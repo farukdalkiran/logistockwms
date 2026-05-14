@@ -1,26 +1,66 @@
+/* 1. FONT IMPORT: Quicksand ve Paytone One sisteme dahil ediliyor */
+@import url('https://fonts.googleapis.com/css2?family=Paytone+One&family=Quicksand:wght@300..700&display=swap');
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/* 2. TAILWIND v4 TEMA YAPILANDIRMASI */
+@theme {
+  /* Marka Renkleri */
+  --color-primary: #dc3545;
+  --color-primary-hover: #c82333;
+  --color-dark: #1a1a1a;
+  --color-dark-soft: #2d2d2d;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+  /* Yazı Tipleri */
+  --font-quicksand: "Quicksand", sans-serif;
+  --font-paytone: "Paytone One", sans-serif;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  /* Animasyonlar (Lazer Tarama vb.) */
+  --animate-scan: scan 3s ease-in-out infinite;
+
+  @keyframes scan {
+    0%, 100% { transform: translateY(0); opacity: 0.2; }
+    50% { transform: translateY(280px); opacity: 0.8; }
   }
 }
 
+/* 3. GLOBAL ROOT VE BASE STİLLER */
+:root {
+  --background: #f8f9fa;
+  --foreground: #1a1a1a;
+}
+
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-quicksand) !important;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 4. LOGO VE ÖZEL SINIFLAR */
+.logistock-logo {
+  font-family: var(--font-paytone) !important;
+  user-select: none;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.logistock-logo.primary { 
+  color: var(--color-primary); 
+}
+
+.logistock-logo.secondary { 
+  color: var(--color-dark); 
+}
+
+/* Dokunmatik Dostu Global İyileştirmeler */
+button, a {
+  @apply transition-all duration-200 active:scale-95;
+  min-height: 44px; /* Kural 1.3: Dokunmatik dostu */
+}
+
+/* Barkod Okuyucu Viewfinder */
+.viewfinder-corner {
+  border-color: var(--color-primary);
+  @apply absolute w-10 h-10 border-4;
 }
