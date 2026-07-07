@@ -21,7 +21,7 @@ export default async function HRManagementPage() {
     redirect("/login");
   }
 
-  // 2. Kullanıcı Profili ve Şube Bilgisini Çek
+// 2. Kullanıcı Profili ve Şube Bilgisini Çek
   const { data: profile } = await supabase
     .from("profiles")
     .select(
@@ -42,8 +42,14 @@ export default async function HRManagementPage() {
     );
   }
 
-  const branchId = profile.branch_id;
-  const branchName = profile.branches?.name || "GLOBAL / MERKEZ";
+const branchId = profile.branch_id;
+  
+  // TS Hatasını Çözen Kısım: Supabase veri tipini dizi veya obje olarak güvenli okuma
+  const branchData = profile.branches as unknown as { name: string } | { name: string }[];
+  const branchName = Array.isArray(branchData)
+    ? branchData[0]?.name
+    : branchData?.name || "GLOBAL / MERKEZ";
+
   const isDeveloper = profile.role === "Developer";
 
   return (
