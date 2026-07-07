@@ -1,12 +1,5 @@
 "use client";
-// 1. Üst tarafta (veya tip dosyasında) AdminFetchResult arayüzünü kesinleştiriyoruz
-interface AdminFetchResult {
-  success: boolean;
-  error?: string;
-  webAccounts: WebAccount[];
-  terminalAccounts: TerminalAccount[];
-  branches: Branch[];
-}
+
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { 
@@ -47,13 +40,23 @@ type TerminalAccount = {
 
 interface AccountsTableProps { refreshTrigger: number; }
 
+// SERVER'DAN DÖNECEK VERİNİN KESİN TİPİ (DEPLOY HATASINI ÖNLER)
+interface AdminFetchResult {
+  success: boolean;
+  error?: string;
+  webAccounts: WebAccount[];
+  terminalAccounts: TerminalAccount[];
+  branches: Branch[];
+  newPassword?: string;
+}
+
 export default function AccountsTable({ refreshTrigger }: AccountsTableProps) {
   const [activeTab, setActiveTab] = useState<"web" | "terminal">("web");
   const [selectedBranch, setSelectedBranch] = useState<string | null>(null);
   
   const [webAccounts, setWebAccounts] = useState<WebAccount[]>([]);
   const [terminalAccounts, setTerminalAccounts] = useState<TerminalAccount[]>([]);
-  const [systemBranches, setSystemBranches] = useState<Branch[]>([]); // Şube değiştirebilmek için
+  const [systemBranches, setSystemBranches] = useState<Branch[]>([]);
   
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
@@ -63,26 +66,19 @@ export default function AccountsTable({ refreshTrigger }: AccountsTableProps) {
   const [editingWeb, setEditingWeb] = useState<WebAccount | null>(null);
   const [editingTerminal, setEditingTerminal] = useState<TerminalAccount | null>(null);
 
-// SERVER ACTION İLE RLS BYPASS EDİLEREK TÜM VERİLER ÇEKİLİYOR
+  // SERVER ACTION İLE RLS BYPASS EDİLEREK TÜM VERİLER ÇEKİLİYOR
   const loadAccounts = useCallback(async () => {
     setIsLoading(true);
     try {
-      // Sunucudan dönen veriyi tip ile garanti altına alıyoruz
       const result = (await fetchAdminAccounts()) as AdminFetchResult;
+      if (!result.success) throw new Error(result.error || "Veri çekme hatası.");
       
-      if (!result.success) {
-        throw new Error(result.error || "Veri çekme işlemi başarısız.");
-      }
-
       setWebAccounts(result.webAccounts);
       setTerminalAccounts(result.terminalAccounts);
       setSystemBranches(result.branches);
-      
-    } catch (err: unknown) {
-      // Hata tipini güvence altına alıyoruz (Unknown -> Error)
-      const message = err instanceof Error ? err.message : "Yönetim verileri çekilirken bir hata oluştu.";
-      console.error("[AccountLoadError]:", err);
-      toast.error(`Veri Senkronizasyonu Hatası: ${message}`);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Bilinmeyen Hata";
+      toast.error("Yönetim Verileri Çekilemedi: " + message);
     } finally {
       setIsLoading(false);
     }
@@ -91,6 +87,7 @@ export default function AccountsTable({ refreshTrigger }: AccountsTableProps) {
   useEffect(() => {
     loadAccounts();
   }, [loadAccounts, refreshTrigger]);
+
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
@@ -103,10 +100,10 @@ export default function AccountsTable({ refreshTrigger }: AccountsTableProps) {
     if (!window.confirm(`DİKKAT: ${email || "Bu hesap"} için oturum kapatılacak ve yeni geçici şifre üretilecek. Onaylıyor musunuz?`)) return;
     setIsProcessing(profileId);
     try {
-      const result = await adminResetPassword(profileId);
-      if (!result.success) throw new Error(result.error);
+      const result = (await adminResetPassword(profileId)) as AdminFetchResult;
+      if (!result.success) throw new Error(result.error || "Şifre sıfırlanamadı.");
       
-      setWebAccounts((prev) => prev.map((acc) => acc.id === profileId ? { ...acc, temp_password: result.newPassword, last_password_change: null } : acc));
+      setWebAccounts((prev) => prev.map((acc) => acc.id === profileId ? { ...acc, temp_password: result.newPassword || null, last_password_change: null } : acc));
       
       toast.success(
         <div className="flex flex-col gap-1">
@@ -114,8 +111,9 @@ export default function AccountsTable({ refreshTrigger }: AccountsTableProps) {
           <span className="text-xs">Yeni Şifre: <strong className="font-mono text-[#dc3545]">{result.newPassword}</strong></span>
         </div>
       );
-    } catch (error: any) {
-      toast.error("Şifre sıfırlama başarısız: " + error.message);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Bilinmeyen Hata";
+      toast.error("Şifre sıfırlama başarısız: " + message);
     } finally { setIsProcessing(null); }
   };
 
@@ -131,16 +129,19 @@ export default function AccountsTable({ refreshTrigger }: AccountsTableProps) {
         role: editingWeb.role || "",
         branchId: editingWeb.branch_id
       });
-      if (!result.success) throw new Error(result.error);
+      if (!result.success) throw new Error(result.error || "Güncelleme reddedildi.");
       
-      // Local state update (Şube ismini manuel eşle)
+      // Local state update
       const updatedBranchName = systemBranches.find(b => b.id === editingWeb.branch_id)?.name || "Merkez";
       const updatedAccount = { ...editingWeb, branches: { name: updatedBranchName } };
       
       setWebAccounts((prev) => prev.map((a) => (a.id === editingWeb.id ? updatedAccount : a)));
       setEditingWeb(null);
       toast.success("Web hesabı başarıyla güncellendi.");
-    } catch (error: any) { toast.error("Güncelleme Hatası: " + error.message); } finally { setIsProcessing(null); }
+    } catch (error: unknown) { 
+      const message = error instanceof Error ? error.message : "Bilinmeyen Hata";
+      toast.error("Güncelleme Hatası: " + message); 
+    } finally { setIsProcessing(null); }
   };
 
   // WEB HESABI TAM SİLME (AUTH CASCADE)
@@ -149,11 +150,14 @@ export default function AccountsTable({ refreshTrigger }: AccountsTableProps) {
     setIsProcessing(id);
     try {
       const result = await deleteSystemUser(id);
-      if (!result.success) throw new Error(result.error);
+      if (!result.success) throw new Error(result.error || "Silme işlemi reddedildi.");
 
       setWebAccounts((prev) => prev.filter((a) => a.id !== id));
       toast.success("Hesap veritabanından kalıcı olarak silindi.");
-    } catch (error: any) { toast.error("Silme hatası: " + error.message); } finally { setIsProcessing(null); }
+    } catch (error: unknown) { 
+      const message = error instanceof Error ? error.message : "Bilinmeyen Hata";
+      toast.error("Silme hatası: " + message); 
+    } finally { setIsProcessing(null); }
   };
 
   const handleSaveTerminalEdit = async () => {
@@ -175,7 +179,10 @@ export default function AccountsTable({ refreshTrigger }: AccountsTableProps) {
       setTerminalAccounts((prev) => prev.map((a) => (a.id === editingTerminal.id ? updatedAccount : a)));
       setEditingTerminal(null);
       toast.success("Saha terminal kaydı güncellendi.");
-    } catch (error: any) { toast.error("Hata: " + error.message); } finally { setIsProcessing(null); }
+    } catch (error: unknown) { 
+      const message = error instanceof Error ? error.message : "Bilinmeyen Hata";
+      toast.error("Hata: " + message); 
+    } finally { setIsProcessing(null); }
   };
 
   const handleDeleteTerminal = async (id: string, name: string | null) => {
@@ -185,12 +192,17 @@ export default function AccountsTable({ refreshTrigger }: AccountsTableProps) {
       if (error) throw error;
       setTerminalAccounts((prev) => prev.filter((a) => a.id !== id));
       toast.success("Saha terminal kimliği silindi.");
-    } catch (error: any) { toast.error("Silme hatası: " + error.message); }
+    } catch (error: unknown) { 
+      const message = error instanceof Error ? error.message : "Bilinmeyen Hata";
+      toast.error("Silme hatası: " + message); 
+    }
   };
 
-  const getBranchName = (acc: any) => {
-    if (Array.isArray(acc.branches)) return acc.branches[0]?.name || "Merkez / Atanmamış";
-    return acc.branches?.name || "Merkez / Atanmamış";
+  const getBranchName = (acc: WebAccount | TerminalAccount) => {
+    // Tip güvenli dizi veya obje okuması
+    const branchData = acc.branches as unknown as { name: string } | { name: string }[];
+    if (Array.isArray(branchData)) return branchData[0]?.name || "Merkez / Atanmamış";
+    return branchData?.name || "Merkez / Atanmamış";
   };
 
   const currentData = activeTab === "web" ? webAccounts : terminalAccounts;
