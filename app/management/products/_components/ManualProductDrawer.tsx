@@ -145,7 +145,7 @@ export default function ManualProductModal({ onClose, onSuccess }: { onClose: ()
                           required 
                           autoFocus
                           type="text" 
-                          placeholder="Örn: 869..."
+                          placeholder="Örn: 570201..."
                           className="w-full h-10 pl-9 pr-3 text-sm border border-slate-300 rounded-lg focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] outline-none transition-all placeholder:text-slate-400"
                           value={formData.barcode} 
                           onChange={e => setFormData({...formData, barcode: e.target.value})} 
@@ -159,7 +159,7 @@ export default function ManualProductModal({ onClose, onSuccess }: { onClose: ()
                         <Tag size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                         <input 
                           type="text" 
-                          placeholder="Opsiyonel stok kodu"
+                          placeholder="Örn: 10294"
                           className="w-full h-10 pl-9 pr-3 text-sm border border-slate-300 rounded-lg focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] outline-none transition-all placeholder:text-slate-400"
                           value={formData.sku} 
                           onChange={e => setFormData({...formData, sku: e.target.value.toUpperCase()})} 
@@ -185,7 +185,7 @@ export default function ManualProductModal({ onClose, onSuccess }: { onClose: ()
                         <Layers size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                         <input 
                           type="text" 
-                          placeholder="Örn: Kırtasiye, Giyim"
+                          placeholder="Örn: LEGO Classic"
                           className="w-full h-10 pl-9 pr-3 text-sm border border-slate-300 rounded-lg focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] outline-none transition-all placeholder:text-slate-400"
                           value={formData.category} 
                           onChange={e => setFormData({...formData, category: e.target.value})} 
