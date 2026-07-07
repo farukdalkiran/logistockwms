@@ -56,7 +56,7 @@ const result = await getPendingApprovals(branchId, isGlobal);
         setHistoryLogs([]);
         console.error("Onay verileri çekilemedi:", result.message);
       }
-
+    }
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (terminalId.length !== 5) {
@@ -289,8 +289,6 @@ const parseDetailedLeaveDates = (
               </div>
             </div>
           </div>
-
-{/* 🎛️ ENDÜSTRİYEL TERMİNAL SEKME SEÇİCİ (HIGH-DENSE MATRIX TABS) */}
           <div className="w-full bg-[#0F172A] p-1 grid grid-cols-1 sm:grid-cols-3 gap-1 border-b border-slate-300 rounded-none relative z-20">
             
             {/* TAB 1: İZİNLER */}
