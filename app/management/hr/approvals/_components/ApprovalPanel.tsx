@@ -43,15 +43,19 @@ export default function ApprovalPanel({ managerBranchId, isGlobal }: ApprovalPan
 
   // Verileri Server Action üzerinden RLS'i aşarak çeker.
   const fetchData = async (mngrId: string, branchId: string) => {
-    const result = await getPendingApprovals(branchId, isGlobal);
-    if (result.success) {
-      setPendingLeaves(result.leaves);
-      setPendingAttendance(result.attendance);
-      setHistoryLogs(result.history);
-    } else {
-      setFeedback({ type: "error", msg: "Kayıtlar çekilirken bir hata oluştu: " + result.message });
-    }
-  };
+const result = await getPendingApprovals(branchId, isGlobal);
+      if (result.success) {
+        // WMS Koruması: 'undefined' gelme ihtimaline karşı fallback (|| []) eklendi.
+        setPendingLeaves(result.leaves || []);
+        setPendingAttendance(result.attendance || []);
+        setHistoryLogs(result.history || []);
+      } else {
+        // Hata durumunda state'leri güvenli şekilde sıfırla
+        setPendingLeaves([]);
+        setPendingAttendance([]);
+        setHistoryLogs([]);
+        console.error("Onay verileri çekilemedi:", result.message);
+      }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
