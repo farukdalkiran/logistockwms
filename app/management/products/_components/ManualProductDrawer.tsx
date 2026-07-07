@@ -8,7 +8,12 @@ import {
   CheckCircle2, Info, Loader2, PackageSearch
 } from "lucide-react";
 
-export default function ManualProductModal({ onClose, onSuccess }: { onClose: () => void, onSuccess: () => void }) {
+interface ManualProductModalProps {
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+export default function ManualProductModal({ onClose, onSuccess }: ManualProductModalProps) {
   const [loading, setLoading] = useState(false);
   const [errorLog, setErrorLog] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -59,7 +64,7 @@ export default function ManualProductModal({ onClose, onSuccess }: { onClose: ()
         if (error.code === '23505') {
           throw new Error("Bu barkod numarası sistemde zaten kayıtlı!");
         }
-        throw error;
+        throw new Error(error.message || "Veritabanı kayıt hatası.");
       }
 
       setSuccess(true);
@@ -68,8 +73,10 @@ export default function ManualProductModal({ onClose, onSuccess }: { onClose: ()
         onClose();
       }, 1500);
 
-    } catch (err: any) {
-      setErrorLog(err.message || "Ürün kaydedilirken bir hata oluştu.");
+    } catch (err: unknown) {
+      // TypeScript Type-Safe Error Handling
+      const message = err instanceof Error ? err.message : "Ürün kaydedilirken bilinmeyen bir hata oluştu.";
+      setErrorLog(message);
     } finally {
       setLoading(false);
     }
@@ -280,8 +287,11 @@ export default function ManualProductModal({ onClose, onSuccess }: { onClose: ()
                       alt="Preview" 
                       className="w-full h-full object-cover"
                       onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = 'none';
-                        (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
+                        const target = e.currentTarget as HTMLImageElement;
+                        target.style.display = 'none';
+                        if (target.nextElementSibling) {
+                          target.nextElementSibling.classList.remove('hidden');
+                        }
                       }}
                     />
                   ) : null}
