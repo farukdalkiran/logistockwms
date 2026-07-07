@@ -37,7 +37,7 @@ export default function HRReportsPage() {
     "TEMMUZ", "AĞUSTOS", "EYLÜL", "EKİM", "KASIM", "ARALIK"
   ];
 
-  // 1. OTOMATİK OTURUM VE ŞUBE TESPİTİ
+// 1. OTOMATİK OTURUM VE ŞUBE TESPİTİ
   useEffect(() => {
     const fetchSession = async () => {
       try {
@@ -55,12 +55,18 @@ export default function HRReportsPage() {
         const _isGlobal = prof.role === "Developer" || prof.role === "Admin" || !prof.branch_id;
         setIsGlobal(_isGlobal);
 
+        // TS Hatasını Çözen Kısım: Supabase veri tipini dizi veya obje olarak güvenli okuma
+        const branchData = prof.branches as unknown as { name: string } | { name: string }[];
+        const branchName = Array.isArray(branchData)
+          ? branchData[0]?.name
+          : branchData?.name || "Merkez / Tüm Şubeler";
+
         setProfile({
           id: prof.id,
           full_name: prof.full_name || "Yetkili",
           branch_id: prof.branch_id,
           role: prof.role,
-          branch_name: prof.branches?.name || "Merkez / Tüm Şubeler"
+          branch_name: branchName
         });
 
       } catch (err: any) {
