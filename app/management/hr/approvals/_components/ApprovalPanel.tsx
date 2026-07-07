@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Lock, AlertCircle, CalendarDays, Calendar, CheckCircle2, XCircle, UserCheck, Clock, ShieldAlert, ArrowDownRight, History, ClipboardList, UserRoundCog, Trash2 } from "lucide-react";
-import { supabase } from "@/lib/supabase"; // Ya da senin yolun "@/lib/supabase"
+import { supabase } from "@/lib/supabase"; 
 import { processApproval, getPendingApprovals } from "@/app/actions/approvals";
 import { useRouter } from "next/navigation";
 
@@ -12,6 +12,44 @@ interface ApprovalPanelProps {
 }
 
 type ManagerData = { id: string; full_name: string; branch_id: string; position_title: string };
+
+// 🛡️ WMS Tip Korumalı ve Esnek Tarih Okuyucu (Performans için Component dışına alındı)
+const parseDetailedLeaveDates = (
+  datesData: any,
+  startDate?: string | Date | null,
+  endDate?: string | Date | null
+): { list: string[]; text: string; fullListStr: string } => {
+  try {
+    let dates: string[] = [];
+    
+    if (typeof datesData === 'string') {
+      dates = JSON.parse(datesData);
+    } else if (Array.isArray(datesData)) {
+      dates = datesData;
+    }
+    
+    if (dates && dates.length > 0) {
+      dates.sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+      const fullListStr = dates.map(d => new Date(d).toLocaleDateString("tr-TR", { day: "numeric", month: "short" })).join(", ");
+      return { list: dates, text: fullListStr, fullListStr: fullListStr };
+    }
+
+    if (startDate && endDate) {
+      const s = new Date(startDate).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+      const e = new Date(endDate).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+      if (s === e) {
+        return { list: [s], text: s, fullListStr: s };
+      }
+      return { list: [s, e], text: `${s} - ${e}`, fullListStr: `${s} - ${e}` };
+    }
+
+    return { list: [], text: "Tarih Belirtilmedi", fullListStr: "Tarih Belirtilmedi" };
+    
+  } catch (e) {
+    console.error("[DATE_PARSE_ERROR]", e);
+    return { list: [], text: "Tarih Okuma Hatası", fullListStr: "Tarih Okuma Hatası" };
+  }
+};
 
 export default function ApprovalPanel({ managerBranchId, isGlobal }: ApprovalPanelProps) {
   const router = useRouter();
@@ -41,22 +79,21 @@ export default function ApprovalPanel({ managerBranchId, isGlobal }: ApprovalPan
     return ["yönetici", "müdür", "şef", "admin", "developer", "uzman", "lider"].some((k) => lowerTitle.includes(k));
   };
 
-  // Verileri Server Action üzerinden RLS'i aşarak çeker.
+  // 🛡️ ÇÖZÜLEN KISIM: Kapanış parantezi eklendi ve Nullish Fallback uygulandı
   const fetchData = async (mngrId: string, branchId: string) => {
-const result = await getPendingApprovals(branchId, isGlobal);
-      if (result.success) {
-        // WMS Koruması: 'undefined' gelme ihtimaline karşı fallback (|| []) eklendi.
-        setPendingLeaves(result.leaves || []);
-        setPendingAttendance(result.attendance || []);
-        setHistoryLogs(result.history || []);
-      } else {
-        // Hata durumunda state'leri güvenli şekilde sıfırla
-        setPendingLeaves([]);
-        setPendingAttendance([]);
-        setHistoryLogs([]);
-        console.error("Onay verileri çekilemedi:", result.message);
-      }
+    const result = await getPendingApprovals(branchId, isGlobal);
+    if (result.success) {
+      setPendingLeaves(result.leaves || []);
+      setPendingAttendance(result.attendance || []);
+      setHistoryLogs(result.history || []);
+    } else {
+      setPendingLeaves([]);
+      setPendingAttendance([]);
+      setHistoryLogs([]);
+      console.error("Onay verileri çekilemedi:", result.message);
     }
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (terminalId.length !== 5) {
@@ -68,7 +105,6 @@ const result = await getPendingApprovals(branchId, isGlobal);
     setLoading(true); setFeedback(null);
 
     try {
-      // Sadece kimlik doğrulama için standart istemci kullanıyoruz.
       const { data: empData, error } = await supabase.from("employees").select("id, full_name, branch_id, position_title").eq("id", terminalId).eq("is_active", true).single();
       if (error || !empData) throw new Error("SİSTEMDE BÖYLE BİR PERSONEL BULUNAMADI");
 
@@ -110,7 +146,7 @@ const result = await getPendingApprovals(branchId, isGlobal);
 
     if (result.success) {
       await fetchData(manager.id, manager.branch_id);
-      router.refresh(); // UI'ı yeni verilere göre tazele
+      router.refresh(); 
     } else {
       alert(result.message);
     }
@@ -119,48 +155,6 @@ const result = await getPendingApprovals(branchId, isGlobal);
 
   const formatDate = (iso: string) => iso ? new Date(iso).toLocaleDateString("tr-TR", { day: "2-digit", month: "short", year: "numeric" }) : "-";
   const formatTime = (iso: string) => iso ? new Date(iso).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "--:--";
-
-// WMS Tip Korumalı ve Esnek Tarih Okuyucu (JSON/Array Çökmelerini ve Parametre Hatalarını Engeller)
-const parseDetailedLeaveDates = (
-  datesData: any,
-  startDate?: string | Date | null,
-  endDate?: string | Date | null
-): { list: string[]; text: string; fullListStr: string } => {
-  try {
-    let dates: string[] = [];
-    
-    // 1. Array veya JSON String kontrolü
-    if (typeof datesData === 'string') {
-      dates = JSON.parse(datesData);
-    } else if (Array.isArray(datesData)) {
-      dates = datesData;
-    }
-    
-    // 2. Eğer dates verisi başarıyla çıkarıldıysa
-    if (dates && dates.length > 0) {
-      dates.sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
-      const fullListStr = dates.map(d => new Date(d).toLocaleDateString("tr-TR", { day: "numeric", month: "short" })).join(", ");
-      return { list: dates, text: fullListStr, fullListStr: fullListStr };
-    }
-
-    // 3. FALLBACK: Eğer datesData boşsa ve eski usul startDate/endDate logu varsa
-    if (startDate && endDate) {
-      const s = new Date(startDate).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
-      const e = new Date(endDate).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
-      if (s === e) {
-        return { list: [s], text: s, fullListStr: s };
-      }
-      return { list: [s, e], text: `${s} - ${e}`, fullListStr: `${s} - ${e}` };
-    }
-
-    // 4. Veri yoksa
-    return { list: [], text: "Tarih Belirtilmedi", fullListStr: "Tarih Belirtilmedi" };
-    
-  } catch (e) {
-    console.error("[DATE_PARSE_ERROR]", e);
-    return { list: [], text: "Tarih Okuma Hatası", fullListStr: "Tarih Okuma Hatası" };
-  }
-};
 
   return (
     <div className="w-full flex flex-col shadow-xl rounded-lg overflow-hidden border border-slate-200 select-none bg-white transition-all duration-300 ease-in-out">
@@ -506,7 +500,7 @@ const parseDetailedLeaveDates = (
                               </div>
 
                               <div className="col-span-1 lg:col-span-3 text-slate-600 font-mono text-[11px] truncate pr-2 lg:border-l border-slate-100 lg:pl-3">
-                                 <span>// {req.reason.replace(/_/g, ' ').toUpperCase()}</span>
+                                 <span>// {req.reason?.replace(/_/g, ' ').toUpperCase()}</span>
                               </div>
 
                               <div className="col-span-1 lg:col-span-2 flex justify-end gap-1.5 lg:border-l border-slate-200 lg:pl-3">

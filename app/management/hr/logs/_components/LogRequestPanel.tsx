@@ -5,13 +5,18 @@ import { Plus, Clock, Lock, FileText, ArrowRight, Check, AlertCircle, Trash2, Ed
 import { supabase } from "@/lib/supabase";
 import { submitLogRequest } from "@/app/actions/attendance-requests";
 import { useRouter } from "next/navigation";
-import { useWms } from "@/components/providers/WmsSessionProvider";
+
+// 1. WMS TİP SÖZLEŞMESİ: Sunucudan (page.tsx) gelen verilerin katı tip tanımlaması
+interface LogRequestPanelProps {
+  managerBranchId: string;
+  isGlobal: boolean;
+}
 
 type EmployeeData = { id: string; full_name: string; branch_id: string; position_title: string };
 
-export default function LogRequestPanel() {
+// 2. BİLEŞEN İMZASI: Artık dışarıdan gelen propları yasal olarak kabul ediyor
+export default function LogRequestPanel({ managerBranchId, isGlobal }: LogRequestPanelProps) {
   const router = useRouter();
-  const { managerBranchId, isGlobal } = useWms();
 
   const [step, setStep] = useState<"LOGIN" | "DASHBOARD" | "REQUEST_FORM">("LOGIN");
   const [terminalId, setTerminalId] = useState("");
@@ -132,7 +137,6 @@ export default function LogRequestPanel() {
       request_date: logDate,
       req_check_in: null,
       req_check_out: null,
-      // DİKKAT: Veritabanında kesin var olan, risksiz bir ENUM seçeneği gönderiyoruz
       reason: "TERMINAL_ARIZASI", 
       action_mode: "DELETE"
     });
@@ -160,7 +164,6 @@ export default function LogRequestPanel() {
       request_date: reqDate,
       req_check_in: null,
       req_check_out: null,
-      // DİKKAT: Veritabanında kesin var olan, risksiz bir ENUM seçeneği gönderiyoruz
       reason: "TERMINAL_ARIZASI", 
       action_mode: "DELETE"
     });
@@ -527,7 +530,6 @@ export default function LogRequestPanel() {
                     <input type="time" value={reqCheckOut} onChange={(e) => setReqCheckOut(e.target.value)} className="h-12 border border-slate-300 rounded-md px-3 font-mono text-lg text-center font-black text-[#dc3545] outline-none focus:border-[#dc3545] focus:ring-2 focus:ring-red-500/10 bg-white shadow-sm transition-all" />
                   </div>
 
-                  {/* 🎯 TİPOGRAFİ/ENUM HATASI İHTİMALİNE KARŞI DEĞERLER DB'YE UYGUN ("MANUEL_DULZELTME") YAZILDI AMA SİLMEDE "TERMINAL_ARIZASI" KULLANILARAK RİSK SIFIRLANDI */}
                   <div className="sm:col-span-2 flex flex-col gap-1.5 mt-1">
                     <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest pl-1">İşlem Mazeret Nedeni</label>
                     <select required value={reqReason} onChange={(e) => setReqReason(e.target.value)} className="h-12 border border-slate-300 rounded-md px-3 text-xs font-bold text-slate-700 outline-none focus:border-[#dc3545] focus:ring-2 focus:ring-red-500/10 uppercase bg-white shadow-sm transition-all cursor-pointer">
