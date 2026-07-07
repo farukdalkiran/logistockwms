@@ -116,22 +116,47 @@ export default function ApprovalPanel({ managerBranchId, isGlobal }: ApprovalPan
   const formatDate = (iso: string) => iso ? new Date(iso).toLocaleDateString("tr-TR", { day: "2-digit", month: "short", year: "numeric" }) : "-";
   const formatTime = (iso: string) => iso ? new Date(iso).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "--:--";
 
-  // Esnek Tarih Okuyucu (JSON Stringify ve Array Çökmelerini Engeller)
-  const parseDetailedLeaveDates = (datesData: any) => {
-    try {
-      let dates: string[] = [];
-      if (typeof datesData === 'string') dates = JSON.parse(datesData);
-      else if (Array.isArray(datesData)) dates = datesData;
-      
-      if (!dates || dates.length === 0) return { fullListStr: "Tarih Bulunamadı", list: [] };
-      
+// WMS Tip Korumalı ve Esnek Tarih Okuyucu (JSON/Array Çökmelerini ve Parametre Hatalarını Engeller)
+const parseDetailedLeaveDates = (
+  datesData: any,
+  startDate?: string | Date | null,
+  endDate?: string | Date | null
+): { list: string[]; text: string; fullListStr: string } => {
+  try {
+    let dates: string[] = [];
+    
+    // 1. Array veya JSON String kontrolü
+    if (typeof datesData === 'string') {
+      dates = JSON.parse(datesData);
+    } else if (Array.isArray(datesData)) {
+      dates = datesData;
+    }
+    
+    // 2. Eğer dates verisi başarıyla çıkarıldıysa
+    if (dates && dates.length > 0) {
       dates.sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
       const fullListStr = dates.map(d => new Date(d).toLocaleDateString("tr-TR", { day: "numeric", month: "short" })).join(", ");
-      return { fullListStr, list: dates };
-    } catch (e) {
-      return { fullListStr: "Tarih Okuma Hatası", list: [] };
+      return { list: dates, text: fullListStr, fullListStr: fullListStr };
     }
-  };
+
+    // 3. FALLBACK: Eğer datesData boşsa ve eski usul startDate/endDate logu varsa
+    if (startDate && endDate) {
+      const s = new Date(startDate).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+      const e = new Date(endDate).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' });
+      if (s === e) {
+        return { list: [s], text: s, fullListStr: s };
+      }
+      return { list: [s, e], text: `${s} - ${e}`, fullListStr: `${s} - ${e}` };
+    }
+
+    // 4. Veri yoksa
+    return { list: [], text: "Tarih Belirtilmedi", fullListStr: "Tarih Belirtilmedi" };
+    
+  } catch (e) {
+    console.error("[DATE_PARSE_ERROR]", e);
+    return { list: [], text: "Tarih Okuma Hatası", fullListStr: "Tarih Okuma Hatası" };
+  }
+};
 
   return (
     <div className="w-full flex flex-col shadow-xl rounded-lg overflow-hidden border border-slate-200 select-none bg-white transition-all duration-300 ease-in-out">
