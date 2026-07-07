@@ -4,7 +4,7 @@ import "./globals.css";
 import { Toaster } from "react-hot-toast";
 import { AuthProvider } from "@/components/providers/AuthProvider";
 
-// YENİ İMPORTLAR: WMS Güvenlik Duvarı ve Supabase
+// WMS Güvenlik Duvarı ve Supabase Sunucu İstemcisi
 import { createClient } from "@/lib/supabase/server";
 import { WmsSessionProvider } from "@/components/providers/WmsSessionProvider";
 
@@ -15,25 +15,34 @@ export const metadata: Metadata = {
   description: "Warehouse Management System",
 };
 
+// 1. WMS Oturum Verisinin Mimari İskeleti (Type Definition)
+// Bu katman, TypeScript'in Inferred Type (Çıkarımsal Tip) kilitlenmesini engeller.
+export type WmsSessionData = {
+  userId: string | null;
+  managerBranchId: string | null;
+  isGlobal: boolean;
+  role: string;
+};
+
 export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   
-  // 1. SUPABASE SUNUCU BAĞLANTISI VE OTURUM KONTROLÜ
+  // 2. SUPABASE SUNUCU BAĞLANTISI VE OTURUM KONTROLÜ
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  // 2. VARSAYILAN (MİSAFİR) ŞUBE VE YETKİ VERİSİ
-  let sessionData = { 
+  // 3. AÇIK TİP TANIMLI (EXPLICIT TYPING) VARSAYILAN ŞUBE VE YETKİ VERİSİ
+  let sessionData: WmsSessionData = { 
     userId: null, 
     managerBranchId: null, 
     isGlobal: false, 
     role: "GUEST" 
   };
 
-  // 3. EĞER GİRİŞ YAPILMIŞSA: VERİTABANINDAN YÖNETİCİ ŞUBESİNİ ÇEK
+  // 4. EĞER GİRİŞ YAPILMIŞSA: VERİTABANINDAN YÖNETİCİ ŞUBESİNİ ÇEK
   if (user) {
     const { data: profile } = await supabase
       .from("profiles")
@@ -42,7 +51,7 @@ export default async function RootLayout({
       .single();
 
     sessionData = {
-      userId: user.id,
+      userId: user.id, // Artık TypeScript hata fırlatmaz, string değer güvenle atanır.
       managerBranchId: profile?.branch_id || "GLOBAL",
       isGlobal: profile?.role === "Developer" || profile?.role === "Admin" || profile?.branch_id === null,
       role: profile?.role || "USER",
@@ -53,7 +62,7 @@ export default async function RootLayout({
     <html lang="tr">
       <body className={inter.className}>
         <AuthProvider>
-          {/* YENİ: TÜM UYGULAMAYI SARAN WMS ŞUBE KİLİDİ */}
+          {/* TÜM UYGULAMAYI SARAN WMS ŞUBE KİLİDİ */}
           <WmsSessionProvider session={sessionData}>
             <Toaster position="top-right" />
             {children}
