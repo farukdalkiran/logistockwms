@@ -251,7 +251,10 @@ export default function ManualProductModal({ onClose, onSuccess }: ManualProduct
                       <div className="mt-4 pt-4 border-t border-slate-200 animate-in fade-in slide-in-from-top-2">
                         <label className="text-xs font-bold text-slate-800 mb-1.5 flex items-center gap-1.5">
                           Maksimum Sipariş Limiti (Adet)
-                          <Info size={14} className="text-slate-400" title="Bir şube tek seferde en fazla kaç adet sipariş verebilir?"/>
+                          {/* TS Hatası Düzeltildi: Info ikonuna verilen title özelliği span etiketine taşındı */}
+                          <span title="Bir şube tek seferde en fazla kaç adet sipariş verebilir?">
+                            <Info size={14} className="text-slate-400 cursor-help" />
+                          </span>
                         </label>
                         <input 
                           type="number" 
