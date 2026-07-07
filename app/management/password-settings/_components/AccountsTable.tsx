@@ -40,13 +40,13 @@ type TerminalAccount = {
 
 interface AccountsTableProps { refreshTrigger: number; }
 
-// SERVER'DAN DÖNECEK VERİNİN KESİN TİPİ (DEPLOY HATASINI ÖNLER)
+// DÜZELTME BURADA: Dizileri isteğe bağlı (?) yaptık.
 interface AdminFetchResult {
   success: boolean;
   error?: string;
-  webAccounts: WebAccount[];
-  terminalAccounts: TerminalAccount[];
-  branches: Branch[];
+  webAccounts?: WebAccount[];
+  terminalAccounts?: TerminalAccount[];
+  branches?: Branch[];
   newPassword?: string;
 }
 
@@ -70,12 +70,16 @@ export default function AccountsTable({ refreshTrigger }: AccountsTableProps) {
   const loadAccounts = useCallback(async () => {
     setIsLoading(true);
     try {
-      const result = (await fetchAdminAccounts()) as AdminFetchResult;
+      // Çift Casting (unknown üzerinden geçerek) TypeScript'i kesin tatmin ederiz.
+      const result = (await fetchAdminAccounts()) as unknown as AdminFetchResult;
+      
       if (!result.success) throw new Error(result.error || "Veri çekme hatası.");
       
-      setWebAccounts(result.webAccounts);
-      setTerminalAccounts(result.terminalAccounts);
-      setSystemBranches(result.branches);
+      // Veriler array olarak gelmezse boş dizi fallback'i atıyoruz
+      setWebAccounts(result.webAccounts || []);
+      setTerminalAccounts(result.terminalAccounts || []);
+      setSystemBranches(result.branches || []);
+      
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Bilinmeyen Hata";
       toast.error("Yönetim Verileri Çekilemedi: " + message);
@@ -100,7 +104,7 @@ export default function AccountsTable({ refreshTrigger }: AccountsTableProps) {
     if (!window.confirm(`DİKKAT: ${email || "Bu hesap"} için oturum kapatılacak ve yeni geçici şifre üretilecek. Onaylıyor musunuz?`)) return;
     setIsProcessing(profileId);
     try {
-      const result = (await adminResetPassword(profileId)) as AdminFetchResult;
+      const result = (await adminResetPassword(profileId)) as unknown as AdminFetchResult;
       if (!result.success) throw new Error(result.error || "Şifre sıfırlanamadı.");
       
       setWebAccounts((prev) => prev.map((acc) => acc.id === profileId ? { ...acc, temp_password: result.newPassword || null, last_password_change: null } : acc));
@@ -199,7 +203,6 @@ export default function AccountsTable({ refreshTrigger }: AccountsTableProps) {
   };
 
   const getBranchName = (acc: WebAccount | TerminalAccount) => {
-    // Tip güvenli dizi veya obje okuması
     const branchData = acc.branches as unknown as { name: string } | { name: string }[];
     if (Array.isArray(branchData)) return branchData[0]?.name || "Merkez / Atanmamış";
     return branchData?.name || "Merkez / Atanmamış";
