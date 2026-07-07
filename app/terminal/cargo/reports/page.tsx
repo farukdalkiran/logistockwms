@@ -26,6 +26,28 @@ import {
 // Kargo konfigürasyonları
 import { CARRIERS } from "@/lib/cargoConfig";
 
+// --- TİP TANIMLAMALARI (Vercel Build Hatalarını Önler) ---
+interface EmployeeData {
+  full_name: string;
+}
+
+interface CargoSession {
+  id: string;
+  carrier_name: string;
+  status: string;
+  total_items: number;
+  started_at: string;
+  completed_at: string | null;
+  employees: EmployeeData | null;
+}
+
+interface CargoLog {
+  id: string;
+  tracking_number: string;
+  scanned_at: string;
+}
+// --------------------------------------------------------
+
 export default function CargoReportsPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -39,17 +61,17 @@ export default function CargoReportsPage() {
   const [empBranchId, setEmpBranchId] = useState<string | null>(null);
   const [clock, setClock] = useState("");
   const [selectedDate, setSelectedDate] = useState<string>(
-    new Date().toISOString().split("T")[0],
+    new Date().toISOString().split("T")[0]
   );
 
-  const [sessions, setSessions] = useState<any[]>([]);
+  const [sessions, setSessions] = useState<CargoSession[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedSession, setSelectedSession] = useState<any | null>(null);
-  const [sessionLogs, setSessionLogs] = useState<any[]>([]);
+  const [selectedSession, setSelectedSession] = useState<CargoSession | null>(null);
+  const [sessionLogs, setSessionLogs] = useState<CargoLog[]>([]);
   const [logSearchQuery, setLogSearchQuery] = useState("");
   const [isLogsLoading, setIsLogsLoading] = useState(false);
 
@@ -60,7 +82,7 @@ export default function CargoReportsPage() {
           hour: "2-digit",
           minute: "2-digit",
           second: "2-digit",
-        }),
+        })
       );
     };
     updateClock();
@@ -95,8 +117,7 @@ export default function CargoReportsPage() {
 
         const { data, error } = await supabase
           .from("cargo_sessions")
-          .select(
-            `
+          .select(`
             id,
             carrier_name,
             status,
@@ -104,16 +125,15 @@ export default function CargoReportsPage() {
             started_at,
             completed_at,
             employees (full_name)
-          `,
-          )
+          `)
           .eq("branch_id", empBranchId)
           .gte("started_at", startOfDay.toISOString())
           .lte("started_at", endOfDay.toISOString())
           .order("started_at", { ascending: false });
 
         if (error) throw error;
-        setSessions(data || []);
-      } catch (err: any) {
+        setSessions((data as unknown as CargoSession[]) || []);
+      } catch (err: unknown) {
         console.error("Rapor çekilemedi:", err);
         setErrorMsg("Kayıtlar yüklenirken bir hata oluştu.");
       } finally {
@@ -125,7 +145,7 @@ export default function CargoReportsPage() {
   }, [empBranchId, selectedDate]);
 
   // Lazy Load Modal Açıcı
-  const openSessionDetails = async (session: any) => {
+  const openSessionDetails = async (session: CargoSession) => {
     setSelectedSession(session);
     setIsModalOpen(true);
     setIsLogsLoading(true);
@@ -139,7 +159,7 @@ export default function CargoReportsPage() {
         .order("scanned_at", { ascending: false });
 
       if (error) throw error;
-      setSessionLogs(data || []);
+      setSessionLogs((data as CargoLog[]) || []);
     } catch (err) {
       console.error("Loglar çekilemedi:", err);
       setSessionLogs([]);
@@ -149,7 +169,7 @@ export default function CargoReportsPage() {
   };
 
   // EXCEL ÇIKTI MOTORU
-  const handleExportExcel = async (session: any) => {
+  const handleExportExcel = async (session: CargoSession) => {
     setIsLoading(true);
     try {
       const { data: logs, error } = await supabase
@@ -165,11 +185,8 @@ export default function CargoReportsPage() {
         return;
       }
 
-      const sessionDate = new Date(session.started_at).toLocaleDateString(
-        "tr-TR",
-      );
-      const employeeFullName =
-        session.employees?.full_name || "Bilinmeyen Personel";
+      const sessionDate = new Date(session.started_at).toLocaleDateString("tr-TR");
+      const employeeFullName = session.employees?.full_name || "Bilinmeyen Personel";
 
       let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
 
@@ -192,12 +209,12 @@ export default function CargoReportsPage() {
       link.setAttribute("href", encodedUri);
       link.setAttribute(
         "download",
-        `WMS_Rapor_${safeCarrierName}_${sessionDate}.csv`,
+        `WMS_Rapor_${safeCarrierName}_${sessionDate}.csv`
       );
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Excel Hatası:", err);
       setErrorMsg("Excel çıktısı alınırken bir sorun oluştu.");
     } finally {
@@ -206,9 +223,9 @@ export default function CargoReportsPage() {
   };
 
   // OTURUM (SESSİON) VE İÇİNDEKİ LOGLARI SİLME MOTORU (Cascade Deletion)
-  const handleDeleteSession = async (session: any) => {
+  const handleDeleteSession = async (session: CargoSession) => {
     const isConfirmed = window.confirm(
-      `DİKKAT: ${session.carrier_name} firmasına ait bu oturumu ve içindeki ${session.total_items} adet kargo barkodunu KALICI olarak silmek istediğinize emin misiniz?`,
+      `DİKKAT: ${session.carrier_name} firmasına ait bu oturumu ve içindeki ${session.total_items} adet kargo barkodunu KALICI olarak silmek istediğinize emin misiniz?`
     );
 
     if (!isConfirmed) return;
@@ -216,8 +233,6 @@ export default function CargoReportsPage() {
     setIsLoading(true);
     setErrorMsg("");
     try {
-      // Supabase'deki cargo_logs tablosu ON DELETE CASCADE ile bağlıysa,
-      // sadece ana oturumu silmemiz içindeki barkodları da otomatik yok eder.
       const { error } = await supabase
         .from("cargo_sessions")
         .delete()
@@ -225,7 +240,6 @@ export default function CargoReportsPage() {
 
       if (error) throw error;
 
-      // Silinen oturumu UI üzerinden (ekrandan) anında kaldır (Optimistic UI)
       setSessions((prev) => prev.filter((s) => s.id !== session.id));
     } catch (err) {
       console.error("Silme işlemi başarısız:", err);
@@ -238,20 +252,20 @@ export default function CargoReportsPage() {
   // İSTATİSTİK (KPI) HESAPLAMALARI
   const totalCargoToday = sessions.reduce(
     (sum, s) => sum + (s.total_items || 0),
-    0,
+    0
   );
 
-  const carrierStats = sessions.reduce(
+  const carrierStats: Record<string, number> = sessions.reduce(
     (acc, s) => {
       const carrier = s.carrier_name;
       acc[carrier] = (acc[carrier] || 0) + (s.total_items || 0);
       return acc;
     },
-    {} as Record<string, number>,
+    {} as Record<string, number>
   );
 
   const filteredLogs = sessionLogs.filter((log) =>
-    log.tracking_number.toLowerCase().includes(logSearchQuery.toLowerCase()),
+    log.tracking_number.toLowerCase().includes(logSearchQuery.toLowerCase())
   );
 
   return (
@@ -344,10 +358,11 @@ export default function CargoReportsPage() {
 
               <div className="w-full flex h-2 rounded-sm overflow-hidden mb-3 bg-slate-100">
                 {Object.entries(carrierStats).map(([cName, count]) => {
-                  if (count === 0) return null;
+                  const countNum = count as number; // TypeScript TYPE-SAFE dönüşümü
+                  if (countNum === 0) return null;
                   const cConf =
                     CARRIERS.find((c) => c.name === cName) || CARRIERS[0];
-                  const percentage = (count / totalCargoToday) * 100;
+                  const percentage = (countNum / totalCargoToday) * 100;
                   return (
                     <div
                       key={`bar-${cName}`}
@@ -361,9 +376,10 @@ export default function CargoReportsPage() {
 
               <div className="grid grid-cols-2 gap-2">
                 {Object.entries(carrierStats)
-                  .sort(([, a], [, b]) => b - a)
+                  .sort(([, a], [, b]) => (b as number) - (a as number))
                   .map(([cName, count]) => {
-                    if (count === 0) return null;
+                    const countNum = count as number; // TypeScript TYPE-SAFE dönüşümü
+                    if (countNum === 0) return null;
                     const cConf =
                       CARRIERS.find((c) => c.name === cName) || CARRIERS[0];
                     return (
@@ -377,7 +393,7 @@ export default function CargoReportsPage() {
                         <span
                           className={`text-[13px] font-black ${cConf.textColor}`}
                         >
-                          {count}
+                          {countNum}
                         </span>
                       </div>
                     );
@@ -424,7 +440,7 @@ export default function CargoReportsPage() {
                   CARRIERS[0];
                 const startTime = new Date(s.started_at).toLocaleTimeString(
                   "tr-TR",
-                  { hour: "2-digit", minute: "2-digit" },
+                  { hour: "2-digit", minute: "2-digit" }
                 );
                 const endTime = s.completed_at
                   ? new Date(s.completed_at).toLocaleTimeString("tr-TR", {
@@ -597,7 +613,7 @@ export default function CargoReportsPage() {
                 filteredLogs.map((log, index) => {
                   const logTime = new Date(log.scanned_at).toLocaleTimeString(
                     "tr-TR",
-                    { hour: "2-digit", minute: "2-digit", second: "2-digit" },
+                    { hour: "2-digit", minute: "2-digit", second: "2-digit" }
                   );
                   return (
                     <div
