@@ -135,7 +135,7 @@ export const Navbar = () => {
     return false;
   };
 
-  // 2. ANA MENÜ VE ROL İZİNLERİ (Kullanılmayanlar Temizlendi)
+  // 2. ANA MENÜ VE ROL İZİNLERİ
   const rawNavLinks = [
     {
       name: "Ürün & Stok",
@@ -333,7 +333,6 @@ export const Navbar = () => {
     },
   ];
 
-  // Arama motorundaki Type Error kalıcı olarak çözüldü
   const searchableLinks: SearchItem[] = rawNavLinks.flatMap((link) => {
     const items: SearchItem[] = [
       {
@@ -374,7 +373,8 @@ export const Navbar = () => {
       ? "Merkez Ofis"
       : userProfile?.branchName;
 
-  const getInitials = (name: string) => {
+  // ÇÖZÜM: Parametre tipini "string | undefined | null" olarak esnettik ve güvenli hale getirdik.
+  const getInitials = (name?: string | null) => {
     if (!name) return "WM";
     return name
       .split(" ")
@@ -386,7 +386,7 @@ export const Navbar = () => {
 
   return (
     <div className="sticky top-0 z-50 flex flex-col w-full shadow-md font-['Quicksand']">
-      {/* 1. KAT: TOP BAR (Sadeleştirilmiş ve Terminal Sol Üste Alındı) */}
+      {/* 1. KAT: TOP BAR */}
       <div className="bg-[#0f172b] text-slate-300 h-14 border-b border-slate-800/50 relative z-50">
         <div className="container mx-auto 2xl:max-w-[1400px] h-full flex items-center justify-between px-4 sm:px-6">
           {/* Sol Kısım: Terminal & Arama */}
