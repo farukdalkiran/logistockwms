@@ -1,118 +1,144 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { useAuth } from "@/components/providers/AuthProvider";
 import { Logo } from "@/components/ui/Logo";
-import { ScanLine, AlertTriangle, ShieldCheck, ArrowRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { AlertCircle, Loader2, MapPin, ScanFace, ArrowRight } from "lucide-react";
 
 export default function TerminalLoginPage() {
   const router = useRouter();
-  const { userProfile, isLoading } = useAuth();
   
   const [employeeId, setEmployeeId] = useState("");
   const [error, setError] = useState("");
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [authChecking, setAuthChecking] = useState(true);
+  
+  const [deviceBranch, setDeviceBranch] = useState<{ id: string; name: string } | null>(null);
+
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // 1. Kasa Mantığı: Donanım (Barkod) okuyucular için input'u daima odakta tut
+  // 1. Cihazın bağlı olduğu yönetici oturumunu ve şubesini kontrol et
   useEffect(() => {
-    inputRef.current?.focus();
+    const checkDeviceAuth = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (!session) {
+          setError("CİHAZ YETKİSİZ: Lütfen önce Web Yöneticisi girişi yapın.");
+          setAuthChecking(false);
+          return;
+        }
+
+        // Yöneticinin profilinden şubesini bul
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("branch_id, role, branches(name)")
+          .eq("id", session.user.id)
+          .single();
+
+        if (profile?.branch_id) {
+          setDeviceBranch({ 
+            id: profile.branch_id, 
+            name: (profile.branches as any)?.name || "Bilinmeyen Şube" 
+          });
+        } else if (profile?.role === "Developer" || profile?.role === "Admin") {
+          setDeviceBranch({ id: "GLOBAL", name: "Merkez / Global Yetki" });
+        } else {
+          setError("Şube yetkisi bulunamadı.");
+        }
+      } catch (err) {
+        setError("Oturum kontrolünde hata oluştu.");
+      } finally {
+        setAuthChecking(false);
+      }
+    };
+
+    checkDeviceAuth();
+  }, []);
+
+  // 2. Kasa Mantığı: Barkod okuyucu için input'u her zaman odakta (focus) tut
+  useEffect(() => {
     const interval = setInterval(() => {
-      if (!isProcessing && document.activeElement !== inputRef.current) {
+      if (!loading && document.activeElement !== inputRef.current) {
         inputRef.current?.focus();
       }
     }, 1500);
     return () => clearInterval(interval);
-  }, [isProcessing]);
-
-  const forceFocus = () => {
-    inputRef.current?.focus();
-  };
+  }, [loading]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
-
     const cleanId = employeeId.trim();
-    if (!cleanId || cleanId.length !== 5) {
-      setError("HATA: Lütfen 5 haneli Personel ID okutunuz.");
+
+    if (cleanId.length !== 5) {
+      setError("Lütfen 5 haneli Personel ID okutunuz.");
       setEmployeeId("");
-      inputRef.current?.focus();
       return;
     }
 
-    if (!userProfile?.branchName) {
-      setError("CİHAZ YETKİSİZ: Web oturumu bulunamadı.");
-      return;
-    }
+    if (!deviceBranch) return;
 
-    setIsProcessing(true);
-
+    setLoading(true);
+    setError("");
+    
     try {
-      const { data: employee, error: dbError } = await supabase
+      const { data: employee, error: empError } = await supabase
         .from("employees")
-        .select("id, full_name, is_active") // RLS kalkanını aştık, Çapraz Şube esnekliği için branch_id blokajı kaldırıldı.
+        .select("id, full_name, branch_id, is_active")
         .eq("id", cleanId)
         .single();
 
-      if (dbError || !employee) {
-        setError("HATA: Personel bulunamadı veya ID hatalı.");
+      if (empError || !employee) {
+        setError("Hatalı Personel ID girdiniz.");
         setEmployeeId("");
-        inputRef.current?.focus();
-        return;
-      }
-
-      if (!employee.is_active) {
-        setError("HATA: Bu personelin hesabı pasif durumdadır.");
+      } else if (!employee.is_active) {
+        setError("Bu personel hesabı pasif durumdadır.");
         setEmployeeId("");
-        inputRef.current?.focus();
-        return;
+      } else if (deviceBranch.id !== "GLOBAL" && employee.branch_id !== deviceBranch.id) {
+        setError(`Erişim Engellendi: Bu şubeye (${deviceBranch.name}) kayıtlı değilsiniz!`);
+        setEmployeeId("");
+      } else {
+        // 1. ADIM: Başarılı Giriş -> LocalStorage'a yaz (Geriye dönük uyumluluk ve Menü sayfasının çökmemesi için)
+        localStorage.setItem("terminal_employee_id", employee.id);
+        localStorage.setItem("terminal_employee_name", employee.full_name);
+        
+        // 2. ADIM (ÇÖZÜM): Middleware kalkanını aşmak için Query Parametrelerini URL'ye zorunlu enjekte ediyoruz.
+        const empName = encodeURIComponent(employee.full_name);
+        const branchName = encodeURIComponent(deviceBranch.name);
+        const targetUrl = `/terminal/menu?empId=${employee.id}&empName=${empName}&branch=${branchName}`;
+        
+        router.push(targetUrl);
       }
-
-      // ÇÖZÜM: Middleware'in istediği parametreler Query String olarak URL'e zırhlanıp enjekte ediliyor.
-      const branchName = userProfile?.branchName || "Bilinmeyen Şube";
-      const targetUrl = `/terminal/menu?empId=${employee.id}&empName=${encodeURIComponent(employee.full_name)}&branch=${encodeURIComponent(branchName)}`;
-      
-      router.push(targetUrl);
-
     } catch (err) {
-      console.error(err);
-      setError("Sistem Hatası: Bağlantı koptu.");
+      setError("Bağlantı hatası oluştu.");
       setEmployeeId("");
     } finally {
-      setIsProcessing(false);
+      setLoading(false);
+      inputRef.current?.focus();
     }
   };
 
-  if (isLoading) {
+  // Oturum kontrolü ekranı
+  if (authChecking) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center font-['Quicksand']">
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
         <Loader2 size={40} className="animate-spin text-[#dc3545]" />
       </div>
     );
   }
 
   return (
-    <div 
-      className="min-h-screen bg-slate-50 font-['Quicksand'] flex flex-col items-center justify-center p-4 select-none relative overflow-hidden" 
-      onClick={forceFocus}
-    >
-      {/* Endüstriyel Zemin Deseni (Light Mode) */}
-      <div className="absolute inset-0 opacity-[0.03] bg-[repeating-linear-gradient(45deg,#000,#000_1px,transparent_1px,transparent_20px)] pointer-events-none"></div>
-
-      {/* Üst Kilit Bilgisi (Device Lock) */}
-      <div className="absolute top-0 left-0 w-full bg-[#0f172b] p-3 text-center border-b-4 border-[#dc3545] shadow-md flex justify-center items-center gap-2 z-20">
-        <ShieldCheck size={16} className="text-emerald-400" />
-        <span className="text-white text-[12px] font-black uppercase tracking-widest">
-          CİHAZ KİLİTLİ: {userProfile?.isGlobalAdmin ? "MERKEZ / GLOBAL YETKİ" : (userProfile?.branchName || "YETKİ BEKLENİYOR")}
-        </span>
-      </div>
+    <div className="min-h-screen flex items-center justify-center bg-slate-900 p-4 font-['Quicksand'] relative overflow-hidden select-none">
+      
+      {/* Endüstriyel Arka Plan Deseni (Web ile Birebir Aynı) */}
+      <div className="absolute inset-0 opacity-10 bg-[repeating-linear-gradient(45deg,#fff,#fff_1px,transparent_1px,transparent_20px)] pointer-events-none"></div>
+      <div className="absolute top-1/4 -left-32 w-96 h-96 bg-[#dc3545]/20 rounded-full blur-[100px] pointer-events-none"></div>
+      <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-indigo-500/10 rounded-full blur-[100px] pointer-events-none"></div>
 
       {/* MERKEZ KART */}
-      <div className="w-full max-w-sm bg-white rounded-sm shadow-xl relative z-10 overflow-hidden animate-in fade-in zoom-in-95 duration-500 mt-10 border border-slate-200">
+      <div className="w-full max-w-sm bg-white rounded-sm shadow-2xl relative z-10 overflow-hidden animate-in fade-in zoom-in-95 duration-500">
         
         {/* Üst Kırmızı Bar */}
         <div className="absolute top-0 left-0 w-full h-1.5 bg-[#dc3545]"></div>
@@ -120,60 +146,62 @@ export default function TerminalLoginPage() {
         <div className="p-8 md:p-10">
           
           {/* Logo ve Başlık */}
-          <div className="text-center mb-8 flex flex-col items-center">
-            <div className="bg-slate-50 p-4 rounded-2xl shadow-inner border border-slate-100 mb-4">
-              <ScanLine size={42} className="text-slate-800" />
-            </div>
-            <div className="flex justify-center items-end mb-1 gap-2">
-              <Logo variant="primary" className="text-3xl" />
-              <span className="text-[#0f172b] font-black text-[14px] tracking-tight uppercase opacity-90 mb-[2px]">
+          <div className="text-center mb-8">
+            <div className="flex justify-center mb-2 gap-2">
+              <Logo variant="primary" className="text-4xl" />
+              <span className="text-[#0f172b] font-black text-[15px] tracking-tight uppercase opacity-90 self-end mb-[2px]">
                 WMS
               </span>
             </div>
-            <p className="text-[11px] text-slate-400 font-black mt-1 tracking-widest uppercase">Operasyon Terminali</p>
+            <p className="text-xs text-slate-400 font-extrabold mt-2 tracking-widest uppercase">Operasyon Terminali</p>
+            
+            {/* Şube Bilgisi Rozeti */}
+            <div className="mt-4 inline-flex items-center gap-1.5 bg-red-50 border border-red-100 text-[#dc3545] px-4 py-1.5 rounded-full text-[11px] font-black tracking-wider shadow-sm">
+              <MapPin size={14} />
+              {deviceBranch?.name || "YETKİSİZ CİHAZ"}
+            </div>
           </div>
 
-          {/* Hata Ekranı */}
+          {/* Hata Mesajı */}
           {error && (
-            <div className="bg-red-50 border border-red-100 text-[#dc3545] px-4 py-3 rounded-sm flex items-start gap-3 text-[11px] font-bold mb-6 animate-in fade-in slide-in-from-top-2 uppercase tracking-wide">
-              <AlertTriangle size={16} className="shrink-0 mt-0.5" /> 
+            <div className="bg-red-50 border border-red-100 text-[#dc3545] px-4 py-3 rounded-sm flex items-start gap-3 text-xs font-bold mb-6 animate-in fade-in slide-in-from-top-2">
+              <AlertCircle size={16} className="shrink-0 mt-0.5" /> 
               <span className="leading-relaxed">{error}</span>
             </div>
           )}
 
           {/* Giriş Formu */}
           <form onSubmit={handleLogin} className="space-y-5">
-            <div className="space-y-2 text-center">
-              <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">
-                Personel ID / Yaka Kartı
+            <div className="space-y-1.5 text-center">
+              <label className="text-[11px] font-black text-slate-500 uppercase tracking-wider">
+                Personel ID'nizi Okutun
               </label>
               
               <div className="relative mt-2">
+                <ScanFace className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={24} />
                 <input
                   ref={inputRef}
-                  type="text" 
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={5}
+                  type="password"
+                  required
                   value={employeeId}
                   onChange={(e) => setEmployeeId(e.target.value)}
-                  disabled={isProcessing || !userProfile}
+                  disabled={loading || !deviceBranch}
                   autoComplete="off"
-                  className="w-full h-16 bg-slate-50 border-2 border-slate-200 rounded-sm focus:bg-white focus:border-[#dc3545] focus:ring-2 focus:ring-[#dc3545]/10 outline-none text-[32px] text-center font-black text-slate-900 tracking-[0.3em] transition-all disabled:opacity-50 placeholder:text-slate-300 placeholder:text-[16px] placeholder:tracking-widest placeholder:font-bold shadow-inner"
-                  placeholder="ID BEKLENİYOR..."
+                  className="w-full h-16 pl-14 pr-4 bg-slate-50 border-2 border-slate-200 rounded-sm focus:bg-white focus:border-[#dc3545] focus:ring-2 focus:ring-[#dc3545]/20 outline-none text-3xl text-center font-mono font-black text-slate-800 tracking-[0.3em] transition-all disabled:opacity-50"
+                  placeholder="•••••"
                 />
               </div>
             </div>
 
             <Button 
               type="submit" 
-              disabled={isProcessing || !userProfile || employeeId.length === 0} 
-              className="w-full h-14 mt-2 text-[13px] font-black tracking-widest bg-[#dc3545] hover:bg-red-700 rounded-sm shadow-md flex items-center justify-center gap-2 transition-all uppercase"
+              disabled={loading || !deviceBranch || employeeId.length === 0} 
+              className="w-full h-14 mt-2 text-sm font-black tracking-wide bg-[#dc3545] hover:bg-red-700 rounded-sm shadow-sm flex items-center justify-center gap-2 transition-all"
             >
-              {isProcessing ? (
-                <span className="animate-pulse flex items-center gap-2"><Loader2 size={16} className="animate-spin" /> Yükleniyor...</span>
+              {loading ? (
+                <span className="animate-pulse">Bağlanıyor...</span>
               ) : (
-                <>Terminali Aç <ArrowRight size={18} /></>
+                <>Terminali Başlat <ArrowRight size={18} /></>
               )}
             </Button>
           </form>
@@ -182,10 +210,8 @@ export default function TerminalLoginPage() {
       </div>
 
       {/* Footer Text */}
-      <div className="absolute bottom-6 w-full text-center pointer-events-none z-10">
-        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest opacity-80">
-          LogiStock WMS • Depo Yönetim Sistemi
-        </span>
+      <div className="absolute bottom-6 w-full text-center pointer-events-none">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest opacity-60">LogiStock WMS • Depo Yönetim Sistemi</span>
       </div>
 
     </div>
