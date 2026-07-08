@@ -6,7 +6,9 @@ import { supabase } from "@/lib/supabase";
 import { 
   ChevronLeft, TerminalSquare, UserCircle, MapPin, 
   Hash, QrCode, AlertTriangle, Package, 
-  Printer, ScanLine, Smartphone, Edit3, PlusCircle, MinusCircle, CheckCircle2, FileSpreadsheet
+  Printer, ScanLine, Smartphone, Edit3, PlusCircle, MinusCircle, CheckCircle2, FileSpreadsheet,
+  ArrowRight,
+  Truck
 } from "lucide-react";
 import { Html5Qrcode } from "html5-qrcode";
 
@@ -62,6 +64,19 @@ export default function ManualTransferScanPage() {
   const scanInputRef = useRef<HTMLInputElement>(null);
   const lastCameraScanTime = useRef<number>(0);
   const qtyButtons = [1, 2, 3, 4, 5, 10];
+
+  // ÇÖZÜM 1 (Kritik): React Stale Closure (Bayat Veri) sorununu aşmak için Ref kalkanı kuruyoruz.
+  // Kamera okuma yaptığında, fonksiyonun state'i boş sanıp sadece son ürünü eklemesi bu sayede kalıcı olarak çözüldü.
+  const opState = useRef({ scanMode, selectedQty });
+  const itemsRef = useRef<ScannedItem[]>([]); 
+
+  useEffect(() => {
+    opState.current = { scanMode, selectedQty };
+  }, [scanMode, selectedQty]);
+
+  useEffect(() => {
+    itemsRef.current = scannedItems;
+  }, [scannedItems]);
 
   useEffect(() => {
     const initData = async () => {
@@ -134,7 +149,7 @@ export default function ManualTransferScanPage() {
 
     if (isCamera) {
       const now = Date.now();
-      if (now - lastCameraScanTime.current < 1500) return;
+      if (now - lastCameraScanTime.current < 2500) return; // Çift okumayı engelleme
       lastCameraScanTime.current = now;
     }
 
@@ -142,7 +157,14 @@ export default function ManualTransferScanPage() {
 
     try {
       let targetBarcode = rawBarcode.trim();
-      let inputQty = typeof selectedQty === 'string' ? parseInt(selectedQty) || 1 : selectedQty;
+      
+      // ÇÖZÜM 1 DEVAMI: Kamera veya terminal her okutmada en GÜNCEL state'i (Ref) okur.
+      let currentScanMode = opState.current.scanMode;
+      let currentQty = opState.current.selectedQty;
+      // Mutasyondan (overwrite) kaçınmak için güncel listeyi klonluyoruz
+      let currentItems = [...itemsRef.current];
+
+      let inputQty = typeof currentQty === 'string' ? parseInt(currentQty) || 1 : currentQty;
       if (inputQty < 1) inputQty = 1;
 
       // 1. Koli Çözümleyici
@@ -161,7 +183,7 @@ export default function ManualTransferScanPage() {
       }
 
       // 2. Ürünü Listeden veya DB'den Bul
-      let existingItemIndex = scannedItems.findIndex(i => i.product.barcode === targetBarcode);
+      let existingItemIndex = currentItems.findIndex(i => i.product.barcode === targetBarcode);
       let productDetails = null;
 
       if (existingItemIndex === -1) {
@@ -177,41 +199,43 @@ export default function ManualTransferScanPage() {
         }
         productDetails = newProduct;
       } else {
-        productDetails = scannedItems[existingItemIndex].product;
+        productDetails = currentItems[existingItemIndex].product;
       }
 
       // 3. Ekleme / Çıkarma Hesaplaması
-      const qtyChange = scanMode === 'add' ? inputQty : -inputQty;
-      const currentQty = existingItemIndex !== -1 ? scannedItems[existingItemIndex].quantity : 0;
-      const proposedQty = currentQty + qtyChange;
+      const qtyChange = currentScanMode === 'add' ? inputQty : -inputQty;
+      const currentCount = existingItemIndex !== -1 ? currentItems[existingItemIndex].quantity : 0;
+      const proposedQty = currentCount + qtyChange;
 
       if (proposedQty < 0) {
         triggerFeedback('error', "HATA! Sayım sıfırın altına düşemez.");
         return;
       }
 
-      let updatedList = [...scannedItems];
+      // 4. Listeyi Kusursuz Olarak Güncelle (Ekle/Çıkar/Sil)
       if (existingItemIndex > -1) {
         if (proposedQty === 0) {
-          updatedList.splice(existingItemIndex, 1);
+          currentItems.splice(existingItemIndex, 1); // Sıfıra düşerse listeden sil
         } else {
-          updatedList[existingItemIndex].quantity = proposedQty;
+          // React için güvenli immutable obje güncellemesi
+          currentItems[existingItemIndex] = { ...currentItems[existingItemIndex], quantity: proposedQty };
         }
       } else {
         if (proposedQty > 0) {
-          updatedList.unshift({
+          currentItems.unshift({
             product: productDetails,
             quantity: proposedQty
           });
         }
       }
 
-      setScannedItems(updatedList);
+      // Sonuçları ekrana ve Ref'e yansıt
+      setScannedItems(currentItems);
       setLastScanned({ 
         product: productDetails, 
         qtyChange: Math.abs(qtyChange), 
         currentTotal: proposedQty,
-        type: scanMode
+        type: currentScanMode
       });
       triggerFeedback('success');
       setSelectedQty(1);
@@ -236,7 +260,7 @@ export default function ManualTransferScanPage() {
       html5QrCode = new Html5Qrcode("reader");
       html5QrCode.start(
         { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 250, height: 150 } }, 
+        { fps: 4, qrbox: { width: 250, height: 150 } }, 
         (decodedText) => processBarcode(decodedText, true), 
         () => {}
       ).catch(err => console.error("Kamera başlatılamadı:", err));
@@ -248,8 +272,9 @@ export default function ManualTransferScanPage() {
     };
   }, [isSetupComplete, activeTab, savedCode]);
 
-  // Nihai Kayıt ve Yazdırma
+  // Nihai Kayıt ve Yazdırma (Tüm liste eksiksiz transfer_items'a dökülür)
   const saveToDatabase = async () => {
+    // Okuma yaparken itemsRef kullandığımız için scannedItems her zaman tamdır
     if (scannedItems.length === 0) return triggerFeedback('error', "Liste boş!");
     setIsProcessing(true);
     setIsSaving(true);
@@ -258,7 +283,6 @@ export default function ManualTransferScanPage() {
       const finalFromBranchId = isCustomFrom ? null : fromBranchId;
       const finalToBranchId = isCustomTo ? null : toBranchId;
 
-      // Akıllı Durum Lojiği (Bizden çıkıyorsa Yolda, bize giriyorsa Tamamlandı)
       const finalStatus = (!isCustomFrom && finalFromBranchId === branchId) ? "Yolda" : "Tamamlandi";
 
       const { data: lastTransfer } = await supabase
@@ -269,7 +293,6 @@ export default function ManualTransferScanPage() {
         .limit(1)
         .maybeSingle();
 
-      // MNS1001 formatı (Tiresiz)
       let finalNumber = 1001;
       if (lastTransfer?.transfer_code) {
         const numPart = lastTransfer.transfer_code.replace("MNS", "");
@@ -363,78 +386,101 @@ export default function ManualTransferScanPage() {
       {/* BAŞLIK (Dark Heading) */}
       <div className="bg-[#0f172b] shadow-md shrink-0 border-b-4 border-[#dc3545] print:hidden">
         <div className="flex items-center justify-between p-4 border-b border-slate-800/60 max-w-7xl mx-auto w-full">
-          <button onClick={() => router.back()} className="text-slate-400 hover:text-white p-2 bg-slate-800/40 hover:bg-slate-800 transition-all rounded-sm">
+          <button onClick={() => router.back()} className="text-slate-400 hover:text-white p-2 bg-slate-800/40 hover:bg-slate-800 transition-all rounded-sm shrink-0">
             <ChevronLeft size={20} />
           </button>
-          <div className="flex items-center gap-2">
-            <TerminalSquare size={18} className="text-[#dc3545]" />
-            <span className="text-white text-[14px] sm:text-[15px] font-black uppercase tracking-widest">
-              Serbest Sayım Motoru
-            </span>
+          
+          <div className="flex flex-col sm:flex-row items-center gap-2 text-center sm:text-left">
+            <div className="flex items-center gap-2">
+              <img src="/logo-placeholder.png" alt="Logo" className="h-6 w-auto object-contain hidden sm:block" onError={(e) => (e.currentTarget.style.display = 'none')} />
+              <TerminalSquare size={18} className="text-[#dc3545] sm:hidden" />
+              <span className="text-white text-[14px] sm:text-[15px] font-black uppercase tracking-widest line-clamp-1">
+                Serbest Sayım Motoru
+              </span>
+            </div>
           </div>
-          <div className="w-10" />
+          
+          <div className="w-10 shrink-0" />
         </div>
         <div className="bg-slate-950 py-2.5 px-4">
-          <div className="max-w-7xl mx-auto w-full flex justify-between items-center text-[11px] font-bold uppercase tracking-wider">
+          <div className="max-w-7xl mx-auto w-full flex flex-col sm:flex-row justify-between items-center text-[11px] font-bold uppercase tracking-wider gap-1">
             <span className="text-slate-400 flex items-center gap-1.5"><UserCircle size={14} className="text-slate-600"/> {empName}</span>
             <span className="text-[#dc3545] flex items-center gap-1.5"><MapPin size={14}/> {branchName}</span>
           </div>
         </div>
       </div>
 
-      {/* 1. KURULUM (SETUP) EKRANI */}
+      {/* 1. KURULUM (SETUP) EKRANI (Arayüz İyileştirildi) */}
       {!isSetupComplete && (
         <div className="flex-1 flex items-center justify-center p-4 print:hidden">
-          <div className="bg-white p-6 border border-slate-300 shadow-xl max-w-2xl w-full flex flex-col gap-6">
-            <div className="flex flex-col items-center text-center gap-2 mb-2 border-b border-slate-100 pb-4">
-              <div className="bg-slate-100 p-4 rounded-full text-slate-400"><QrCode size={40} /></div>
-              <h2 className="text-[18px] font-black uppercase text-slate-800 tracking-widest">Serbest Sayım Oluştur</h2>
-              <p className="text-[12px] font-bold text-slate-500">Bu modül ile plansız transfer veya siparişleri okutarak yeni liste yaratabilirsiniz.</p>
+          <div className="bg-white p-6 sm:p-8 border border-slate-200 shadow-2xl max-w-2xl w-full flex flex-col gap-6 rounded-sm relative overflow-hidden">
+            
+            {/* Geliştirilmiş Arka Plan Detayı */}
+            <div className="absolute top-0 right-0 w-64 h-64 bg-slate-50 rounded-full blur-[80px] pointer-events-none"></div>
+
+            <div className="flex flex-col items-center text-center gap-3 mb-2 border-b border-slate-100 pb-6 relative z-10">
+              <div className="bg-white border-2 border-slate-100 p-4 rounded-full text-[#0f172b] shadow-sm"><QrCode size={40} /></div>
+              <h2 className="text-[18px] sm:text-[20px] font-black uppercase text-slate-800 tracking-widest">Serbest Sayım Oluştur</h2>
+              <p className="text-[12px] font-bold text-slate-500 max-w-md leading-relaxed">
+                Bu modül ile sistemsel kaydı olmayan plansız transfer veya depo sayımlarını okutarak yeni bir liste yaratabilirsiniz.
+              </p>
             </div>
             
-            <form onSubmit={handleStartCount} className="flex flex-col gap-5">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <div className="flex flex-col gap-2">
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Çıkış Şubesi (Gönderen)</label>
+            <form onSubmit={handleStartCount} className="flex flex-col gap-6 relative z-10">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative">
+                
+                {/* Rota Ok İkonu */}
+                <div className="hidden md:flex absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 bg-white p-2 rounded-full border border-slate-200 text-slate-400 shadow-sm">
+                  <ArrowRight size={20} />
+                </div>
+
+                {/* GÖNDEREN KISMI */}
+                <div className="flex flex-col gap-2 bg-slate-50 p-5 border border-slate-200 rounded-sm shadow-inner transition-colors focus-within:bg-white focus-within:border-orange-300">
+                  <label className="text-[11px] font-black text-slate-600 uppercase tracking-widest flex items-center gap-2">
+                    <MapPin size={14} className="text-orange-500" /> Çıkış (Gönderen)
+                  </label>
                   <select 
                     value={isCustomFrom ? "other" : fromBranchId} 
                     onChange={(e) => {
                       if(e.target.value === "other") setIsCustomFrom(true);
                       else { setIsCustomFrom(false); setFromBranchId(e.target.value); }
                     }}
-                    className="w-full bg-slate-50 border border-slate-300 text-slate-800 text-[14px] font-bold p-3 rounded-sm focus:outline-none focus:border-[#dc3545]"
+                    className="w-full bg-white border-2 border-slate-200 text-slate-800 text-[14px] font-bold p-3 rounded-sm focus:outline-none focus:border-orange-500 transition-colors cursor-pointer"
                   >
                     <option value="" disabled>Şube Seçiniz...</option>
                     {branches.map(b => <option key={b.id} value={b.id}>{b.name} ({b.type})</option>)}
-                    <option value="other" className="font-black text-[#dc3545]">+ Geçici / Manuel (Tabloyu Kirletmez)</option>
+                    <option value="other" className="font-black text-orange-600">+ Özel Konum / Dışarıya</option>
                   </select>
                   {isCustomFrom && (
-                    <input type="text" placeholder="Örn: Müşteri Siparişi A" value={customFromBranch} onChange={e => setCustomFromBranch(e.target.value)} className="w-full mt-2 bg-white border border-[#dc3545] p-3 text-[13px] font-bold rounded-sm focus:outline-none" autoFocus />
+                    <input type="text" placeholder="Örn: X Müşterisi, İade vs." value={customFromBranch} onChange={e => setCustomFromBranch(e.target.value)} className="w-full mt-3 bg-white border-2 border-orange-400 p-3 text-[13px] font-bold rounded-sm focus:outline-none shadow-sm" autoFocus />
                   )}
                 </div>
 
-                <div className="flex flex-col gap-2">
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Varış Şubesi (Alıcı)</label>
+                {/* ALICI KISMI */}
+                <div className="flex flex-col gap-2 bg-slate-50 p-5 border border-slate-200 rounded-sm shadow-inner transition-colors focus-within:bg-white focus-within:border-emerald-300">
+                  <label className="text-[11px] font-black text-slate-600 uppercase tracking-widest flex items-center gap-2">
+                    <Truck size={14} className="text-emerald-500" /> Varış (Alıcı)
+                  </label>
                   <select 
                     value={isCustomTo ? "other" : toBranchId} 
                     onChange={(e) => {
                       if(e.target.value === "other") setIsCustomTo(true);
                       else { setIsCustomTo(false); setToBranchId(e.target.value); }
                     }}
-                    className="w-full bg-slate-50 border border-slate-300 text-slate-800 text-[14px] font-bold p-3 rounded-sm focus:outline-none focus:border-[#dc3545]"
+                    className="w-full bg-white border-2 border-slate-200 text-slate-800 text-[14px] font-bold p-3 rounded-sm focus:outline-none focus:border-emerald-500 transition-colors cursor-pointer"
                   >
                     <option value="" disabled>Şube Seçiniz...</option>
                     {branches.map(b => <option key={b.id} value={b.id}>{b.name} ({b.type})</option>)}
-                    <option value="other" className="font-black text-[#dc3545]">+ Geçici / Manuel (Tabloyu Kirletmez)</option>
+                    <option value="other" className="font-black text-emerald-600">+ Özel Konum / Dışarıdan</option>
                   </select>
                   {isCustomTo && (
-                    <input type="text" placeholder="Örn: X Kargo Firması" value={customToBranch} onChange={e => setCustomToBranch(e.target.value)} className="w-full mt-2 bg-white border border-[#dc3545] p-3 text-[13px] font-bold rounded-sm focus:outline-none" />
+                    <input type="text" placeholder="Örn: X Tedarikçisi, Kargo vs." value={customToBranch} onChange={e => setCustomToBranch(e.target.value)} className="w-full mt-3 bg-white border-2 border-emerald-400 p-3 text-[13px] font-bold rounded-sm focus:outline-none shadow-sm" />
                   )}
                 </div>
               </div>
 
-              <button type="submit" className="w-full bg-[#dc3545] text-white p-4 font-black uppercase tracking-widest hover:bg-red-700 transition-colors active:scale-95 shadow-md mt-2">
-                SAYIMA BAŞLA
+              <button type="submit" className="w-full bg-[#0f172b] text-white p-4 sm:p-5 font-black uppercase tracking-[0.1em] hover:bg-[#dc3545] transition-all active:scale-95 shadow-md mt-2 flex items-center justify-center gap-3 text-[13px] rounded-sm">
+                ROTA ONAYLA VE SAYIMA BAŞLA <ArrowRight size={18} />
               </button>
             </form>
           </div>
@@ -451,97 +497,103 @@ export default function ManualTransferScanPage() {
           }`} />
 
           {errorMsg && (
-            <div className="absolute top-10 left-1/2 -translate-x-1/2 z-[60] bg-red-600 text-white px-6 py-4 font-black text-[14px] md:text-[18px] tracking-widest uppercase shadow-2xl border-2 border-red-900 animate-in slide-in-from-top-10 flex items-center gap-3 w-[90%] md:w-auto text-center">
-              <AlertTriangle size={28} className="shrink-0" /> {errorMsg}
+            <div className="absolute top-10 left-1/2 -translate-x-1/2 z-[60] bg-red-600 text-white px-4 sm:px-6 py-4 font-black text-[12px] sm:text-[14px] tracking-widest uppercase shadow-2xl border-2 border-red-900 animate-in slide-in-from-top-10 flex items-center gap-3 w-[95%] max-w-md text-center">
+              <AlertTriangle size={24} className="shrink-0" /> {errorMsg}
             </div>
           )}
 
           {/* KOKPİT BİLGİ PANELİ */}
-          <div className="bg-[#0f172b] p-4 text-white flex flex-col md:flex-row justify-between items-start md:items-center gap-4 z-10 shrink-0 border-b border-slate-800">
-            <div className="flex items-center gap-4">
-              <div className={`p-3 border-2 shadow-sm bg-purple-600 border-purple-400 text-white`}>
-                <Package size={24} />
+          <div className="bg-[#0f172b] p-4 text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 z-10 shrink-0 border-b border-slate-800">
+            <div className="flex items-center gap-3 w-full sm:w-auto">
+              <div className={`p-2 sm:p-3 border-2 shadow-sm bg-purple-600 border-purple-400 text-white shrink-0`}>
+                <Package size={20} className="sm:w-6 sm:h-6" />
               </div>
-              <div className="flex flex-col">
-                <span className="text-[12px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-0.5">
+              <div className="flex flex-col min-w-0">
+                <span className="text-[11px] sm:text-[12px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-0.5">
                   <Hash size={12}/> {savedCode ? `${savedCode} OLUŞTURULDU` : "SERBEST SAYIM MODU"}
                 </span>
-                <span className="text-[14px] md:text-[16px] font-black tracking-widest uppercase flex items-center gap-2">
-                  <span className="text-white truncate max-w-[150px] md:max-w-[300px]" title={routeDisplay}>{routeDisplay}</span>
+                <span className="text-[14px] sm:text-[16px] font-black tracking-widest uppercase flex items-center gap-2 w-full">
+                  <span className="text-white truncate" title={routeDisplay}>{routeDisplay}</span>
                 </span>
               </div>
             </div>
             
-            <div className="flex flex-col text-left md:text-right w-full md:w-auto border-t md:border-t-0 border-slate-700 pt-3 md:pt-0">
+            <div className="flex flex-col text-left sm:text-right w-full sm:w-auto border-t sm:border-t-0 border-slate-700 pt-3 sm:pt-0 shrink-0">
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Toplam Okunan</span>
-              <div className="flex items-end gap-2 md:justify-end">
+              <div className="flex items-end gap-2 sm:justify-end">
                 <span className={`text-[24px] font-black leading-none text-emerald-400`}>{totalScanned}</span>
                 <span className="text-slate-500 text-[14px] font-bold">ADET</span>
               </div>
             </div>
           </div>
 
-          <div className="flex-1 p-4 w-full max-w-7xl mx-auto flex flex-col lg:flex-row gap-6 z-10">
+          <div className="flex-1 p-2 sm:p-4 w-full max-w-7xl mx-auto flex flex-col lg:flex-row gap-4 sm:gap-6 z-10 overflow-hidden">
             
             {/* SOL KOLON: OKUMA MOTORU */}
-            <div className="w-full lg:w-[420px] flex flex-col gap-4">
+            <div className="w-full lg:w-[420px] flex flex-col gap-4 shrink-0 overflow-y-auto lg:overflow-visible pb-4 lg:pb-0">
               
               {!savedCode && (
                 <>
-                  <div className="flex bg-slate-200 p-1.5 rounded-sm shadow-inner">
-                    <button onClick={() => setActiveTab('terminal')} className={`flex-1 flex items-center justify-center gap-2 py-3 text-[12px] font-black uppercase tracking-widest transition-all ${activeTab === 'terminal' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>
-                      <ScanLine size={16} /> Terminal Cihazı
+                  <div className="flex bg-white border border-slate-200 p-1.5 rounded-sm shadow-sm">
+                    <button onClick={() => setActiveTab('terminal')} className={`flex-1 flex items-center justify-center gap-2 py-3 text-[12px] font-black uppercase tracking-widest transition-all ${activeTab === 'terminal' ? 'bg-[#0f172b] text-white shadow-md' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}>
+                      <ScanLine size={16} /> Terminal
                     </button>
-                    <button onClick={() => setActiveTab('camera')} className={`flex-1 flex items-center justify-center gap-2 py-3 text-[12px] font-black uppercase tracking-widest transition-all ${activeTab === 'camera' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>
-                      <Smartphone size={16} /> Telefon Kamerası
+                    <button onClick={() => setActiveTab('camera')} className={`flex-1 flex items-center justify-center gap-2 py-3 text-[12px] font-black uppercase tracking-widest transition-all ${activeTab === 'camera' ? 'bg-[#0f172b] text-white shadow-md' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}>
+                      <Smartphone size={16} /> Kamera
                     </button>
                   </div>
 
-                  <div className="bg-slate-900 p-4 shadow-xl border border-slate-800 flex flex-col gap-4 relative">
+                  <div className="bg-white p-4 shadow-md border border-slate-200 flex flex-col gap-4 relative">
                     
                     {/* Toggle: Ekle/Çıkar */}
                     <div className="flex gap-2">
-                      <button type="button" onClick={() => { setScanMode('add'); setTimeout(() => scanInputRef.current?.focus(), 100); }} className={`flex-1 flex items-center justify-center gap-2 py-2.5 font-black uppercase tracking-widest text-[12px] transition-all border ${scanMode === 'add' ? 'bg-emerald-600 text-white border-emerald-500 shadow-md' : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'}`}>
+                      <button type="button" onClick={() => { setScanMode('add'); setTimeout(() => scanInputRef.current?.focus(), 100); }} className={`flex-1 flex items-center justify-center gap-2 py-3 font-black uppercase tracking-widest text-[12px] transition-all border-2 ${scanMode === 'add' ? 'bg-emerald-50 text-emerald-700 border-emerald-500 shadow-sm' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-50'}`}>
                         <PlusCircle size={16}/> EKLE
                       </button>
-                      <button type="button" onClick={() => { setScanMode('remove'); setTimeout(() => scanInputRef.current?.focus(), 100); }} className={`flex-1 flex items-center justify-center gap-2 py-2.5 font-black uppercase tracking-widest text-[12px] transition-all border ${scanMode === 'remove' ? 'bg-[#dc3545] text-white border-red-500 shadow-md' : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-700'}`}>
-                        <MinusCircle size={16}/> GERİ AL
+                      <button type="button" onClick={() => { setScanMode('remove'); setTimeout(() => scanInputRef.current?.focus(), 100); }} className={`flex-1 flex items-center justify-center gap-2 py-3 font-black uppercase tracking-widest text-[12px] transition-all border-2 ${scanMode === 'remove' ? 'bg-red-50 text-[#dc3545] border-red-500 shadow-sm' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-50'}`}>
+                        <MinusCircle size={16}/> İPTAL ET
                       </button>
                     </div>
 
                     {activeTab === 'terminal' ? (
                       <form onSubmit={handleTerminalScan} className="flex flex-col gap-2">
+                        {/* Terminal Input - Beyaz Aydınlık Tema */}
                         <input 
                           ref={scanInputRef}
                           type="text" 
                           value={scanInput}
                           onChange={e => setScanInput(e.target.value)}
                           onBlur={() => setTimeout(() => { if(!savedCode) scanInputRef.current?.focus() }, 300)}
-                          placeholder="Barkod Okutun"
+                          placeholder="BARKOD OKUTUN"
                           disabled={isProcessing}
-                          className={`w-full text-white border-2 focus:outline-none p-4 font-black text-[18px] text-center uppercase tracking-widest placeholder:text-slate-700 transition-colors ${scanMode === 'add' ? 'bg-slate-950 border-slate-700 focus:border-emerald-500' : 'bg-red-950 border-red-900 focus:border-[#dc3545]'} disabled:opacity-50`}
+                          className={`w-full text-center font-black text-[24px] uppercase p-4 border-2 focus:outline-none tracking-widest transition-colors shadow-inner disabled:opacity-50
+                            ${scanMode === 'add' 
+                              ? 'bg-white text-slate-900 border-slate-300 focus:border-emerald-500 placeholder:text-slate-300' 
+                              : 'bg-red-50 text-[#dc3545] border-red-200 focus:border-[#dc3545] placeholder:text-red-200'}`}
                         />
                         <button type="submit" className="hidden" /> 
                       </form>
                     ) : (
                       <div className="flex flex-col gap-2">
-                        <div id="reader" className={`w-full bg-black border-2 overflow-hidden min-h-[250px] ${scanMode === 'add' ? 'border-slate-700' : 'border-[#dc3545]'}`} />
+                        <div id="reader" className={`w-full bg-slate-50 border-2 overflow-hidden min-h-[250px] ${scanMode === 'add' ? 'border-slate-300' : 'border-red-400'}`} />
                       </div>
                     )}
 
-                    {/* Miktar Çarpanı */}
-                    <div className="flex flex-col gap-2 border-t border-slate-800 pt-4 mt-2">
-                      <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5"><Edit3 size={12}/> Adet Seçimi (Çarpan)</span>
-                      <div className="grid grid-cols-6 gap-1.5 mb-2">
+                    {/* Miktar Çarpanı ve Flex Taşma Çözümü */}
+                    <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 mt-2">
+                      <span className="text-slate-500 text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5"><Edit3 size={12}/> Adet Seçimi (Çarpan)</span>
+                      
+                      <div className="flex flex-wrap gap-2 mb-1">
                         {qtyButtons.map(qty => (
-                          <button key={qty} type="button" onClick={() => { setSelectedQty(qty); setTimeout(() => scanInputRef.current?.focus(), 100); }} className={`py-3 text-[14px] font-black transition-all border rounded-sm ${selectedQty === qty ? (scanMode === 'add' ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-[#dc3545] border-red-500 text-white') : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'}`}>
+                          <button key={qty} type="button" onClick={() => { setSelectedQty(qty); setTimeout(() => scanInputRef.current?.focus(), 100); }} className={`flex-1 min-w-[44px] py-3 text-[14px] font-black transition-all border-2 rounded-sm ${selectedQty === qty ? (scanMode === 'add' ? 'bg-emerald-600 border-emerald-600 text-white shadow-md' : 'bg-[#dc3545] border-[#dc3545] text-white shadow-md') : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
                             {qty}
                           </button>
                         ))}
                       </div>
-                      <div className="flex items-center gap-3 bg-slate-950 border border-slate-700 p-2 rounded-sm focus-within:border-slate-500 transition-colors">
-                        <span className="text-slate-500 text-[11px] font-black uppercase tracking-widest whitespace-nowrap pl-2">Manuel Adet:</span>
-                        <input type="number" min="1" value={selectedQty} onChange={e => setSelectedQty(e.target.value)} className="flex-1 bg-transparent text-white font-black text-[20px] text-right focus:outline-none pr-2" />
+                      
+                      <div className={`flex items-center gap-3 border-2 p-2 rounded-sm transition-colors w-full overflow-hidden ${scanMode === 'add' ? 'bg-emerald-50/50 border-slate-200 focus-within:border-emerald-500' : 'bg-red-50/50 border-slate-200 focus-within:border-[#dc3545]'}`}>
+                        <span className="text-slate-600 text-[11px] font-black uppercase tracking-widest whitespace-nowrap pl-2 shrink-0">Manuel:</span>
+                        <input type="number" min="1" value={selectedQty} onChange={e => setSelectedQty(e.target.value)} className="flex-1 bg-transparent text-slate-900 font-black text-[22px] text-right focus:outline-none pr-2 min-w-0 w-full" />
                       </div>
                     </div>
                   </div>
@@ -549,38 +601,38 @@ export default function ManualTransferScanPage() {
               )}
 
               {/* ANLIK OKUNAN ÜRÜN BİLGİSİ */}
-              <div className="bg-white border border-slate-300 shadow-lg p-5 flex flex-col items-center text-center gap-4 relative overflow-hidden flex-1">
-                <div className={`absolute top-0 w-full h-1.5 ${lastScanned?.type === 'remove' ? 'bg-[#dc3545]' : 'bg-slate-800'}`} />
+              <div className="bg-white border border-slate-200 shadow-md p-5 flex flex-col items-center text-center gap-4 relative overflow-hidden flex-1">
+                <div className={`absolute top-0 w-full h-1.5 ${lastScanned?.type === 'remove' ? 'bg-[#dc3545]' : 'bg-[#0f172b]'}`} />
                 
                 {lastScanned ? (
                   <div className="w-full flex flex-col items-center">
-                    <div className="w-24 h-24 bg-slate-50 border border-slate-200 p-2 shadow-inner mb-4">
+                    <div className="w-20 h-20 sm:w-24 sm:h-24 bg-white border border-slate-200 p-2 shadow-sm rounded-md mb-4">
                       {lastScanned.product.image_url ? (
-                        <img src={lastScanned.product.image_url} alt="Urun" className="w-full h-full object-contain mix-blend-multiply" />
+                        <img src={lastScanned.product.image_url} alt="Urun" className="w-full h-full object-contain" />
                       ) : (
                         <Package size={40} className="text-slate-300 w-full h-full" />
                       )}
                     </div>
                     <div className="flex flex-col gap-1 w-full border-b border-slate-100 pb-4 mb-4">
                       <span className="text-[13px] font-black text-[#dc3545] tracking-widest uppercase truncate">{lastScanned.product.barcode}</span>
-                      <span className="text-[14px] font-bold text-slate-800 line-clamp-2 leading-tight">{lastScanned.product.name}</span>
+                      <span className="text-[12px] sm:text-[14px] font-bold text-slate-800 line-clamp-2 leading-tight">{lastScanned.product.name}</span>
                     </div>
 
-                    <div className="w-full bg-slate-50 p-3 border border-slate-200 flex justify-between items-center">
-                      <span className={`text-[12px] font-black uppercase tracking-widest ${lastScanned.type === 'remove' ? 'text-[#dc3545]' : 'text-emerald-600'}`}>
-                        {lastScanned.type === 'remove' ? `-${lastScanned.qtyChange} İPTAL EDİLDİ` : `+${lastScanned.qtyChange} EKLENDİ`}
+                    <div className="w-full bg-slate-50 p-3 border border-slate-200 flex justify-between items-center rounded-sm">
+                      <span className={`text-[11px] sm:text-[12px] font-black uppercase tracking-widest ${lastScanned.type === 'remove' ? 'text-[#dc3545]' : 'text-emerald-600'}`}>
+                        {lastScanned.type === 'remove' ? `-${lastScanned.qtyChange} İPTAL` : `+${lastScanned.qtyChange} EKLENDİ`}
                       </span>
-                      <div className="flex flex-col text-right">
+                      <div className="flex flex-col text-right shrink-0">
                         <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Bu Üründen Toplam</span>
-                        <span className="text-[24px] font-black text-slate-900 leading-none">{lastScanned.currentTotal}</span>
+                        <span className="text-[20px] sm:text-[24px] font-black text-slate-900 leading-none mt-0.5">{lastScanned.currentTotal}</span>
                       </div>
                     </div>
                   </div>
                 ) : (
                   <div className="flex flex-col items-center text-slate-300 gap-3 py-10 my-auto">
-                    {savedCode ? <CheckCircle2 size={56} className="text-emerald-500"/> : <QrCode size={48} />}
-                    <span className="font-bold text-[12px] uppercase tracking-widest">
-                      {savedCode ? "İşlem Tamamlandı" : "İlk barkodu okutmanız bekleniyor"}
+                    {savedCode ? <CheckCircle2 size={56} className="text-emerald-500"/> : <QrCode size={48} className="text-slate-200" />}
+                    <span className="font-black text-[11px] text-slate-400 uppercase tracking-widest text-center px-4">
+                      {savedCode ? "İşlem Tamamlandı. Evrak Oluşturuldu." : "İlk barkodu okutmanız bekleniyor"}
                     </span>
                   </div>
                 )}
@@ -588,29 +640,29 @@ export default function ManualTransferScanPage() {
             </div>
 
             {/* SAĞ KOLON: ÜRÜN LİSTESİ */}
-            <div className="flex-1 bg-white border border-slate-300 shadow-md flex flex-col overflow-hidden">
-              <div className="bg-[#0f172b] px-4 py-3 flex justify-between items-center text-white">
+            <div className="flex-1 bg-white border border-slate-200 shadow-md flex flex-col overflow-hidden min-h-[400px]">
+              <div className="bg-[#0f172b] px-4 py-3 flex justify-between items-center text-white shrink-0">
                 <span className="text-[11px] font-black uppercase tracking-widest">Sayım Listesi Özeti</span>
-                <span className="bg-slate-800 px-2 py-0.5 text-[10px] font-bold tracking-widest border border-slate-700">{scannedItems.length} Kalem</span>
+                <span className="bg-slate-800 px-2 py-0.5 text-[10px] font-bold tracking-widest border border-slate-700 rounded-sm shadow-sm">{scannedItems.length} Kalem</span>
               </div>
               
-              <div className="flex-1 overflow-y-auto">
-                <table className="w-full text-left border-collapse table-fixed min-w-[400px]">
-                  <thead className="bg-slate-100 text-slate-500 text-[10px] uppercase tracking-widest sticky top-0 z-10 shadow-sm border-b border-slate-300">
+              <div className="flex-1 overflow-y-auto overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[400px]">
+                  <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-widest sticky top-0 z-10 shadow-sm border-b border-slate-200">
                     <tr>
-                      <th className="p-3 w-36 border-r border-slate-200">Barkod</th>
+                      <th className="p-3 w-32 border-r border-slate-200">Barkod</th>
                       <th className="p-3 border-r border-slate-200">Ürün Adı</th>
                       <th className="p-3 w-24 text-center text-emerald-600 bg-emerald-50">Okunan</th>
                     </tr>
                   </thead>
-                  <tbody className="text-[12px] font-bold text-slate-800 divide-y divide-slate-200">
+                  <tbody className="text-[12px] font-bold text-slate-800 divide-y divide-slate-100">
                     {scannedItems.map((item) => (
                       <tr key={item.product.id} className="hover:bg-slate-50 transition-colors">
                         <td className="p-3 border-r border-slate-100 overflow-hidden">
                           <span className="tracking-widest uppercase truncate block text-slate-800">{item.product.barcode}</span>
                         </td>
                         <td className="p-3 border-r border-slate-100">
-                          <span className="line-clamp-2 text-[11px]">{item.product.name}</span>
+                          <span className="line-clamp-2 text-[11px] leading-tight">{item.product.name}</span>
                         </td>
                         <td className="p-3 text-center bg-emerald-50/30">
                           <span className="text-[16px] font-black text-emerald-600">{item.quantity}</span>
@@ -627,33 +679,33 @@ export default function ManualTransferScanPage() {
               </div>
               
               {/* KAYDET VE YAZDIR ALANI */}
-              <div className="p-4 bg-slate-100 border-t border-slate-300 shrink-0 flex flex-col gap-3">
+              <div className="p-3 sm:p-4 bg-slate-50 border-t border-slate-200 shrink-0 flex flex-col gap-3">
                 {!savedCode ? (
                   <button 
                     onClick={saveToDatabase}
                     disabled={totalScanned === 0 || isSaving}
-                    className="w-full bg-[#0f172b] disabled:bg-slate-400 text-white font-black text-[14px] p-5 uppercase tracking-[0.2em] flex items-center justify-center gap-3 hover:bg-[#dc3545] transition-colors shadow-lg active:scale-95"
+                    className="w-full bg-[#0f172b] disabled:bg-slate-300 disabled:text-slate-500 text-white font-black text-[12px] sm:text-[14px] p-4 sm:p-5 uppercase tracking-[0.1em] flex items-center justify-center gap-3 hover:bg-[#dc3545] transition-colors shadow-md active:scale-95 rounded-sm"
                   >
-                    {isSaving ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"/> : <Printer size={20} />}
+                    {isSaving ? <div className="w-5 h-5 border-2 border-slate-400 border-t-white rounded-full animate-spin"/> : <Printer size={20} />}
                     İŞLEMİ BİTİR, KAYDET VE ETİKET YAZDIR
                   </button>
                 ) : (
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <button 
                       onClick={() => window.print()}
-                      className="bg-slate-900 text-white font-black text-[12px] p-4 uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-slate-800 transition-colors shadow-sm"
+                      className="bg-slate-900 text-white font-black text-[12px] p-4 uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-slate-800 transition-colors shadow-sm rounded-sm"
                     >
                       <Printer size={18} /> TEKRAR YAZDIR
                     </button>
                     <button 
                       onClick={handleDownloadExcel}
-                      className="bg-emerald-600 text-white font-black text-[12px] p-4 uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-emerald-700 transition-colors shadow-sm"
+                      className="bg-emerald-600 text-white font-black text-[12px] p-4 uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-emerald-700 transition-colors shadow-sm rounded-sm"
                     >
                       <FileSpreadsheet size={18} /> EXCEL (CSV) İNDİR
                     </button>
                     <button 
                       onClick={() => window.location.reload()}
-                      className="col-span-2 bg-white border-2 border-slate-300 text-slate-700 font-black text-[12px] p-4 uppercase tracking-widest hover:border-[#dc3545] hover:text-[#dc3545] transition-colors"
+                      className="col-span-1 sm:col-span-2 bg-white border-2 border-slate-300 text-slate-700 font-black text-[12px] p-4 uppercase tracking-widest hover:border-[#dc3545] hover:text-[#dc3545] transition-colors rounded-sm"
                     >
                       YENİ SAYIM BAŞLAT
                     </button>
