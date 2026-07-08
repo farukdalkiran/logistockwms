@@ -40,7 +40,7 @@ export default function TransferScanPage() {
   
   // Operasyon State'leri
   const [activeTab, setActiveTab] = useState<'terminal' | 'camera'>('terminal');
-  const [scanMode, setScanMode] = useState<'add' | 'remove'>('add'); // EKLE veya ÇIKAR (Geri Al) Modu
+  const [scanMode, setScanMode] = useState<'add' | 'remove'>('add');
   const [scanInput, setScanInput] = useState("");
   const [selectedQty, setSelectedQty] = useState<number | string>(1);
   const [lastScanned, setLastScanned] = useState<{product: any, qtyChange: number, currentTotal: number, reqTotal: number, type: 'add'|'remove'} | null>(null);
@@ -195,13 +195,13 @@ export default function TransferScanPage() {
     }
   };
 
-  // 3. Ortak Barkod İşleme Motoru (EKLE / ÇIKAR Destekli)
   const processBarcode = async (rawBarcode: string, isCamera: boolean = false) => {
     if (!rawBarcode || isProcessing) return;
 
     if (isCamera) {
       const now = Date.now();
-      if (now - lastCameraScanTime.current < 1500) return;
+      // ÇÖZÜM: Mobil kamera hızı frenlendi. 3 saniyelik katı soğuma (cooldown) süresi eklendi.
+      if (now - lastCameraScanTime.current < 3000) return;
       lastCameraScanTime.current = now;
     }
 
@@ -212,7 +212,6 @@ export default function TransferScanPage() {
       let inputQty = typeof selectedQty === 'string' ? parseInt(selectedQty) || 1 : selectedQty;
       if (inputQty < 1) inputQty = 1;
 
-      // Koli (Box) Çözümleyici
       const { data: boxData } = await supabase
         .from("boxes")
         .select("product_id, quantity")
@@ -227,10 +226,8 @@ export default function TransferScanPage() {
         }
       }
 
-      // Ekleme mi Çıkarma mı (Yön Tayini)
       const qtyChange = scanMode === 'add' ? inputQty : -inputQty;
 
-      // Liste Kontrolü
       const itemIndex = transferItems.findIndex(i => i.products.barcode === targetBarcode);
       if (itemIndex === -1) {
         triggerFeedback('error', "HATA: Ürün bu listede yok!");
@@ -241,7 +238,6 @@ export default function TransferScanPage() {
       const currentCount = mode === 'outbound' ? item.sent_qty : item.received_qty;
       const proposedCount = currentCount + qtyChange;
 
-      // Sınır Kontrolleri
       if (proposedCount > item.requested_qty) {
         triggerFeedback('error', `AŞIM! İstenen: ${item.requested_qty} | Girmeye Çalıştığınız: ${proposedCount}`);
         return;
@@ -251,7 +247,6 @@ export default function TransferScanPage() {
         return;
       }
 
-      // Başarılı Güncelleme
       const newItems = [...transferItems];
       if (mode === 'outbound') newItems[itemIndex].sent_qty = proposedCount;
       else newItems[itemIndex].received_qty = proposedCount;
@@ -265,9 +260,8 @@ export default function TransferScanPage() {
         type: scanMode
       });
       triggerFeedback('success');
-      setSelectedQty(1); // Miktarı resetle
+      setSelectedQty(1); 
 
-      // Arka planda sessiz update
       supabase.from("transfer_items").update({
         sent_qty: mode === 'outbound' ? proposedCount : item.sent_qty,
         received_qty: mode === 'inbound' ? proposedCount : item.received_qty
@@ -294,7 +288,8 @@ export default function TransferScanPage() {
       html5QrCode = new Html5Qrcode("reader");
       html5QrCode.start(
         { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 250, height: 150 } }, 
+        // ÇÖZÜM: Kameranın saniyedeki tarama hızı (fps) düşürülerek kontrolsüz okumalar engellendi.
+        { fps: 4, qrbox: { width: 250, height: 150 } }, 
         (decodedText) => processBarcode(decodedText, true), 
         (errorMessage) => { /* Yoksay */ }
       ).catch(err => console.error("Kamera başlatılamadı:", err));
@@ -343,16 +338,22 @@ export default function TransferScanPage() {
       {/* BAŞLIK (Dark Heading) */}
       <div className="bg-[#0f172b] shadow-md shrink-0 border-b-4 border-[#dc3545] print:hidden">
         <div className="flex items-center justify-between p-4 border-b border-slate-800/60 max-w-7xl mx-auto w-full">
-          <button onClick={() => router.back()} className="text-slate-400 hover:text-white p-2 bg-slate-800/40 hover:bg-slate-800 transition-all rounded-sm">
+          <button onClick={() => router.back()} className="text-slate-400 hover:text-white p-2 bg-slate-800/40 hover:bg-slate-800 transition-all rounded-sm shrink-0">
             <ChevronLeft size={20} />
           </button>
-          <div className="flex items-center gap-2">
-            <TerminalSquare size={18} className="text-[#dc3545]" />
-            <span className="text-white text-[14px] sm:text-[15px] font-black uppercase tracking-widest">
-              Terminal Sayım Motoru
-            </span>
+          
+          <div className="flex flex-col sm:flex-row items-center gap-2 text-center sm:text-left">
+            {/* ÇÖZÜM: Görsel logo alanı eklendi (src yolunu kendi logonla değiştirebilirsin) */}
+            <div className="flex items-center gap-2">
+              <img src="/logo-placeholder.png" alt="Logo" className="h-6 w-auto object-contain hidden sm:block" onError={(e) => (e.currentTarget.style.display = 'none')} />
+              <TerminalSquare size={18} className="text-[#dc3545] sm:hidden" />
+              <span className="text-white text-[14px] sm:text-[15px] font-black uppercase tracking-widest line-clamp-1">
+                Terminal Sayım Motoru
+              </span>
+            </div>
           </div>
-          <div className="w-10" />
+          
+          <div className="w-10 shrink-0" />
         </div>
         <div className="bg-slate-950 py-2.5 px-4">
           <div className="max-w-7xl mx-auto w-full flex justify-between items-center text-[11px] font-bold uppercase tracking-wider">
@@ -414,7 +415,7 @@ export default function TransferScanPage() {
                 <span className="text-[12px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-0.5">
                   <Hash size={12}/> {activeTransfer.transfer_code}
                 </span>
-                <span className="text-[16px] md:text-[18px] font-black tracking-widest uppercase flex items-center gap-2">
+                <span className="text-[16px] md:text-[18px] font-black tracking-widest uppercase flex items-center gap-2 flex-wrap">
                   <span className="text-slate-300">{activeTransfer.fromName}</span>
                   <ArrowRight size={14} className="text-[#dc3545]"/>
                   <span className="text-white">{activeTransfer.toName}</span>
@@ -441,13 +442,13 @@ export default function TransferScanPage() {
                   onClick={() => setActiveTab('terminal')}
                   className={`flex-1 flex items-center justify-center gap-2 py-3 text-[12px] font-black uppercase tracking-widest transition-all ${activeTab === 'terminal' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
                 >
-                  <ScanLine size={16} /> Terminal Cihazı
+                  <ScanLine size={16} /> Terminal
                 </button>
                 <button 
                   onClick={() => setActiveTab('camera')}
                   className={`flex-1 flex items-center justify-center gap-2 py-3 text-[12px] font-black uppercase tracking-widest transition-all ${activeTab === 'camera' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
                 >
-                  <Smartphone size={16} /> Telefon Kamerası
+                  <Smartphone size={16} /> Kamera
                 </button>
               </div>
 
@@ -490,17 +491,17 @@ export default function TransferScanPage() {
                   </div>
                 )}
 
-                {/* Miktar Çarpanı */}
+                {/* ÇÖZÜM: Mobil taşma engellendi. Flex-wrap yapısına geçildi ve min-w-0 eklendi. */}
                 <div className="flex flex-col gap-2 border-t border-slate-800 pt-4 mt-2">
                   <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5"><Edit3 size={12}/> Adet Seçimi (Çarpan)</span>
                   
-                  <div className="grid grid-cols-6 gap-1.5 mb-2">
+                  <div className="flex flex-wrap gap-1.5 mb-2">
                     {qtyButtons.map(qty => (
                       <button
                         key={qty}
                         type="button"
                         onClick={() => { setSelectedQty(qty); setTimeout(() => scanInputRef.current?.focus(), 100); }}
-                        className={`py-3 text-[14px] font-black transition-all border rounded-sm ${
+                        className={`flex-1 min-w-[40px] py-3 text-[14px] font-black transition-all border rounded-sm ${
                           selectedQty === qty 
                             ? (scanMode === 'add' ? 'bg-emerald-600 border-emerald-500 text-white' : 'bg-[#dc3545] border-red-500 text-white')
                             : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
@@ -511,14 +512,14 @@ export default function TransferScanPage() {
                     ))}
                   </div>
 
-                  <div className="flex items-center gap-3 bg-slate-950 border border-slate-700 p-2 rounded-sm focus-within:border-slate-500 transition-colors">
-                    <span className="text-slate-500 text-[11px] font-black uppercase tracking-widest whitespace-nowrap pl-2">Manuel Adet:</span>
+                  <div className="flex items-center gap-3 bg-slate-950 border border-slate-700 p-2 rounded-sm focus-within:border-slate-500 transition-colors w-full overflow-hidden">
+                    <span className="text-slate-500 text-[11px] font-black uppercase tracking-widest whitespace-nowrap pl-2 shrink-0">Manuel Adet:</span>
                     <input 
                       type="number" 
                       min="1"
                       value={selectedQty}
                       onChange={e => setSelectedQty(e.target.value)}
-                      className="flex-1 bg-transparent text-white font-black text-[20px] text-right focus:outline-none pr-2"
+                      className="flex-1 bg-transparent text-white font-black text-[20px] text-right focus:outline-none pr-2 min-w-0 w-full"
                     />
                   </div>
                 </div>
@@ -547,7 +548,7 @@ export default function TransferScanPage() {
                         <span className={`text-[12px] font-black uppercase tracking-widest ${lastScanned.type === 'remove' ? 'text-[#dc3545]' : 'text-emerald-600'}`}>
                           {lastScanned.type === 'remove' ? `-${lastScanned.qtyChange} İPTAL EDİLDİ` : `+${lastScanned.qtyChange} EKLENDİ`}
                         </span>
-                        <div className="flex items-baseline gap-1">
+                        <div className="flex items-baseline gap-1 shrink-0">
                           <span className="text-[22px] font-black text-slate-900 leading-none">{lastScanned.currentTotal}</span>
                           <span className="text-[12px] font-bold text-slate-400">/ {lastScanned.reqTotal}</span>
                         </div>
@@ -567,8 +568,8 @@ export default function TransferScanPage() {
             </div>
 
             {/* SAĞ KOLON: ÜRÜN LİSTESİ */}
-            <div className="flex-1 bg-white border border-slate-300 shadow-md flex flex-col overflow-hidden">
-              <div className="bg-[#0f172b] px-4 py-3 flex justify-between items-center text-white">
+            <div className="flex-1 bg-white border border-slate-300 shadow-md flex flex-col overflow-hidden min-h-[400px]">
+              <div className="bg-[#0f172b] px-4 py-3 flex justify-between items-center text-white shrink-0">
                 <span className="text-[11px] font-black uppercase tracking-widest">Canlı Sayım Listesi</span>
               </div>
               

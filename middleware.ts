@@ -38,7 +38,7 @@ export async function middleware(req: NextRequest) {
 
   const path = req.nextUrl.pathname;
 
-  // Statik dosyaları, API rotalarını ve Next.js sistem dosyalarını taramadan muaf tut (Performans için)
+  // Statik dosyaları, API rotalarını ve Next.js sistem dosyalarını taramadan muaf tut (Performans)
   if (
     path.startsWith("/_next") ||
     path.startsWith("/favicon.ico") ||
@@ -47,24 +47,21 @@ export async function middleware(req: NextRequest) {
     return res;
   }
 
-  const isPublicPath = path.startsWith("/login") || path.startsWith("/terminal/login");
-
-  // 1. GİRİŞ YAPMAMIŞ KULLANICI KONTROLÜ (Tüm Sistem Kapalı Konumda)
-  if (!session && !isPublicPath) {
-    // Hangi portaldan (Web veya Terminal) girmeye çalıştığını tespit et ve doğru Login'e şutla
-    if (path.startsWith("/terminal")) {
-      return NextResponse.redirect(new URL("/terminal/login", req.url));
+  // 1. HİÇ OTURUM YOKSA (Terminal cihazı henüz bir yönetici tarafından şubeye kilitlenmemişse)
+  if (!session) {
+    // Güvenlik Duvarı: Cihaz yetkisizken Web Login (/login) hariç her yeri tamamen yasakla.
+    if (path !== "/login") {
+      return NextResponse.redirect(new URL("/login", req.url));
     }
-    return NextResponse.redirect(new URL("/login", req.url));
+    return res;
   }
 
-  // 2. GİRİŞ YAPMIŞ KULLANICI ve 72 SAAT KURALI (Zorunlu Re-Login)
+  // 2. YÖNETİCİ OTURUMU VARSA (Cihaz bir şubeye kilitliyse)
   if (session) {
     const authTimeCookie = req.cookies.get("wms_session_timestamp");
-    const MAX_SESSION_AGE = 72 * 60 * 60 * 1000; // Tam 3 Gün (Milisaniye bazında)
+    const MAX_SESSION_AGE = 72 * 60 * 60 * 1000; // 3 Gün
 
     if (!authTimeCookie) {
-      // Yeni giriş yapılmış. Sistem saatini güvenli httpOnly çerezine damgala.
       res.cookies.set("wms_session_timestamp", Date.now().toString(), {
         maxAge: 72 * 60 * 60,
         path: "/",
@@ -72,34 +69,41 @@ export async function middleware(req: NextRequest) {
         secure: process.env.NODE_ENV === "production",
       });
     } else {
-      // Çerez mevcut, yaşını hesapla
       const sessionAge = Date.now() - parseInt(authTimeCookie.value);
       if (sessionAge > MAX_SESSION_AGE) {
-        // 3 GÜN DOLDU! Supabase session'ı imha et, damgayı sil ve sisteme yeniden girişi zorunlu kıl.
         await supabase.auth.signOut();
         res.cookies.delete("wms_session_timestamp");
         return NextResponse.redirect(new URL("/login?reason=timeout", req.url));
       }
     }
 
-    // Giriş yapmış bir personel yanlışlıkla veya elle login rotalarına giderse onu sistemin içine geri çek
-    if (isPublicPath) {
-      if (path.startsWith("/terminal/login")) {
-        return NextResponse.redirect(new URL("/terminal/menu", req.url));
+    // A. Web Login Kalkanı
+    // Giriş yapmış cihaz manuel olarak /login rotasına giderse onu Management paneline it.
+    if (path === "/login") {
+      return NextResponse.redirect(new URL("/management", req.url));
+    }
+
+    // B. Terminal Zırhı ve Çapraz Geçiş Denetimi
+    if (path.startsWith("/terminal")) {
+      // Terminal Login sayfasına erişimi SERBEST bırak. (Personelin ID barkodunu okutabilmesi için)
+      if (path === "/terminal/login") {
+        return res;
       }
-      return NextResponse.redirect(new URL("/", req.url));
+
+      // EĞER personel login olmadan (URL'de empId parametresi olmadan) menüye veya operasyon ekranlarına 
+      // direkt girmeye çalışırsa, sistem onu acımasızca /terminal/login ekranına geri fırlatır.
+      if (!req.nextUrl.searchParams.has("empId")) {
+        return NextResponse.redirect(new URL("/terminal/login", req.url));
+      }
     }
   }
 
   return res;
 }
 
-// ZIRH MATRİSİ: Tarayıcının uğrayacağı her yolu izle ve middleware'den geçir.
+// ZIRH MATRİSİ
 export const config = {
   matcher: [
-    /*
-     * Tüm dizinleri kilitliyoruz. Sadece performans için _next ve statik dosyaları hariç bırakıyoruz.
-     */
     "/((?!_next/static|_next/image|favicon.ico).*)",
   ],
 };
