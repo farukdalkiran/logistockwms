@@ -603,7 +603,7 @@ export const Navbar = () => {
         <div className="container mx-auto 2xl:max-w-[1400px] h-full flex items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-6 lg:gap-8 h-full">
             <Link
-              href="/management"
+              href="/"
               className="flex-shrink-0 flex items-center justify-center cursor-pointer gap-2"
             >
               <Logo variant="primary" className="text-3xl" />

@@ -85,7 +85,7 @@ export default function LoginPage() {
 
       // Başarılıysa sisteme al
       setShowForceReset(false);
-      router.push('/management');
+      router.push('/');
       router.refresh();
     } catch (err: any) {
       setError('Şifre güncellenirken bir hata oluştu: ' + err.message);
