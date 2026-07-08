@@ -28,6 +28,14 @@ import {
   UserCog,
 } from "lucide-react";
 
+type SearchItem = {
+  name: string;
+  path: string;
+  parent: string | null;
+  moduleCode: string;
+  allowedRoles?: string[];
+};
+
 export const Navbar = () => {
   const { userProfile, isLoading } = useAuth();
 
@@ -50,7 +58,7 @@ export const Navbar = () => {
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
   }, []);
 
-  // VERİTABANINDAN GERÇEK ZAMANLI YETKİ ÇEKİCİ (Kilit Sorununun Kesin Çözümü)
+  // VERİTABANINDAN GERÇEK ZAMANLI YETKİ ÇEKİCİ
   useEffect(() => {
     const fetchRealPermissions = async () => {
       if (
@@ -118,7 +126,7 @@ export const Navbar = () => {
       if (dbPermissions.includes(moduleCode)) return true;
     }
 
-    // B. Hardcoded İzinler (Senin Orijinal Listen İçin Yedek Kalkan)
+    // B. Hardcoded İzinler
     if (allowedRoles) {
       if (allowedRoles.includes(userProfile.role)) return true;
       if (dbRoleName && allowedRoles.includes(dbRoleName)) return true;
@@ -127,7 +135,7 @@ export const Navbar = () => {
     return false;
   };
 
-  // 2. ANA MENÜ VE ROL İZİNLERİ (Orijinal Koduna Döndürüldü, Modül Kodları Eklendi)
+  // 2. ANA MENÜ VE ROL İZİNLERİ (Kullanılmayanlar Temizlendi)
   const rawNavLinks = [
     {
       name: "Ürün & Stok",
@@ -180,7 +188,7 @@ export const Navbar = () => {
         },
       ],
     },
-{
+    {
       name: "Mesai & İK",
       path: "/management/hr",
       icon: <Users size={18} />,
@@ -196,18 +204,6 @@ export const Navbar = () => {
         {
           name: "Canlı Takip",
           path: "/management/hr",
-          moduleCode: "hr",
-          allowedRoles: [
-            "Developer",
-            "Admin",
-            "İK Bölge Müdürü",
-            "Mağaza Müdürü",
-            "Depo Müdürü",
-          ],
-        },
-        {
-          name: "Vardiya Planlama",
-          path: "/management/hr/shifts",
           moduleCode: "hr",
           allowedRoles: [
             "Developer",
@@ -261,7 +257,7 @@ export const Navbar = () => {
             "Developer",
             "Admin",
             "İK Bölge Müdürü",
-            "Mağaza Müdürü", /* Müdürler sadece kendi şubesinin raporunu çeker */
+            "Mağaza Müdürü",
             "Depo Müdürü",
           ],
         },
@@ -337,8 +333,9 @@ export const Navbar = () => {
     },
   ];
 
-  const searchableLinks = rawNavLinks.flatMap((link) => {
-    const items = [
+  // Arama motorundaki Type Error kalıcı olarak çözüldü
+  const searchableLinks: SearchItem[] = rawNavLinks.flatMap((link) => {
+    const items: SearchItem[] = [
       {
         name: link.name,
         path: link.path,
@@ -486,7 +483,6 @@ export const Navbar = () => {
             <div className="w-px h-6 bg-slate-700 hidden lg:block mx-1"></div>
 
             <div className="flex items-center gap-3">
-              {/* Daha Tok ve WMS'e Uygun Destek İkonu */}
               <Link
                 href="/management/help"
                 className="flex items-center gap-2 hover:bg-slate-800/80 px-2.5 py-1.5 rounded-lg transition-colors group"
@@ -602,7 +598,7 @@ export const Navbar = () => {
         </div>
       </div>
 
-      {/* 2. KAT: MAIN BAR (Orijinal Tasarıma ve Font Büyüklüklerine Döndü) */}
+      {/* 2. KAT: MAIN BAR */}
       <nav className="bg-white/95 backdrop-blur-md h-20 border-b border-slate-200 relative z-40">
         <div className="container mx-auto 2xl:max-w-[1400px] h-full flex items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-6 lg:gap-8 h-full">
