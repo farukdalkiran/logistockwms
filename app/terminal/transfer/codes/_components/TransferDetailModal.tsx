@@ -289,7 +289,7 @@ export default function TransferDetailModal({ transfer, branchMap, onClose }: Pr
                               {item.received_qty || 0}
                             </span>
                             {isMissing ? (
-                              <AlertTriangle size={14} className="text-red-500 shrink-0" title="Eksik Teslimat!" />
+                              <AlertTriangle size={14} className="text-red-500 shrink-0" />
                             ) : (
                               <CheckCircle2 size={14} className="text-emerald-500 opacity-50 shrink-0" />
                             )}
