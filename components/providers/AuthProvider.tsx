@@ -42,12 +42,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             .single();
 
           if (profile && isMounted) {
+            // TypeScript'in dizi (Array) veya nesne (Object) algılama karmaşasını çözen güvenli okuma bloğu
+            const branchData = profile.branches as any;
+            const resolvedBranchName = Array.isArray(branchData) 
+              ? branchData[0]?.name 
+              : branchData?.name;
+
             setUserProfile({
               id: session.user.id,
               email: session.user.email || "",
               fullName: session.user.user_metadata?.full_name || "Faruk Dalkıran",
               role: profile.role || "Developer",
-              branchName: profile.branches?.name || "Şube Tanımsız",
+              branchName: resolvedBranchName || "Şube Tanımsız",
               isGlobalAdmin: profile.role === "Developer" || profile.role === "Admin",
             });
           }
