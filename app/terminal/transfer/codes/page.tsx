@@ -6,9 +6,9 @@ import { supabase } from "@/lib/supabase";
 import {
   ChevronLeft, TerminalSquare, UserCircle, MapPin, 
   ArrowRight, Layers, Clock, ChevronDown, ChevronUp,
-  Info, CalendarDays, BarChart3, AlertCircle, CheckCircle2, ChevronRight, Eye
+  Info, CalendarDays, BarChart3, AlertCircle, CheckCircle2, ChevronRight, Eye, PackageOpen, Truck
 } from "lucide-react";
-import TransferDetailModal from "./_components/TransferDetailModal"; // Modal bileşenimizi çağırıyoruz
+import TransferDetailModal from "./_components/TransferDetailModal"; 
 
 export type Transfer = {
   id: string;
@@ -110,15 +110,56 @@ export default function TransferCodesPage() {
     return branchMap[idOrName] || idOrName;
   };
 
-  const getStatusStyle = (status: string) => {
+  // ÇÖZÜM 1: Durum bazlı animasyonlu statü (Radar Ping / Pulse / Solid)
+  const getStatusBadge = (status: string) => {
     switch (status) {
-      case 'Bekliyor': return 'bg-amber-50 text-amber-800 border-amber-300';
-      case 'Toplaniyor': return 'bg-blue-50 text-blue-800 border-blue-300';
-      case 'Hazir': return 'bg-orange-50 text-orange-800 border-orange-300';
-      case 'Yolda': return 'bg-indigo-50 text-indigo-800 border-indigo-300';
-      case 'Tamamlandi': return 'bg-emerald-50 text-emerald-800 border-emerald-300';
-      case 'Iptal': return 'bg-red-50 text-red-800 border-red-300';
-      default: return 'bg-slate-100 text-slate-800 border-slate-300';
+      case 'Yolda': 
+        return (
+          <div className="flex items-center gap-2 bg-orange-50 text-orange-800 border border-orange-300 px-2 py-0.5 rounded-none w-fit">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-500 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-orange-600"></span>
+            </span>
+            <span className="text-[10px] font-black uppercase tracking-wider">Yolda / Transferde</span>
+          </div>
+        );
+      case 'Toplaniyor': 
+        return (
+          <div className="flex items-center gap-2 bg-blue-50 text-blue-800 border border-blue-300 px-2 py-0.5 rounded-none w-fit">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-pulse absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-600"></span>
+            </span>
+            <span className="text-[10px] font-black uppercase tracking-wider">Sayım / Toplama</span>
+          </div>
+        );
+      case 'Tamamlandi': 
+        return (
+          <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-none w-fit shadow-sm">
+            <CheckCircle2 size={12} className="text-emerald-600" />
+            <span className="text-[10px] font-black uppercase tracking-wider">Teslim / Tamamlandı</span>
+          </div>
+        );
+      case 'Bekliyor': 
+        return (
+          <div className="flex items-center gap-1.5 bg-amber-50 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-none w-fit">
+            <Clock size={12} className="text-amber-600" />
+            <span className="text-[10px] font-black uppercase tracking-wider">İşlem Bekliyor</span>
+          </div>
+        );
+      case 'Iptal': 
+        return (
+          <div className="flex items-center gap-1.5 bg-red-50 text-red-800 border border-red-300 px-2 py-0.5 rounded-none w-fit">
+            <AlertCircle size={12} className="text-red-600" />
+            <span className="text-[10px] font-black uppercase tracking-wider">İptal Edildi</span>
+          </div>
+        );
+      default: 
+        return (
+          <div className="flex items-center gap-1.5 bg-slate-100 text-slate-800 border border-slate-300 px-2 py-0.5 rounded-none w-fit">
+            <span className="text-[10px] font-black uppercase tracking-wider">{status}</span>
+          </div>
+        );
     }
   };
 
@@ -128,26 +169,41 @@ export default function TransferCodesPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 font-['Quicksand'] flex flex-col antialiased selection:bg-[#dc3545] selection:text-white pb-10">
+    <div className="min-h-screen bg-slate-100 font-['Quicksand'] flex flex-col antialiased selection:bg-[#dc3545] selection:text-white pb-10 relative">
       
-      {/* BAŞLIK (Dark Heading) */}
-      <div className="bg-[#0f172b] shadow-md shrink-0 border-b-4 border-[#dc3545]">
-        <div className="flex items-center justify-between p-4 border-b border-slate-800/60 max-w-7xl mx-auto w-full">
-          <button onClick={() => router.back()} className="text-slate-400 hover:text-white p-2 bg-slate-800/40 hover:bg-slate-800 border border-slate-700/50 rounded-none transition-all">
-            <ChevronLeft size={20} />
-          </button>
-          <div className="flex items-center gap-2">
-            <TerminalSquare size={18} className="text-[#dc3545]" />
-            <span className="text-white text-[14px] sm:text-[15px] font-black uppercase tracking-widest">
-              WMS / Transfer Yönetimi
-            </span>
+      {/* ÇÖZÜM 3: DEPO GÖRSELLİ DİNAMİK HERO HEADER */}
+      <div className="relative h-32 sm:h-40 shrink-0 border-b-4 border-[#dc3545] overflow-hidden group shadow-md">
+        <div 
+          className="absolute inset-0 bg-cover bg-center z-0 transition-transform duration-700 group-hover:scale-105"
+          style={{ backgroundImage: `url('https://img.magnific.com/free-vector/warehouse-interior-logistics-cargo-delivery_107791-1777.jpg?t=st=1783584649~exp=1783588249~hmac=e8964f146db5ae77a34bd16b1cf253f0d186adee6482861950eb6be361e6b722&w=1480')` }}
+        />
+        <div className="absolute inset-0 bg-slate-950/50 mix-blend-multiply z-10" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#0f172b] to-transparent z-10" />
+
+        <div className="relative z-20 w-full h-full p-4 sm:p-6 flex flex-col justify-between max-w-7xl mx-auto">
+          <div className="flex justify-between items-start">
+            <button onClick={() => router.back()} className="text-slate-300 hover:text-white bg-slate-900/50 hover:bg-[#dc3545] p-2 border border-slate-700 hover:border-red-400 transition-all backdrop-blur-sm min-w-[40px] min-h-[40px] flex items-center justify-center rounded-sm shrink-0 shadow-sm">
+              <ChevronLeft size={20} />
+            </button>
+            <div className="flex items-center gap-2 bg-slate-900/80 border border-slate-700 backdrop-blur-sm px-3 py-1.5 shadow-sm rounded-sm">
+              <UserCircle size={14} className="text-slate-400 shrink-0"/> 
+              <span className="text-[10px] font-black uppercase text-slate-200 tracking-widest truncate max-w-[120px] sm:max-w-none">{empName}</span>
+            </div>
           </div>
-          <div className="w-10" />
-        </div>
-        <div className="bg-slate-950 py-2.5 px-4">
-          <div className="max-w-7xl mx-auto w-full flex justify-between items-center text-[11px] font-bold uppercase tracking-wider">
-            <span className="text-slate-400 flex items-center gap-1.5 truncate max-w-[180px] sm:max-w-none"><UserCircle size={14} className="text-slate-600 shrink-0"/> {empName} ({empId})</span>
-            <span className="text-[#dc3545] flex items-center gap-1.5 truncate max-w-[180px] sm:max-w-none"><MapPin size={14} className="shrink-0"/> {branchName}</span>
+          
+          <div className="flex items-end gap-3 sm:gap-4 drop-shadow-md">
+            <div className="bg-[#dc3545] p-2.5 sm:p-3 shadow-lg border border-red-400/30 rounded-sm shrink-0">
+              <TerminalSquare size={24} className="text-white sm:w-7 sm:h-7" />
+            </div>
+            <div className="flex flex-col min-w-0">
+              <h1 className="text-white text-[16px] sm:text-[22px] font-black uppercase tracking-widest leading-none mb-1.5 truncate">
+                Transfer Yönetimi
+              </h1>
+              <div className="text-slate-300 text-[10px] sm:text-[11px] font-bold tracking-widest flex items-center gap-1.5 truncate">
+                <MapPin size={12} className="text-[#dc3545] shrink-0" />
+                <span className="truncate">AKTİF ŞUBE: {branchName}</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -206,7 +262,7 @@ export default function TransferCodesPage() {
               <div className="col-span-4 min-w-0">Transfer Rotası (Kaynak &gt; Hedef)</div>
               <div className="col-span-2 min-w-0">İşlem Durumu</div>
               <div className="col-span-2 min-w-0">Oluşturma Tarihi</div>
-              <div className="col-span-1 min-w-0 text-center">Genişlet</div>
+              <div className="col-span-1 min-w-0 text-center">Detay</div>
             </div>
 
             {/* Tablo Satırları */}
@@ -219,14 +275,15 @@ export default function TransferCodesPage() {
               return (
                 <div key={tx.id} className="border-b border-slate-200 last:border-0 hover:bg-slate-50/80 transition-all">
                   
+                  {/* ÇÖZÜM 2: Kusursuz Mobil Hizalama (Truncate ve Min-W Zırhları) */}
                   <div 
                     onClick={() => toggleExpand(tx.id)}
-                    className={`cursor-pointer grid grid-cols-1 md:grid-cols-12 gap-2 md:gap-4 p-4 items-center border-l-4 transition-all select-none ${isExpanded ? 'border-[#dc3545] bg-slate-50' : 'border-transparent hover:border-slate-300'}`}
+                    className={`cursor-pointer grid grid-cols-1 md:grid-cols-12 gap-2.5 md:gap-4 p-4 items-center border-l-4 transition-all select-none ${isExpanded ? 'border-[#dc3545] bg-slate-50' : 'border-transparent hover:border-slate-300'}`}
                   >
                     {/* Transfer Kodu */}
                     <div className="col-span-1 md:col-span-3 flex items-center justify-between md:block min-w-0">
-                      <span className="font-black text-[14px] sm:text-[15px] text-slate-900 tracking-widest block truncate">{tx.transfer_code}</span>
-                      <span className="md:hidden text-slate-400 p-1 bg-white border border-slate-200 shadow-sm">
+                      <span className="font-black text-[15px] sm:text-[16px] text-slate-900 tracking-widest block truncate">{tx.transfer_code}</span>
+                      <span className="md:hidden text-slate-400 p-1.5 bg-white border border-slate-200 shadow-sm shrink-0">
                         {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                       </span>
                     </div>
@@ -234,19 +291,17 @@ export default function TransferCodesPage() {
                     {/* Rota Kolonu */}
                     <div className="col-span-1 md:col-span-4 flex items-center gap-2 text-[12px] font-bold text-slate-600 min-w-0">
                       <span className="md:hidden text-slate-400 text-[10px] font-black uppercase tracking-wider shrink-0 w-12">Rota:</span>
-                      <div className="flex items-center gap-1.5 min-w-0 truncate">
-                        <span className="truncate bg-white border border-slate-200 px-2 py-0.5 text-slate-800 md:border-none md:bg-transparent md:p-0">{fromName}</span>
+                      <div className="flex items-center gap-1.5 min-w-0 w-full">
+                        <span className="truncate bg-white border border-slate-200 px-2 py-0.5 text-slate-800 md:border-none md:bg-transparent md:p-0 min-w-0" title={fromName}>{fromName}</span>
                         <ArrowRight size={13} className="text-[#dc3545] shrink-0" />
-                        <span className="truncate bg-white border border-slate-200 px-2 py-0.5 text-slate-800 md:border-none md:bg-transparent md:p-0">{toName}</span>
+                        <span className="truncate bg-white border border-slate-200 px-2 py-0.5 text-slate-800 md:border-none md:bg-transparent md:p-0 min-w-0" title={toName}>{toName}</span>
                       </div>
                     </div>
 
-                    {/* Durum Kolonu */}
-                    <div className="col-span-1 md:col-span-2 flex items-center gap-2 md:block min-w-0">
+                    {/* Durum Kolonu (Animasyonlu) */}
+                    <div className="col-span-1 md:col-span-2 flex items-center gap-2 md:block min-w-0 pt-1 md:pt-0">
                       <span className="md:hidden text-slate-400 text-[10px] font-black uppercase tracking-wider shrink-0 w-12">Durum:</span>
-                      <span className={`px-2 py-0.5 text-[10px] font-black uppercase border tracking-wider shrink-0 ${getStatusStyle(tx.status)}`}>
-                        {tx.status}
-                      </span>
+                      {getStatusBadge(tx.status)}
                     </div>
 
                     {/* Zaman Kolonu */}
@@ -270,44 +325,44 @@ export default function TransferCodesPage() {
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                         {/* Sol Kart: Güzergah */}
                         <div className="bg-white p-3.5 border border-slate-200 shadow-sm flex flex-col justify-between min-w-0">
-                          <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-100 pb-1 mb-2 block">Detaylı Güzergah</span>
-                          <div className="space-y-1.5 text-[12px] font-bold">
-                            <div className="flex justify-between items-center gap-2">
+                          <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-100 pb-1 mb-2 block flex items-center gap-1.5"><Truck size={12}/> Detaylı Güzergah</span>
+                          <div className="space-y-1.5 text-[12px] font-bold min-w-0">
+                            <div className="flex justify-between items-center gap-2 min-w-0">
                               <span className="text-slate-400 shrink-0">Çıkış Noktası:</span>
-                              <span className="text-slate-900 truncate text-right">{fromName}</span>
+                              <span className="text-slate-900 truncate text-right min-w-0" title={fromName}>{fromName}</span>
                             </div>
-                            <div className="flex justify-between items-center gap-2">
-                              <span className="text-slate-400 shrink-0">Teslim Noktası:</span>
-                              <span className="text-slate-900 truncate text-right">{toName}</span>
+                            <div className="flex justify-between items-center gap-2 min-w-0">
+                              <span className="text-slate-400 shrink-0">Varış Noktası:</span>
+                              <span className="text-slate-900 truncate text-right min-w-0" title={toName}>{toName}</span>
                             </div>
                           </div>
                         </div>
 
                         {/* Orta Kart: Hacim ve Sorumlu */}
                         <div className="bg-white p-3.5 border border-slate-200 shadow-sm flex flex-col justify-between min-w-0">
-                          <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-100 pb-1 mb-2 block">Operasyon Verisi</span>
-                          <div className="space-y-1.5 text-[12px] font-bold">
-                            <div className="flex justify-between items-center">
-                              <span className="text-slate-400 flex items-center gap-1"><Layers size={12}/> Toplam Adet:</span>
-                              <span className="bg-slate-900 text-white font-black px-1.5 py-0.5 text-[11px]">{totalQty} Ürün</span>
+                          <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-100 pb-1 mb-2 block flex items-center gap-1.5"><Info size={12}/> Operasyon Verisi</span>
+                          <div className="space-y-1.5 text-[12px] font-bold min-w-0">
+                            <div className="flex justify-between items-center min-w-0 gap-2">
+                              <span className="text-slate-400 flex items-center gap-1 shrink-0"><Layers size={12}/> Toplam Adet:</span>
+                              <span className="bg-slate-900 text-white font-black px-1.5 py-0.5 text-[11px] shrink-0">{totalQty} Ürün</span>
                             </div>
-                            <div className="flex justify-between items-center gap-2">
-                              <span className="text-slate-400 flex items-center gap-1"><UserCircle size={12}/> Oluşturan:</span>
-                              <span className="text-slate-900 truncate text-right">{tx.creator?.full_name || "Otomatik Sistem"}</span>
+                            <div className="flex justify-between items-center gap-2 min-w-0">
+                              <span className="text-slate-400 flex items-center gap-1 shrink-0"><UserCircle size={12}/> Oluşturan:</span>
+                              <span className="text-slate-900 truncate text-right min-w-0" title={tx.creator?.full_name || "Sistem"}>{tx.creator?.full_name || "Sistem"}</span>
                             </div>
                           </div>
                         </div>
 
                         {/* Sağ Kart: Tarih / Saat Damgası */}
                         <div className="bg-white p-3.5 border border-slate-200 shadow-sm flex flex-col justify-between min-w-0">
-                          <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-100 pb-1 mb-2 block">Zaman Damgası</span>
-                          <div className="flex items-center gap-2.5 text-[12px] font-bold text-slate-800">
+                          <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-100 pb-1 mb-2 block flex items-center gap-1.5"><Clock size={12}/> Zaman Damgası</span>
+                          <div className="flex items-center gap-2.5 text-[12px] font-bold text-slate-800 min-w-0 mt-1">
                             <CalendarDays size={18} className="text-slate-400 shrink-0" />
                             <div className="flex flex-col min-w-0">
-                              <span className="text-slate-900 tracking-wider">
+                              <span className="text-slate-900 tracking-wider truncate">
                                 {new Date(tx.created_at).toLocaleDateString("tr-TR")}
                               </span>
-                              <span className="text-slate-400 text-[10px] font-medium tracking-widest">
+                              <span className="text-slate-400 text-[10px] font-medium tracking-widest truncate">
                                 SAAT: {new Date(tx.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}
                               </span>
                             </div>
@@ -321,7 +376,7 @@ export default function TransferCodesPage() {
                           onClick={() => handleOpenDetails(tx)}
                           className="bg-[#dc3545] hover:bg-red-700 text-white flex items-center gap-2 px-6 py-2.5 rounded-none font-black text-[11px] uppercase tracking-widest transition-all shadow-md hover:shadow-lg active:scale-95"
                         >
-                          <Eye size={16} /> İçeriği ve Detayları Gör
+                          <PackageOpen size={16} /> İçeriği ve Detayları Gör
                         </button>
                       </div>
                     </div>

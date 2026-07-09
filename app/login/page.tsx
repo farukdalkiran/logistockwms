@@ -52,7 +52,7 @@ export default function LoginPage() {
       }
 
       // Şifre normalse doğrudan sisteme al
-      router.push('/management');
+      router.push('/');
       router.refresh();
     } catch (err: any) {
       setError('Giriş başarısız. Lütfen bilgilerinizi kontrol ediniz.');

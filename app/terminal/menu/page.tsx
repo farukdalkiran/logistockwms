@@ -79,7 +79,7 @@ export default function TerminalMenuPage() {
   const handleLogout = () => {
     localStorage.removeItem("terminal_employee_id");
     localStorage.removeItem("terminal_employee_name");
-    router.push("/management");
+    router.push("/");
   };
 
   const handleNavigate = (path: string) => {
@@ -111,12 +111,12 @@ export default function TerminalMenuPage() {
           link: "/terminal/transfer/codes",
         },
         {
-          label: "LGS Transfer Sayımı",
+          label: "LGS-MNS Transfer Sayımı",
           icon: ArrowDownToLine,
           link: "/terminal/transfer/scan",
         },
         {
-          label: "Kayıtsız Transfer Sayımı",
+          label: "Serbest Transfer Sayımı",
           icon: ArrowUpFromLine,
           link: "/terminal/transfer/manual-scan",
         },
