@@ -147,7 +147,7 @@ export default function TerminalMenuPage() {
         {
           label: "Ürün Raflama",
           icon: ArchiveRestore,
-          link: "/terminal/inventory/shelving",
+          link: "/terminal/inventory/putaway",
         },
         {
           label: "Ürün Raftan Kaldır",
