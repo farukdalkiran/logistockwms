@@ -2,9 +2,10 @@
 
 import { useState, useRef, useEffect, FormEvent } from "react";
 import { 
-  getShipmentByDeliveryNumber, 
+  getShipmentsByDeliveryNumber, 
   saveArasTracking, 
-  getProcessedExportData 
+  getProcessedExportData,
+  getFullProcessedExportData
 } from "@/app/actions/aras-integration";
 import ExcelUploadDrawer from "./ExcelUploadDrawer";
 
@@ -22,8 +23,17 @@ interface ShipmentData {
   region: string;
   postal_code: string;
   delivery_number: string;
+  sd_document: string;
   aras_tracking_number: string | null;
   is_processed_aras: boolean;
+}
+
+interface ActiveGroupData {
+  records: ShipmentData[];
+  count: number;
+  primary: ShipmentData;
+  sdDocumentsMatch: boolean;
+  uniqueSdDocuments: string[];
 }
 
 export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps) {
@@ -32,14 +42,13 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
   const [deliveryNo, setDeliveryNo] = useState("");
   const [trackingNo, setTrackingNo] = useState("");
   
-  const [activeShipment, setActiveShipment] = useState<ShipmentData | null>(null);
+  const [activeGroup, setActiveGroup] = useState<ActiveGroupData | null>(null);
   const [loading, setLoading] = useState(false);
   const [recentScans, setRecentScans] = useState<ShipmentData[]>([]);
   
   const [uiStatus, setUiStatus] = useState<"idle" | "success" | "error" | "warning">("idle");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   
-  // Kopyalama işlemi için görsel geribildirim state'i
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   const deliveryRef = useRef<HTMLInputElement>(null);
@@ -61,7 +70,6 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     setStatusMessage(msg);
   };
 
-  // Tek Tıkla Kopyalama Fonksiyonu
   const handleCopy = (text: string, fieldId: string) => {
     if (!text) return;
     navigator.clipboard.writeText(text);
@@ -77,15 +85,32 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     setUiStatus("idle");
     setStatusMessage(null);
 
-    const result = await getShipmentByDeliveryNumber(deliveryNo.trim());
+    const result = await getShipmentsByDeliveryNumber(deliveryNo.trim());
 
-    if (result.success && result.data) {
-      if (result.data.is_processed_aras) {
-        triggerFeedback("warning", `İHLAL: ${deliveryNo} numaralı sipariş daha önce eşleştirilmiş! (Takip: ${result.data.aras_tracking_number})`);
+    if (result.success && result.data && result.data.length > 0) {
+      const records = result.data as ShipmentData[];
+      
+      // Eğer kayıtlardan herhangi biri daha önce kargolanmışsa uyar
+      const alreadyProcessed = records.find(r => r.is_processed_aras);
+      
+      if (alreadyProcessed) {
+        triggerFeedback("warning", `İHLAL: ${deliveryNo} numaralı sipariş daha önce eşleştirilmiş! (Takip: ${alreadyProcessed.aras_tracking_number})`);
         setDeliveryNo("");
         deliveryRef.current?.focus();
       } else {
-        setActiveShipment(result.data);
+        // SD Document Kontrolü
+        const sdDocuments = records.map(r => r.sd_document).filter(Boolean);
+        const uniqueSdDocuments = Array.from(new Set(sdDocuments));
+        const sdDocumentsMatch = uniqueSdDocuments.length === 1;
+
+        setActiveGroup({
+          records,
+          count: records.length,
+          primary: records[0],
+          sdDocumentsMatch,
+          uniqueSdDocuments
+        });
+        
         setTimeout(() => trackingRef.current?.focus(), 50);
       }
     } else {
@@ -98,15 +123,16 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
 
   const handleTrackingScan = async (e: FormEvent) => {
     e.preventDefault();
-    if (!activeShipment || !trackingNo.trim() || loading) return;
+    if (!activeGroup || !trackingNo.trim() || loading) return;
 
     setLoading(true);
-    const result = await saveArasTracking(activeShipment.id, trackingNo.trim(), employeeId);
+    // Veritabanındaki eşleşen TÜM delivery_number satırlarını tek seferde günceller
+    const result = await saveArasTracking(activeGroup.primary.delivery_number, trackingNo.trim(), employeeId);
 
     if (result.success) {
-      triggerFeedback("success", `EŞLEŞTİRME BAŞARILI: ${activeShipment.customer_name}`);
-      setRecentScans(prev => [{...activeShipment, aras_tracking_number: trackingNo.trim(), is_processed_aras: true}, ...prev].slice(0, 8));
-      setActiveShipment(null);
+      triggerFeedback("success", `EŞLEŞTİRME BAŞARILI: ${activeGroup.primary.customer_name} (${activeGroup.count} Kalem)`);
+      setRecentScans(prev => [{...activeGroup.primary, aras_tracking_number: trackingNo.trim(), is_processed_aras: true}, ...prev].slice(0, 8));
+      setActiveGroup(null);
       setDeliveryNo("");
       setTrackingNo("");
       setTimeout(() => deliveryRef.current?.focus(), 50);
@@ -119,7 +145,7 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
   };
 
   const handleCancel = () => {
-    setActiveShipment(null);
+    setActiveGroup(null);
     setTrackingNo("");
     setDeliveryNo("");
     setUiStatus("idle");
@@ -127,7 +153,7 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     deliveryRef.current?.focus();
   };
 
-  const exportToExcel = async () => {
+  const exportBasicExcel = async () => {
     const result = await getProcessedExportData();
     if (!result.success || !result.data || result.data.length === 0) {
       alert("İndirilecek işlenmiş kayıt bulunamadı.");
@@ -138,11 +164,37 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     const rows = result.data.map((r: any) => `${r.delivery_number};${r.aras_tracking_number}`).join("\n");
     const csvContent = "\uFEFF" + headers + rows;
 
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    downloadCSV(csvContent, `LEGO_Temel_Cikti_${new Date().toISOString().split("T")[0]}.csv`);
+  };
+
+  const exportFullExcel = async () => {
+    const result = await getFullProcessedExportData();
+    if (!result.success || !result.data || result.data.length === 0) {
+      alert("İndirilecek işlenmiş kayıt bulunamadı.");
+      return;
+    }
+
+    // Gelen datanın tüm anahtarlarını kolon başlığı olarak çıkarır
+    const keys = Object.keys(result.data[0]);
+    const headers = keys.join(";") + "\n";
+    const rows = result.data.map((row: any) => {
+      return keys.map(k => {
+        let val = row[k];
+        if (val === null || val === undefined) val = "";
+        return `"${val.toString().replace(/"/g, '""')}"`; // Veri içindeki noktalı virgülleri korumak için
+      }).join(";");
+    }).join("\n");
+
+    const csvContent = "\uFEFF" + headers + rows;
+    downloadCSV(csvContent, `LEGO_FULL_VERI_${new Date().toISOString().split("T")[0]}.csv`);
+  };
+
+  const downloadCSV = (content: string, fileName: string) => {
+    const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `LEGO_Eksik_Parca_Kargo_${new Date().toISOString().split("T")[0]}.csv`;
+    link.download = fileName;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -157,7 +209,6 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     }
   };
 
-  // Kopyalama İkonu Bileşeni
   const CopyIcon = ({ fieldId, textToCopy }: { fieldId: string, textToCopy: string }) => (
     <button 
       type="button"
@@ -177,10 +228,9 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     <>
       <div className="w-full flex flex-col gap-6 text-slate-800">
         
-        {/* Modern Aydınlık Tematik Header (Sıfır Taşma) */}
+        {/* Modern Aydınlık Tematik Header */}
         <div className="w-full bg-white border-2 border-slate-200 border-l-8 border-[#dc3545] p-4 flex flex-col md:flex-row items-start md:items-center gap-4 rounded-none shadow-sm">
           
-          {/* Kare Görsel Modülü */}
           <div className="w-24 h-24 sm:w-28 sm:h-28 shrink-0 bg-slate-50 border-2 border-slate-200 p-1">
             <img 
               src="https://img.magnific.com/premium-vector/two-colorful-building-blocks-are-lying-white-background_96318-192043.jpg?semt=ais_hybrid&w=740&q=80" 
@@ -189,7 +239,6 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
             />
           </div>
 
-          {/* Başlık ve Info Box */}
           <div className="flex-1 min-w-0 flex flex-col justify-center w-full">
             <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-1 sm:mb-2">
               <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-widest uppercase truncate">
@@ -204,8 +253,7 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
             </p>
           </div>
           
-          {/* Aksiyon Butonları (Mobil Uyumlu) */}
-          <div className="w-full md:w-auto shrink-0 flex flex-col sm:flex-row gap-3">
+          <div className="w-full xl:w-auto shrink-0 flex flex-col sm:flex-row gap-3">
             <button 
               onClick={() => setIsExcelOpen(true)}
               className="w-full sm:w-auto min-h-[48px] bg-slate-100 hover:bg-slate-200 text-slate-900 px-6 font-black uppercase tracking-wider transition-colors flex justify-center items-center gap-2 border-2 border-slate-300 rounded-none"
@@ -214,16 +262,22 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
               <span>EXCEL YÜKLE</span>
             </button>
             <button 
-              onClick={exportToExcel}
+              onClick={exportBasicExcel}
               className="w-full sm:w-auto min-h-[48px] bg-white hover:bg-slate-50 text-[#dc3545] px-6 font-black uppercase tracking-wider transition-colors flex justify-center items-center gap-2 border-2 border-[#dc3545] rounded-none"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-              <span>GÜN SONU (CSV)</span>
+              <span>GÜN SONU (TEMEL)</span>
+            </button>
+            <button 
+              onClick={exportFullExcel}
+              className="w-full sm:w-auto min-h-[48px] bg-slate-800 hover:bg-slate-900 text-white px-6 font-black uppercase tracking-wider transition-colors flex justify-center items-center gap-2 border-2 border-slate-900 rounded-none shadow-none"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+              <span>TÜM VERİYİ İNDİR</span>
             </button>
           </div>
         </div>
 
-        {/* Ana İçerik Grid Yapısı */}
         <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           
           {/* SOL KOLON: Aktif İşlem Modülü */}
@@ -239,8 +293,7 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
               </div>
             )}
 
-            {/* ADIM 1: Delivery Kodu */}
-            <div className={`transition-opacity duration-200 ${activeShipment ? "opacity-30 pointer-events-none" : "opacity-100"} w-full`}>
+            <div className={`transition-opacity duration-200 ${activeGroup ? "opacity-30 pointer-events-none" : "opacity-100"} w-full`}>
               <label className="block text-sm font-black text-slate-600 uppercase tracking-widest mb-3 border-b-2 border-slate-200 pb-2">
                 1. ADIM: SİPARİŞ / DELIVERY NO
               </label>
@@ -250,14 +303,14 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
                   type="text"
                   value={deliveryNo}
                   onChange={(e) => setDeliveryNo(e.target.value)}
-                  disabled={loading || activeShipment !== null}
+                  disabled={loading || activeGroup !== null}
                   className="flex-1 min-h-[56px] bg-white border-2 border-slate-300 px-4 sm:px-6 text-xl sm:text-2xl font-black text-slate-900 focus:outline-none focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] disabled:bg-slate-100 rounded-none shadow-inner uppercase placeholder:text-slate-300 w-full min-w-0"
                   placeholder="BARKOD OKUTUNUZ"
                   autoComplete="off"
                 />
                 <button 
                   type="submit" 
-                  disabled={loading || !deliveryNo.trim() || activeShipment !== null}
+                  disabled={loading || !deliveryNo.trim() || activeGroup !== null}
                   className="w-full sm:w-auto min-h-[56px] px-8 sm:px-12 bg-[#dc3545] hover:bg-red-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-black text-xl uppercase tracking-widest transition-colors rounded-none border-2 border-red-800 shadow-none shrink-0"
                 >
                   SORGULA
@@ -265,16 +318,25 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
               </form>
             </div>
 
-            {/* ADIM 2: Aktif Sipariş & Takip Kodu Girişi */}
-            {activeShipment && (
+            {/* ADIM 2: Aktif Sipariş Detayları */}
+            {activeGroup && (
               <div className="flex flex-col gap-0 animate-in slide-in-from-bottom-2 fade-in duration-200 bg-white border-2 border-slate-300 shadow-sm relative rounded-none w-full min-w-0">
                 <div className="absolute top-0 left-0 w-[6px] h-full bg-[#dc3545]"></div>
 
-                {/* Detaylı Müşteri & Lokasyon Paneli */}
+                {/* Çoklu Kayıt ve SD Document Analizi Lojiği */}
+                <div className="bg-slate-50 border-b-2 border-slate-200 p-4 pl-6 sm:pl-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                   <div className="flex items-center gap-2">
+                     <span className="bg-[#dc3545] text-white px-3 py-1 font-black text-sm">{activeGroup.count} ADET</span>
+                     <span className="text-xs font-bold text-slate-600 uppercase tracking-widest">Kayıt Bulundu (Toplu Güncellenecek)</span>
+                   </div>
+                   <div className={`px-3 py-1 text-xs font-black uppercase tracking-widest border-2 ${activeGroup.sdDocumentsMatch ? 'bg-green-100 text-green-800 border-green-300' : 'bg-orange-100 text-orange-800 border-orange-300'}`}>
+                     SD DOCUMENT: {activeGroup.sdDocumentsMatch ? `TÜMÜ EŞLEŞİYOR (${activeGroup.uniqueSdDocuments[0] || 'BOŞ'})` : 'FARKLI KODLAR TESPİT EDİLDİ'}
+                   </div>
+                </div>
+
                 <div className="p-5 sm:p-6 pl-6 sm:pl-8 w-full">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full min-w-0">
                     
-                    {/* Alıcı Bilgi Kartı */}
                     <div className="flex flex-col min-w-0 bg-slate-50 border-2 border-slate-200 p-4 sm:p-5">
                       <div className="flex items-center gap-2 mb-4 border-b-2 border-slate-200 pb-2">
                         <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
@@ -284,21 +346,20 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
                       <div className="mb-4">
                         <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Ad Soyad</p>
                         <div className="flex items-stretch justify-between bg-white border border-slate-200 p-2 min-h-[44px]">
-                          <span className="flex items-center text-base sm:text-lg font-black text-slate-900 uppercase break-words leading-tight truncate px-1">{activeShipment.customer_name}</span>
-                          <CopyIcon fieldId="name" textToCopy={activeShipment.customer_name} />
+                          <span className="flex items-center text-base sm:text-lg font-black text-slate-900 uppercase break-words leading-tight truncate px-1">{activeGroup.primary.customer_name}</span>
+                          <CopyIcon fieldId="name" textToCopy={activeGroup.primary.customer_name} />
                         </div>
                       </div>
 
                       <div>
-                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Telefon Numarası</p>
+                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Telefon Numarası (Sadece 5'ten İtibaren)</p>
                         <div className="flex items-stretch justify-between bg-white border border-slate-200 p-2 min-h-[44px]">
-                          <span className="flex items-center text-sm sm:text-base font-bold font-mono text-slate-700 tracking-tight truncate px-1">{activeShipment.mobile_number}</span>
-                          <CopyIcon fieldId="phone" textToCopy={activeShipment.mobile_number} />
+                          <span className="flex items-center text-sm sm:text-base font-bold font-mono text-slate-700 tracking-tight truncate px-1">{activeGroup.primary.mobile_number}</span>
+                          <CopyIcon fieldId="phone" textToCopy={activeGroup.primary.mobile_number ? activeGroup.primary.mobile_number.substring(activeGroup.primary.mobile_number.indexOf('5')) : ""} />
                         </div>
                       </div>
                     </div>
 
-                    {/* Lokasyon Bilgi Kartı */}
                     <div className="flex flex-col min-w-0 bg-slate-50 border-2 border-slate-200 p-4 sm:p-5">
                       <div className="flex items-center gap-2 mb-4 border-b-2 border-slate-200 pb-2">
                         <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path strokeLinecap="square" strokeWidth="2.5" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
@@ -306,25 +367,30 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
                       </div>
 
                       <div className="mb-4">
-                         <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Açık Adres & İl/İlçe</p>
+                         <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Açık Adres (Sokak/Cadde)</p>
                          <div className="flex items-stretch justify-between bg-white border border-slate-200 p-2">
-                            <div className="flex flex-col justify-center min-w-0 px-1 py-1">
-                               <span className="text-xs sm:text-sm font-bold text-slate-800 uppercase leading-snug break-words">
-                                 {activeShipment.street} {activeShipment.street_2}
-                               </span>
-                               <span className="font-black text-slate-900 text-sm uppercase break-words mt-1">
-                                 {activeShipment.city} / {activeShipment.region}
-                               </span>
-                            </div>
-                            <CopyIcon fieldId="address" textToCopy={`${activeShipment.street} ${activeShipment.street_2} ${activeShipment.city} / ${activeShipment.region}`} />
+                            <span className="flex items-center text-xs sm:text-sm font-bold text-slate-800 uppercase leading-snug break-words px-1">
+                              {activeGroup.primary.street} {activeGroup.primary.street_2}
+                            </span>
+                            <CopyIcon fieldId="address" textToCopy={`${activeGroup.primary.street || ''} ${activeGroup.primary.street_2 || ''}`.trim()} />
+                         </div>
+                      </div>
+
+                      <div className="mb-4">
+                         <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">İl / İlçe</p>
+                         <div className="flex items-stretch justify-between bg-white border border-slate-200 p-2">
+                            <span className="flex items-center font-black text-slate-900 text-sm uppercase break-words px-1">
+                              {activeGroup.primary.city} / {activeGroup.primary.region}
+                            </span>
+                            <CopyIcon fieldId="city" textToCopy={`${activeGroup.primary.city || ''} / ${activeGroup.primary.region || ''}`} />
                          </div>
                       </div>
 
                       <div className="mt-auto">
-                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Posta Kodu</p>
+                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Özel Formatlı Posta Kodu</p>
                         <div className="flex items-stretch justify-between bg-white border border-slate-200 p-2 min-h-[44px]">
-                          <span className="flex items-center text-sm sm:text-base font-black font-mono text-slate-900 px-1">{activeShipment.postal_code || "YOK"}</span>
-                          <CopyIcon fieldId="postal" textToCopy={activeShipment.postal_code || ""} />
+                          <span className="flex items-center text-sm sm:text-base font-black font-mono text-slate-900 px-1">{activeGroup.primary.postal_code || "YOK"}</span>
+                          <CopyIcon fieldId="postal" textToCopy={activeGroup.primary.postal_code ? `Posta Kodu ${activeGroup.primary.postal_code}` : "Posta Kodu YOK"} />
                         </div>
                       </div>
                     </div>
@@ -382,7 +448,7 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
               {recentScans.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-400 p-8 text-center">
                   <svg className="w-10 h-10 mb-4 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                  <span className="text-xs uppercase tracking-widest font-black">BEKLEMEDE</span>
+                  <span className="text-[11px] uppercase tracking-widest font-black">BEKLEMEDE</span>
                 </div>
               ) : (
                 <ul className="flex flex-col divide-y-2 divide-slate-200 w-full">

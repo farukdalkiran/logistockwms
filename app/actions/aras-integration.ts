@@ -35,8 +35,12 @@ export async function getShipmentByDeliveryNumber(deliveryNumber: string) {
   }
 }
 
-export async function saveArasTracking(id: string, trackingNumber: string, employeeId: string) {
+// app/actions/aras-integration.ts içindeki saveArasTracking fonksiyonu:
+
+export async function saveArasTracking(deliveryNumber: string, trackingNumber: string, employeeId: string) {
   try {
+    // WMS KURALI: Aynı siparişe (delivery_number) ait birden fazla kalem olabilir.
+    // ID yerine delivery_number kullanarak tüm eşleşen kalemleri (satırları) aynı anda güncelliyoruz.
     const { error } = await supabaseAdmin
       .from("erp_raw_shipments")
       .update({
@@ -45,7 +49,7 @@ export async function saveArasTracking(id: string, trackingNumber: string, emplo
         processed_at: new Date().toISOString(),
         uploaded_by: employeeId
       })
-      .eq("id", id);
+      .eq("delivery_number", deliveryNumber); 
 
     if (error) return { success: false, error: "Kayıt güncellenemedi." };
 
