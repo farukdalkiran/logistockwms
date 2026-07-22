@@ -27,32 +27,15 @@ export default function BarcodeScanner({
   const inputRef = useRef<HTMLInputElement>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const fetchStats = async () => {
-    const now = new Date();
-    const startOfDay = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate()
-    ).toISOString();
-
-    let query = supabase
-      .from("attendance")
-      .select("id, check_out_time")
-      .gte("check_in_time", startOfDay);
-
-    if (branchId) query = query.eq("branch_id", branchId);
-
-    const { data } = await query;
-
-  };
-
   useEffect(() => {
-    fetchStats();
+    // Terminal açıldığında otomatik odaklan
     inputRef.current?.focus();
 
+    // WMS Kiosk Lojiği: Ekranda nereye tıklanırsa tıklansın odak inputta kalsın
     const handleGlobalClick = () => inputRef.current?.focus();
     window.addEventListener("click", handleGlobalClick);
 
+    // Sadece Realtime tetikleyicisi olarak kullanıyoruz, ölü data fetch işlemi kaldırıldı
     const realtimeChannel = supabase
       .channel("attendance_realtime_sync")
       .on(
@@ -64,7 +47,6 @@ export default function BarcodeScanner({
           filter: branchId ? `branch_id=eq.${branchId}` : undefined,
         },
         () => {
-          fetchStats();
           router.refresh();
         }
       )
@@ -95,7 +77,6 @@ export default function BarcodeScanner({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // 1. O anki değeri değişkene al (Data Loss önlemi)
     const currentId = terminalId;
 
     if (currentId.length !== 5) {
@@ -104,44 +85,24 @@ export default function BarcodeScanner({
       return;
     }
 
-    // 2. KESİNTİSİZ HIZ: İstek başlamadan inputu hemen boşalt ki arkadan okutma devam etsin!
+    // KESİNTİSİZ HIZ: İstek başlamadan inputu hemen boşalt ki arkadan okutma devam etsin!
     setTerminalId("");
     setLoading(true);
 
-    // ==========================================
-    // 🛡️ WMS ŞUBE GÜVENLİK DUVARI (CROSS-BRANCH LOCK)
-    // ==========================================
     try {
-      const { data: empData, error: empError } = await supabase
-        .from("employees")
-        .select("full_name, branch_id")
-        .eq("id", currentId)
-        .eq("is_active", true)
-        .single();
-
-      if (empError || !empData) {
-        triggerFeedback("error", "PERSONEL BULUNAMADI VEYA PASİF");
-        setLoading(false);
-        return;
-      }
-
-      if (branchId && empData.branch_id !== branchId) {
-        triggerFeedback("error", `GÜVENLİK İHLALİ: PERSONEL BU ŞUBEYE KAYITLI DEĞİL!` );
-        setLoading(false);
-        return;
-      }
-
-      // 3. Arka planda sunucu işlemleri akarken donanım yeni kod okumaya devam edebilir
+      // 🚀 HIZ OPTİMİZASYONU: Double-trip kapatıldı. 
+      // Personel var mı? Şube yetkisi doğru mu? Aktif mi? 
+      // Bütün kontrolleri processAttendanceScan Server Action'ı yapıp bize result dönecek.
       const result = await processAttendanceScan(
         currentId,
         actionType,
         branchId
       );
 
-      triggerFeedback(result.success ? "success" : "error", result.message!);
+      triggerFeedback(result.success ? "success" : "error", result.message || "İŞLEM SONUCU ALINAMADI");
 
       if (result.success) {
-        fetchStats(); // Await blokajı yok, arka planda state dolsun
+        // Await blokajı yok, arka planda UI yenilensin
         window.dispatchEvent(new CustomEvent("refresh-wms-attendance"));
         router.refresh();
       }
@@ -176,7 +137,6 @@ export default function BarcodeScanner({
             {branchName}
           </span>
         </div>
-
       </div>
 
       <div className="p-6 flex flex-col items-center bg-slate-50">
@@ -251,13 +211,8 @@ export default function BarcodeScanner({
               value={terminalId}
               onChange={(e) => {
                 setTerminalId(e.target.value.replace(/[^0-9]/g, ""));
-                // NOT: Burada "if (feedback) setFeedback(null)" bloğunu kaldırdım. 
-                // Artık kullanıcı arka planda bir sonraki kodu yazmaya başlasa bile
-                // okuduğu info kartı ekranda 3.5 sn boyunca kalmaya devam edecek!
               }}
               maxLength={5}
-              // NOT: KESİNTİSİZ GİRİŞ İÇİN DİSABLED KALDIRILDI! 
-              // Network işlemi sürerken bile hardware scanner sonraki kodu yazmaya devam edebilir.
               disabled={false} 
               className={`h-16 w-full bg-white border-2 rounded-md pl-4 pr-16 font-mono text-center text-3xl font-black tracking-[0.3em] outline-none transition-all focus:bg-slate-50 focus:shadow-[0_0_0_4px_rgba(0,0,0,0.04)] ${
                 isOut

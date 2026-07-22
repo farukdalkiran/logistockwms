@@ -3,11 +3,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { processPutawayServer } from "@/app/actions/inventory"; // Sunucu Aksiyonu Eklendi
+import { processPickingServer } from "@/app/actions/inventory"; // YENİ: Server Action Entegre Edildi
 import { 
   ChevronLeft, UserCircle, MapPin, Hash, AlertTriangle, 
   Package, ScanLine, Smartphone, Edit3, ArrowRight,
-  BoxSelect, Server, PlusCircle, ClipboardList
+  BoxSelect, Server, MinusCircle, ClipboardList, Info
 } from "lucide-react";
 import { Html5Qrcode } from "html5-qrcode";
 
@@ -16,11 +16,12 @@ type SessionLogItem = {
   product: { barcode: string; sku: string | null; name: string; image_url: string | null; };
   quantity: number;
   time: string;
+  reason?: string;
 };
 
 type Shelf = { id: number; name: string; status: string; };
 
-export default function PutawayPage() {
+export default function PickingPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -39,12 +40,20 @@ export default function PutawayPage() {
   const [lastScanned, setLastScanned] = useState<SessionLogItem | null>(null);
   const [sessionLogs, setSessionLogs] = useState<SessionLogItem[]>([]); 
   
+  // Hasarlı Raf Modal State'leri (Artık stocks dizisine ihtiyaç yok, sunucu hallediyor)
+  const [pendingRemoval, setPendingRemoval] = useState<{product: any, qty: number} | null>(null);
+  const [removalReason, setRemovalReason] = useState("eksik_parca");
+  const [requestedBy, setRequestedBy] = useState("");
+  const [otherDescription, setOtherDescription] = useState("");
+
   const [isProcessing, setIsProcessing] = useState(false); 
   const [flashState, setFlashState] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState("");
   
   const scanInputRef = useRef<HTMLInputElement>(null);
   const shelfInputRef = useRef<HTMLInputElement>(null);
+  const requestedByRef = useRef<HTMLInputElement>(null);
+  const otherDescRef = useRef<HTMLInputElement>(null);
   const lastCameraScanTime = useRef<number>(0);
   const qtyButtons = [1, 2, 3, 4, 5, 10];
 
@@ -53,7 +62,7 @@ export default function PutawayPage() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (!isProcessing) {
+      if (!isProcessing && !pendingRemoval) {
         if (!activeShelf && document.activeElement !== shelfInputRef.current) {
           shelfInputRef.current?.focus();
         } else if (activeShelf && activeTab === 'terminal' && document.activeElement !== scanInputRef.current) {
@@ -62,7 +71,7 @@ export default function PutawayPage() {
       }
     }, 800);
     return () => clearInterval(interval);
-  }, [activeShelf, activeTab, isProcessing]);
+  }, [activeShelf, activeTab, isProcessing, pendingRemoval]);
 
   useEffect(() => {
     const initData = async () => {
@@ -86,7 +95,6 @@ export default function PutawayPage() {
     try {
       const isNumeric = /^\d+$/.test(cleanShelf);
       let query = supabase.from("shelves").select("id, name, status").eq("branch_id", branchId);
-      
       if (isNumeric) query = query.or(`id.eq.${cleanShelf},name.ilike.${cleanShelf}`);
       else query = query.ilike("name", cleanShelf);
 
@@ -119,42 +127,57 @@ export default function PutawayPage() {
       let inputQty = typeof currentQty === 'string' ? parseInt(currentQty) || 1 : currentQty;
       if (inputQty < 1) inputQty = 1;
 
-      // 1. Koli Check 
+      // Koli (Box) Kontrolü
       const { data: boxData } = await supabase.from("boxes").select("product_id, quantity").eq("box_barcode", targetBarcode).maybeSingle();
       if (boxData) {
         const { data: pData } = await supabase.from("products").select("barcode").eq("id", boxData.product_id).single();
         if (pData) { targetBarcode = pData.barcode; inputQty = boxData.quantity * inputQty; }
       }
 
-      // 2. Ürün Bul
+      // Ürün Tespiti
       const { data: productDetails, error: pErr } = await supabase.from("products").select("id, barcode, sku, name, image_url").eq("barcode", targetBarcode).maybeSingle();
       if (pErr || !productDetails) {
         triggerFeedback('error', "HATA: Ürün bulunamadı!");
         setIsProcessing(false); setScanInput(""); return;
       }
 
-      // 3. SERVER ACTION ILE STOK YAZMA (RLS BYPASS)
-      const serverResponse = await processPutawayServer({
+      // Raf HASARLI ise Modal'ı tetikle, Değilse doğrudan Server'a gönder
+      if (activeShelf.status?.toUpperCase() === 'HASARLI') {
+        setPendingRemoval({ product: productDetails, qty: inputQty });
+        setIsProcessing(false); 
+      } else {
+        await finalizeRemoval(productDetails, inputQty, null);
+      }
+    } catch (error) { triggerFeedback('error', "İşlem Hatası!"); setIsProcessing(false); setScanInput(""); }
+  };
+
+  const finalizeRemoval = async (productDetails: any, qty: number, reasonDetails: string | null) => {
+    setIsProcessing(true);
+    try {
+      // ÇÖZÜM: Stok düşümü ve RLS bypass için Server Action çağrılıyor
+      const serverResponse = await processPickingServer({
         productId: productDetails.id,
-        branchId: branchId,
-        shelfId: activeShelf.id,
-        shelfName: activeShelf.name,
-        quantity: inputQty,
+        branchId: branchId!,
+        shelfId: activeShelf!.id,
+        shelfName: activeShelf!.name,
+        quantity: qty,
         empId: empId,
-        productDetails: productDetails
+        productDetails: productDetails,
+        reasonDetails: reasonDetails
       });
 
       if (!serverResponse.success) {
-         triggerFeedback('error', `Sunucu: ${serverResponse.error}`);
-         setIsProcessing(false); setScanInput(""); return;
+        triggerFeedback('error', `HATA: ${serverResponse.error}`);
+        setIsProcessing(false); setScanInput(""); return;
       }
 
-      // 4. UI Güncellemesi
+      // UI Log Güncellemesi
       const logEntry: SessionLogItem = {
         id: Math.random().toString(36).substring(7),
         product: productDetails,
-        quantity: inputQty,
-        time: new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+        quantity: qty,
+        time: new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+        reason: reasonDetails || undefined
       };
 
       setLastScanned(logEntry);
@@ -162,52 +185,53 @@ export default function PutawayPage() {
       
       triggerFeedback('success');
       setSelectedQty(1);
+      setPendingRemoval(null);
+      setRemovalReason("eksik_parca"); setRequestedBy(""); setOtherDescription("");
+      
+    } catch (err) { triggerFeedback('error', "Kayıt Hatası!"); } 
+    finally { setIsProcessing(false); setScanInput(""); setTimeout(() => scanInputRef.current?.focus(), 50); }
+  };
 
-    } catch (error) { 
-      triggerFeedback('error', "Kayıt Hatası!"); 
-    } finally { 
-      setIsProcessing(false); 
-      setScanInput(""); 
-      setTimeout(() => scanInputRef.current?.focus(), 50); 
+  const handleModalSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingRemoval) return;
+
+    let finalReason = "";
+    if (removalReason === "yonetici_hediye") {
+      if(!requestedBy.trim()) return requestedByRef.current?.focus();
+      finalReason = `Yönetici Talepli Hediye (Talep Eden: ${requestedBy.trim()})`;
+    } else if (removalReason === "diger") {
+      if(!otherDescription.trim()) return otherDescRef.current?.focus();
+      finalReason = `Diğer: ${otherDescription.trim()}`;
+    } else {
+      finalReason = "Eksik Parça Tedariği (Müşteri/Mağaza Talepli)";
     }
+
+    finalizeRemoval(pendingRemoval.product, pendingRemoval.qty, finalReason);
   };
 
   const handleTerminalScan = (e: React.FormEvent) => { e.preventDefault(); processBarcode(scanInput, false); };
 
-  useEffect(() => {
-    let html5QrCode: Html5Qrcode | null = null;
-    if (activeShelf && activeTab === 'camera') {
-      html5QrCode = new Html5Qrcode("reader");
-      html5QrCode.start(
-        { facingMode: "environment" },
-        { fps: 4, qrbox: { width: 250, height: 150 } }, 
-        (decodedText) => processBarcode(decodedText, true), 
-        () => {}
-      ).catch(console.error);
-    }
-    return () => { if (html5QrCode && html5QrCode.isScanning) html5QrCode.stop().then(() => html5QrCode?.clear()).catch(console.error); };
-  }, [activeShelf, activeTab]);
-
   return (
     <div className="min-h-screen bg-slate-50 font-['Quicksand'] flex flex-col antialiased select-none">
       
-      {/* ENDÜSTRİYEL DARK HEADING (Marka Rengi Vurgusu) */}
-      <div className="bg-[#0f172b] shadow-md shrink-0 border-b-4 border-[#dc3545]">
-        <div className="flex items-center justify-between p-3 sm:p-4 border-b border-slate-800/60 max-w-7xl mx-auto w-full">
-          <button onClick={() => router.back()} className="text-slate-400 hover:text-white bg-slate-800/40 hover:bg-slate-800 p-2 sm:p-3 transition-all rounded-sm shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center">
+      {/* HEADER - MODERN AYDINLIK (Kırmızı Vurgu) */}
+      <div className="bg-white shadow-sm shrink-0 border-b-4 border-[#dc3545]">
+        <div className="flex items-center justify-between p-3 sm:p-4 border-b border-slate-100 max-w-7xl mx-auto w-full">
+          <button onClick={() => router.back()} className="text-slate-500 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 p-2 sm:p-3 transition-all rounded-sm shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center">
             <ChevronLeft size={24} />
           </button>
           <div className="flex items-center gap-2">
-            <PlusCircle size={18} className="text-[#dc3545] hidden sm:block" />
-            <span className="text-white text-[15px] sm:text-[16px] font-black uppercase tracking-widest line-clamp-1">
-              Hızlı Raflama (Putaway)
+            <MinusCircle size={18} className="text-[#dc3545] hidden sm:block" />
+            <span className="text-slate-800 text-[15px] sm:text-[16px] font-black uppercase tracking-widest line-clamp-1">
+              Raftan Kaldırma (Picking)
             </span>
           </div>
           <div className="w-11 shrink-0" />
         </div>
-        <div className="bg-slate-950 py-2 px-3 sm:px-4">
+        <div className="bg-slate-50 py-2 px-3 sm:px-4">
           <div className="max-w-7xl mx-auto w-full flex justify-between items-center text-[10px] sm:text-[11px] font-bold uppercase tracking-wider gap-1">
-            <span className="text-slate-400 flex items-center gap-1.5 truncate"><UserCircle size={14} className="text-slate-600 shrink-0"/> <span className="truncate">{empName}</span></span>
+            <span className="text-slate-500 flex items-center gap-1.5 truncate"><UserCircle size={14} className="text-slate-400 shrink-0"/> <span className="truncate">{empName}</span></span>
             <span className="text-[#dc3545] flex items-center gap-1.5 shrink-0"><MapPin size={14}/> {branchName}</span>
           </div>
         </div>
@@ -223,7 +247,7 @@ export default function PutawayPage() {
               <div className="bg-slate-50 border-2 border-slate-100 p-4 rounded-full text-[#dc3545] shadow-sm"><BoxSelect size={40} /></div>
               <h2 className="text-[18px] sm:text-[20px] font-black uppercase text-slate-800 tracking-widest">Raf Barkodunu Okut</h2>
               <p className="text-[12px] font-bold text-slate-500 max-w-sm leading-relaxed">
-                İşlem yapmak istediğiniz rafın ID'sini okutarak sistemi kilitli hale getirin.
+                Ürün eksilteceğiniz rafın ID'sini okutarak sistemi kilitli hale getirin.
               </p>
             </div>
             
@@ -256,10 +280,72 @@ export default function PutawayPage() {
             </div>
           )}
 
+          {/* HASARLI RAF MODALI */}
+          {pendingRemoval && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="bg-white rounded-sm shadow-2xl w-full max-w-md flex flex-col overflow-hidden border-t-4 border-[#dc3545]">
+                <div className="bg-red-50 p-4 border-b border-red-100 flex items-center gap-3">
+                  <AlertTriangle className="text-[#dc3545]" size={24}/>
+                  <div>
+                    <h3 className="font-black text-slate-800 uppercase tracking-widest text-[14px]">Hasarlı Raf Çıkışı</h3>
+                    <p className="text-[11px] text-slate-600 font-bold uppercase mt-0.5">Lütfen stok düşüm sebebini seçiniz.</p>
+                  </div>
+                </div>
+                <form onSubmit={handleModalSubmit} className="p-5 flex flex-col gap-4">
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[11px] font-black text-slate-700 uppercase tracking-widest">İşlem Gerekçesi</label>
+                    <select 
+                      value={removalReason} 
+                      onChange={(e) => setRemovalReason(e.target.value)}
+                      className="w-full border-2 border-slate-300 p-3 min-h-[48px] rounded-sm bg-slate-50 text-slate-800 font-bold text-[13px] focus:outline-none focus:border-[#dc3545]"
+                    >
+                      <option value="eksik_parca">Eksik Parça Tedariği (Müşteri/Mağaza)</option>
+                      <option value="yonetici_hediye">Yönetici Talepli Hediye</option>
+                      <option value="diger">Diğer / Manuel Giriş</option>
+                    </select>
+                  </div>
+
+                  {removalReason === "yonetici_hediye" && (
+                    <div className="flex flex-col gap-2 animate-in slide-in-from-top-2">
+                      <label className="text-[11px] font-black text-slate-700 uppercase tracking-widest">Talep Eden Kişi / Yönetici</label>
+                      <input 
+                        ref={requestedByRef}
+                        type="text" 
+                        value={requestedBy} 
+                        onChange={(e) => setRequestedBy(e.target.value)}
+                        placeholder="Örn: İsmail Bey"
+                        className="w-full border-2 border-slate-300 p-3 min-h-[48px] rounded-sm focus:outline-none focus:border-[#dc3545] font-bold text-[13px]"
+                      />
+                    </div>
+                  )}
+
+                  {removalReason === "diger" && (
+                    <div className="flex flex-col gap-2 animate-in slide-in-from-top-2">
+                      <label className="text-[11px] font-black text-slate-700 uppercase tracking-widest">Açıklama</label>
+                      <input 
+                        ref={otherDescRef}
+                        type="text" 
+                        value={otherDescription} 
+                        onChange={(e) => setOtherDescription(e.target.value)}
+                        placeholder="Örn: Ürün kırık çıktı"
+                        className="w-full border-2 border-slate-300 p-3 min-h-[48px] rounded-sm focus:outline-none focus:border-[#dc3545] font-bold text-[13px]"
+                      />
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 mt-2">
+                    <button type="button" onClick={() => {setPendingRemoval(null); setScanInput(""); setTimeout(() => scanInputRef.current?.focus(), 50);}} className="flex-1 min-h-[48px] bg-slate-200 text-slate-700 font-black text-[12px] uppercase tracking-widest rounded-sm hover:bg-slate-300 transition-colors">İptal</button>
+                    <button type="submit" disabled={isProcessing} className="flex-1 min-h-[48px] bg-[#dc3545] text-white font-black text-[12px] uppercase tracking-widest rounded-sm hover:bg-red-700 transition-colors shadow-md">Stoğu Düş</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
           {/* RAF BİLGİ PANELİ */}
           <div className="bg-white p-3 sm:p-4 flex justify-between items-center gap-2 z-10 shrink-0 border-b border-slate-200 shadow-sm">
             <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-              <div className="p-2 border-2 shadow-sm shrink-0 rounded-sm bg-slate-100 border-slate-200 text-slate-600">
+              <div className={`p-2 border-2 shadow-sm shrink-0 rounded-sm ${activeShelf.status?.toUpperCase() === 'HASARLI' ? 'bg-amber-100 border-amber-200 text-amber-600' : 'bg-slate-100 border-slate-200 text-slate-600'}`}>
                 <Server size={18} className="sm:w-5 sm:h-5" />
               </div>
               <div className="flex flex-col min-w-0">
@@ -267,7 +353,8 @@ export default function PutawayPage() {
                   <Hash size={10}/> AKTİF RAF
                 </span>
                 <span className="text-[14px] sm:text-[18px] font-black tracking-widest uppercase text-slate-800 truncate flex items-center gap-2">
-                  {activeShelf.name} <span className="text-slate-400 text-[12px]">(ID:{activeShelf.id})</span>
+                  {activeShelf.name} 
+                  {activeShelf.status?.toUpperCase() === 'HASARLI' && <span className="bg-amber-100 text-amber-700 text-[10px] px-1.5 py-0.5 rounded-sm border border-amber-200">HASARLI RAF</span>}
                 </span>
               </div>
             </div>
@@ -310,7 +397,7 @@ export default function PutawayPage() {
                       type="text" 
                       value={scanInput} 
                       onChange={e => setScanInput(e.target.value)} 
-                      placeholder="RAFLANACAK BARKOD" 
+                      placeholder="DÜŞÜLECEK ÜRÜN BARKODU" 
                       disabled={isProcessing} 
                       className="w-full min-h-[56px] sm:min-h-[64px] text-center font-black text-[18px] sm:text-[20px] uppercase p-3 sm:p-4 border-2 focus:outline-none tracking-widest transition-colors shadow-inner disabled:opacity-50 bg-white text-slate-900 border-slate-300 focus:border-[#dc3545] placeholder:text-slate-300 rounded-sm" 
                     />
@@ -321,7 +408,7 @@ export default function PutawayPage() {
                 )}
 
                 <div className="flex flex-col gap-2 border-t border-slate-200 pt-3 mt-1">
-                  <span className="text-slate-500 text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5"><Edit3 size={12}/> Adet Çarpanı</span>
+                  <span className="text-slate-500 text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5"><Edit3 size={12}/> Düşülecek Adet Seçimi</span>
                   <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-1.5 sm:gap-2">
                     {qtyButtons.map(qty => (
                       <button key={qty} type="button" onClick={() => { setSelectedQty(qty); setTimeout(() => scanInputRef.current?.focus(), 50); }} className={`flex-1 min-h-[48px] text-[15px] font-black transition-all border-2 rounded-sm flex items-center justify-center ${selectedQty === qty ? 'bg-[#dc3545] border-[#dc3545] text-white shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 active:bg-slate-100'}`}>{qty}</button>
@@ -338,18 +425,18 @@ export default function PutawayPage() {
             {/* SAĞ: OTURUM LOGLARI */}
             <div className="flex-1 bg-white border border-slate-200 shadow-sm flex flex-col overflow-hidden rounded-sm mt-2 lg:mt-0 h-48 lg:h-auto min-h-[200px]">
               <div className="bg-slate-50 px-3 sm:px-4 py-3 flex justify-between items-center border-b border-slate-200 shrink-0">
-                <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-widest flex items-center gap-2 text-slate-700"><ClipboardList size={16} className="text-slate-400"/> Eklenenler (Geçmiş)</span>
+                <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-widest flex items-center gap-2 text-slate-700"><ClipboardList size={16} className="text-slate-400"/> Düşüm Geçmişi</span>
                 <span className="bg-white px-2 py-0.5 text-[10px] font-bold tracking-widest border border-slate-200 rounded-sm shadow-sm text-slate-600">{sessionLogs.length} Kayıt</span>
               </div>
               
               <div className="flex-1 overflow-y-auto overflow-x-auto bg-white">
-                <table className="w-full text-left border-collapse min-w-[400px]">
+                <table className="w-full text-left border-collapse min-w-[450px]">
                   <thead className="bg-slate-50 text-slate-500 text-[9px] sm:text-[10px] uppercase tracking-widest sticky top-0 z-10 shadow-sm border-b border-slate-200">
                     <tr>
                       <th className="p-2 sm:p-3 w-16 sm:w-20 border-r border-slate-200">Saat</th>
                       <th className="p-2 sm:p-3 w-28 sm:w-32 border-r border-slate-200">Barkod</th>
                       <th className="p-2 sm:p-3 border-r border-slate-200">Ürün Adı</th>
-                      <th className="p-2 sm:p-3 w-16 sm:w-20 text-center text-green-600 bg-green-50/50">Miktar</th>
+                      <th className="p-2 sm:p-3 w-16 sm:w-20 text-center text-[#dc3545] bg-red-50/50">Miktar</th>
                     </tr>
                   </thead>
                   <tbody className="text-[11px] sm:text-[12px] font-bold text-slate-800 divide-y divide-slate-100">
@@ -357,12 +444,15 @@ export default function PutawayPage() {
                       <tr key={log.id} className="hover:bg-slate-50 transition-colors bg-transparent animate-in fade-in duration-300">
                         <td className="p-2 sm:p-3 border-r border-slate-100 text-slate-400 font-black">{log.time}</td>
                         <td className="p-2 sm:p-3 border-r border-slate-100 overflow-hidden"><span className="tracking-widest uppercase truncate block text-slate-700">{log.product.barcode}</span></td>
-                        <td className="p-2 sm:p-3 border-r border-slate-100"><span className="line-clamp-1 leading-tight text-slate-700">{log.product.name}</span></td>
-                        <td className="p-2 sm:p-3 text-center bg-green-50/30"><span className="text-[14px] sm:text-[15px] font-black text-green-600">+{log.quantity}</span></td>
+                        <td className="p-2 sm:p-3 border-r border-slate-100">
+                          <span className="line-clamp-1 leading-tight text-slate-700">{log.product.name}</span>
+                          {log.reason && <span className="block mt-1 text-[9px] text-[#dc3545] bg-red-50 px-1.5 py-0.5 rounded-sm w-fit border border-red-100 flex items-center gap-1"><Info size={10}/> {log.reason}</span>}
+                        </td>
+                        <td className="p-2 sm:p-3 text-center bg-red-50/30"><span className="text-[14px] sm:text-[15px] font-black text-[#dc3545]">-{log.quantity}</span></td>
                       </tr>
                     ))}
                     {sessionLogs.length === 0 && (
-                      <tr><td colSpan={4} className="p-6 sm:p-10 text-center text-slate-400 text-[10px] sm:text-[12px] font-black uppercase tracking-widest border-dashed border-2 border-slate-200 m-4 block w-auto">Henüz işlem yapılmadı</td></tr>
+                      <tr><td colSpan={4} className="p-6 sm:p-10 text-center text-slate-400 text-[10px] sm:text-[12px] font-black uppercase tracking-widest border-dashed border-2 border-slate-200 m-4 block w-auto">Henüz raf düşümü yapılmadı</td></tr>
                     )}
                   </tbody>
                 </table>
