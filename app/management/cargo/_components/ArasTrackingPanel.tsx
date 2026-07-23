@@ -5,7 +5,7 @@ import {
   getShipmentsByDeliveryNumber, 
   saveArasTracking, 
   getProcessedExportData,
-  getFullProcessedExportData
+  getTodayProcessedCount
 } from "@/app/actions/aras-integration";
 import ExcelUploadDrawer from "./ExcelUploadDrawer";
 
@@ -44,7 +44,7 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
   
   const [activeGroup, setActiveGroup] = useState<ActiveGroupData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [recentScans, setRecentScans] = useState<ShipmentData[]>([]);
+  const [todayCount, setTodayCount] = useState<number>(0);
   
   const [uiStatus, setUiStatus] = useState<"idle" | "success" | "error" | "warning">("idle");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -53,6 +53,10 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
 
   const deliveryRef = useRef<HTMLInputElement>(null);
   const trackingRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    fetchTodayCount();
+  }, []);
 
   useEffect(() => {
     if (!isExcelOpen) deliveryRef.current?.focus();
@@ -65,6 +69,11 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     }
   }, [uiStatus]);
 
+  const fetchTodayCount = async () => {
+    const res = await getTodayProcessedCount();
+    if (res.success) setTodayCount(res.count);
+  };
+
   const triggerFeedback = (status: "success" | "error" | "warning", msg: string) => {
     setUiStatus(status);
     setStatusMessage(msg);
@@ -75,6 +84,24 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     navigator.clipboard.writeText(text);
     setCopiedField(fieldId);
     setTimeout(() => setCopiedField(null), 2000); 
+  };
+
+  const formatPhoneForCopy = (phone: string | null | undefined) => {
+    if (!phone) return "";
+    const idx = phone.indexOf('5');
+    return idx !== -1 ? phone.substring(idx) : phone;
+  };
+
+  // Açık adres, il, ilçe ve posta kodunu tek bir metin bloğunda birleştirir
+  const getFullAddress = (shipment: ShipmentData) => {
+    const parts = [
+      shipment.street,
+      shipment.street_2,
+      `${shipment.city} / ${shipment.region}`,
+      `Posta Kodu: ${shipment.postal_code || "YOK"}`
+    ];
+    // Boş olan parçaları filtrele ve aralarına boşluk koyarak birleştir
+    return parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   };
 
   const handleDeliveryScan = async (e: FormEvent) => {
@@ -89,19 +116,16 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
 
     if (result.success && result.data && result.data.length > 0) {
       const records = result.data as ShipmentData[];
-      
-      // Eğer kayıtlardan herhangi biri daha önce kargolanmışsa uyar
       const alreadyProcessed = records.find(r => r.is_processed_aras);
       
       if (alreadyProcessed) {
-        triggerFeedback("warning", `İHLAL: ${deliveryNo} numaralı sipariş daha önce eşleştirilmiş! (Takip: ${alreadyProcessed.aras_tracking_number})`);
+        triggerFeedback("warning", `İHLAL: ${deliveryNo} siparişi eşleştirilmiş! (Takip: ${alreadyProcessed.aras_tracking_number})`);
         setDeliveryNo("");
         deliveryRef.current?.focus();
       } else {
-        // SD Document Kontrolü
         const sdDocuments = records.map(r => r.sd_document).filter(Boolean);
         const uniqueSdDocuments = Array.from(new Set(sdDocuments));
-        const sdDocumentsMatch = uniqueSdDocuments.length === 1;
+        const sdDocumentsMatch = uniqueSdDocuments.length <= 1;
 
         setActiveGroup({
           records,
@@ -114,7 +138,7 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
         setTimeout(() => trackingRef.current?.focus(), 50);
       }
     } else {
-      triggerFeedback("error", "SİPARİŞ BULUNAMADI! BARKODU VEYA EXCEL'İ KONTROL EDİN.");
+      triggerFeedback("error", "SİPARİŞ BULUNAMADI! BARKODU KONTROL EDİN.");
       setDeliveryNo("");
       deliveryRef.current?.focus();
     }
@@ -126,15 +150,14 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     if (!activeGroup || !trackingNo.trim() || loading) return;
 
     setLoading(true);
-    // Veritabanındaki eşleşen TÜM delivery_number satırlarını tek seferde günceller
     const result = await saveArasTracking(activeGroup.primary.delivery_number, trackingNo.trim(), employeeId);
 
     if (result.success) {
-      triggerFeedback("success", `EŞLEŞTİRME BAŞARILI: ${activeGroup.primary.customer_name} (${activeGroup.count} Kalem)`);
-      setRecentScans(prev => [{...activeGroup.primary, aras_tracking_number: trackingNo.trim(), is_processed_aras: true}, ...prev].slice(0, 8));
+      triggerFeedback("success", `EŞLEŞTİRME BAŞARILI: ${activeGroup.primary.customer_name}`);
       setActiveGroup(null);
       setDeliveryNo("");
       setTrackingNo("");
+      fetchTodayCount(); // Sayacı anında güncelle
       setTimeout(() => deliveryRef.current?.focus(), 50);
     } else {
       triggerFeedback("error", "VERİTABANI YAZMA HATASI!");
@@ -153,7 +176,7 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     deliveryRef.current?.focus();
   };
 
-  const exportBasicExcel = async () => {
+  const exportTwoColumnExcel = async () => {
     const result = await getProcessedExportData();
     if (!result.success || !result.data || result.data.length === 0) {
       alert("İndirilecek işlenmiş kayıt bulunamadı.");
@@ -163,38 +186,12 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     const headers = "Delivery Number;Aras Takip No\n";
     const rows = result.data.map((r: any) => `${r.delivery_number};${r.aras_tracking_number}`).join("\n");
     const csvContent = "\uFEFF" + headers + rows;
-
-    downloadCSV(csvContent, `LEGO_Temel_Cikti_${new Date().toISOString().split("T")[0]}.csv`);
-  };
-
-  const exportFullExcel = async () => {
-    const result = await getFullProcessedExportData();
-    if (!result.success || !result.data || result.data.length === 0) {
-      alert("İndirilecek işlenmiş kayıt bulunamadı.");
-      return;
-    }
-
-    // Gelen datanın tüm anahtarlarını kolon başlığı olarak çıkarır
-    const keys = Object.keys(result.data[0]);
-    const headers = keys.join(";") + "\n";
-    const rows = result.data.map((row: any) => {
-      return keys.map(k => {
-        let val = row[k];
-        if (val === null || val === undefined) val = "";
-        return `"${val.toString().replace(/"/g, '""')}"`; // Veri içindeki noktalı virgülleri korumak için
-      }).join(";");
-    }).join("\n");
-
-    const csvContent = "\uFEFF" + headers + rows;
-    downloadCSV(csvContent, `LEGO_FULL_VERI_${new Date().toISOString().split("T")[0]}.csv`);
-  };
-
-  const downloadCSV = (content: string, fileName: string) => {
-    const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+    
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = fileName;
+    link.download = `ARAS_GUNCEL_CIKTI_${new Date().toISOString().split("T")[0]}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -213,268 +210,225 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     <button 
       type="button"
       onClick={() => handleCopy(textToCopy, fieldId)}
-      className="flex-shrink-0 inline-flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 bg-slate-100 hover:bg-[#dc3545] text-slate-500 hover:text-white border border-slate-300 transition-colors rounded-none focus:outline-none focus:ring-2 focus:ring-[#dc3545] ml-2"
+      className="flex-shrink-0 inline-flex items-center justify-center w-10 h-10 bg-slate-100 hover:bg-[#dc3545] text-slate-500 hover:text-white border border-slate-300 transition-colors rounded-none focus:outline-none focus:ring-2 focus:ring-[#dc3545] ml-2"
       title="Kopyala"
     >
       {copiedField === fieldId ? (
-        <svg className="w-4 h-4 sm:w-5 sm:h-5 text-green-600 hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
+        <svg className="w-5 h-5 text-green-600 hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
       ) : (
-        <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
       )}
     </button>
   );
 
   return (
     <>
-      <div className="w-full flex flex-col gap-6 text-slate-800">
+      <div className="w-full max-w-5xl mx-auto flex flex-col gap-6 text-slate-800">
         
-        {/* Modern Aydınlık Tematik Header */}
-        <div className="w-full bg-white border-2 border-slate-200 border-l-8 border-[#dc3545] p-4 flex flex-col md:flex-row items-start md:items-center gap-4 rounded-none shadow-sm">
+        {/* Modern Header & Komuta Merkezi */}
+        <div className="bg-white border-2 border-slate-200 border-l-8 border-[#dc3545] p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-5 rounded-none shadow-sm">
           
-          <div className="w-24 h-24 sm:w-28 sm:h-28 shrink-0 bg-slate-50 border-2 border-slate-200 p-1">
-            <img 
-              src="https://img.magnific.com/premium-vector/two-colorful-building-blocks-are-lying-white-background_96318-192043.jpg?semt=ais_hybrid&w=740&q=80" 
-              alt="Lego Eksik Parça" 
-              className="w-full h-full object-cover"
-            />
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full md:w-auto">
+            <div className="w-20 h-20 shrink-0 bg-slate-50 border-2 border-slate-200 p-1">
+              <img 
+                src="https://img.magnific.com/premium-vector/two-colorful-building-blocks-are-lying-white-background_96318-192043.jpg?semt=ais_hybrid&w=740&q=80" 
+                alt="Lego Eksik Parça" 
+                className="w-full h-full object-cover"
+              />
+            </div>
+
+            <div className="flex flex-col justify-center min-w-0">
+              <div className="flex items-center gap-2 mb-1">
+                <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-widest uppercase truncate">
+                  LEGO EKSİK PARÇA
+                </h1>
+                <span className="bg-[#dc3545] text-white text-[10px] px-2 py-0.5 uppercase tracking-widest font-bold">
+                  ARAS
+                </span>
+              </div>
+              <p className="text-slate-500 font-bold uppercase tracking-wider text-xs truncate">
+                Müşteri Yedek Parça Kargo Operasyonları
+              </p>
+            </div>
           </div>
 
-          <div className="flex-1 min-w-0 flex flex-col justify-center w-full">
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-1 sm:mb-2">
-              <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-widest uppercase truncate">
-                LEGO EKSİK PARÇA TERMİNALİ
-              </h1>
-              <span className="bg-[#dc3545] text-white text-[10px] sm:text-xs px-2 py-1 uppercase tracking-widest font-bold">
-                ARAS ENT.
-              </span>
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto shrink-0">
+            {/* KPI Modülü - Sadece Toplam Sayı */}
+            <div className="flex items-center gap-3 bg-slate-50 border-2 border-slate-200 px-4 py-2 w-full sm:w-auto justify-center">
+              <div className="flex flex-col items-end">
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">BUGÜN İŞLENEN</span>
+                <span className="text-xs font-bold text-slate-800 uppercase tracking-widest leading-none">SİPARİŞ</span>
+              </div>
+              <span className="text-2xl font-black text-[#dc3545] leading-none">{todayCount}</span>
             </div>
-            <p className="text-slate-500 font-bold uppercase tracking-wider text-xs sm:text-sm truncate">
-              Müşteri Yedek Parça Kargo Operasyonları
-            </p>
-          </div>
-          
-          <div className="w-full xl:w-auto shrink-0 flex flex-col sm:flex-row gap-3">
+
             <button 
               onClick={() => setIsExcelOpen(true)}
-              className="w-full sm:w-auto min-h-[48px] bg-slate-100 hover:bg-slate-200 text-slate-900 px-6 font-black uppercase tracking-wider transition-colors flex justify-center items-center gap-2 border-2 border-slate-300 rounded-none"
+              className="w-full sm:w-auto h-12 bg-slate-800 hover:bg-slate-900 text-white px-5 font-black text-sm uppercase tracking-wider transition-colors flex justify-center items-center gap-2 border-2 border-slate-900 rounded-none shadow-none"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M4 16v1h16v-1M12 4v10m-4-4l4 4 4-4"></path></svg>
-              <span>EXCEL YÜKLE</span>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M4 16v1h16v-1M12 4v10m-4-4l4 4 4-4"></path></svg>
+              <span>YÜKLE</span>
             </button>
             <button 
-              onClick={exportBasicExcel}
-              className="w-full sm:w-auto min-h-[48px] bg-white hover:bg-slate-50 text-[#dc3545] px-6 font-black uppercase tracking-wider transition-colors flex justify-center items-center gap-2 border-2 border-[#dc3545] rounded-none"
+              onClick={exportTwoColumnExcel}
+              className="w-full sm:w-auto h-12 bg-white hover:bg-slate-50 text-[#dc3545] px-5 font-black text-sm uppercase tracking-wider transition-colors flex justify-center items-center gap-2 border-2 border-[#dc3545] rounded-none shadow-none"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-              <span>GÜN SONU (TEMEL)</span>
-            </button>
-            <button 
-              onClick={exportFullExcel}
-              className="w-full sm:w-auto min-h-[48px] bg-slate-800 hover:bg-slate-900 text-white px-6 font-black uppercase tracking-wider transition-colors flex justify-center items-center gap-2 border-2 border-slate-900 rounded-none shadow-none"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
-              <span>TÜM VERİYİ İNDİR</span>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+              <span>ÇIKTI AL (2 KOLON)</span>
             </button>
           </div>
         </div>
 
-        <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Merkezi Operasyon Modülü */}
+        <div className={`w-full shadow-sm border-2 transition-colors duration-200 p-6 sm:p-8 flex flex-col gap-6 rounded-none ${getContainerStyles()}`}>
           
-          {/* SOL KOLON: Aktif İşlem Modülü */}
-          <div className={`col-span-1 lg:col-span-8 shadow-sm border-2 transition-colors duration-200 p-5 lg:p-6 flex flex-col gap-6 rounded-none ${getContainerStyles()} w-full min-w-0`}>
-            
-            {statusMessage && (
-              <div className={`p-4 text-sm sm:text-base font-black uppercase tracking-widest border-2 shadow-none animate-in fade-in rounded-none break-words ${
-                uiStatus === "error" ? "bg-red-50 text-red-700 border-red-500" :
-                uiStatus === "warning" ? "bg-orange-50 text-orange-700 border-orange-500" :
-                "bg-green-50 text-green-700 border-green-500"
-              }`}>
-                {statusMessage}
-              </div>
-            )}
-
-            <div className={`transition-opacity duration-200 ${activeGroup ? "opacity-30 pointer-events-none" : "opacity-100"} w-full`}>
-              <label className="block text-sm font-black text-slate-600 uppercase tracking-widest mb-3 border-b-2 border-slate-200 pb-2">
-                1. ADIM: SİPARİŞ / DELIVERY NO
-              </label>
-              <form onSubmit={handleDeliveryScan} className="flex flex-col sm:flex-row gap-3 w-full">
-                <input
-                  ref={deliveryRef}
-                  type="text"
-                  value={deliveryNo}
-                  onChange={(e) => setDeliveryNo(e.target.value)}
-                  disabled={loading || activeGroup !== null}
-                  className="flex-1 min-h-[56px] bg-white border-2 border-slate-300 px-4 sm:px-6 text-xl sm:text-2xl font-black text-slate-900 focus:outline-none focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] disabled:bg-slate-100 rounded-none shadow-inner uppercase placeholder:text-slate-300 w-full min-w-0"
-                  placeholder="BARKOD OKUTUNUZ"
-                  autoComplete="off"
-                />
-                <button 
-                  type="submit" 
-                  disabled={loading || !deliveryNo.trim() || activeGroup !== null}
-                  className="w-full sm:w-auto min-h-[56px] px-8 sm:px-12 bg-[#dc3545] hover:bg-red-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-black text-xl uppercase tracking-widest transition-colors rounded-none border-2 border-red-800 shadow-none shrink-0"
-                >
-                  SORGULA
-                </button>
-              </form>
+          {statusMessage && (
+            <div className={`p-4 text-sm font-black uppercase tracking-widest border-2 shadow-none animate-in fade-in rounded-none break-words ${
+              uiStatus === "error" ? "bg-red-50 text-red-700 border-red-500" :
+              uiStatus === "warning" ? "bg-orange-50 text-orange-700 border-orange-500" :
+              "bg-green-50 text-green-700 border-green-500"
+            }`}>
+              {statusMessage}
             </div>
+          )}
 
-            {/* ADIM 2: Aktif Sipariş Detayları */}
-            {activeGroup && (
-              <div className="flex flex-col gap-0 animate-in slide-in-from-bottom-2 fade-in duration-200 bg-white border-2 border-slate-300 shadow-sm relative rounded-none w-full min-w-0">
-                <div className="absolute top-0 left-0 w-[6px] h-full bg-[#dc3545]"></div>
+          {/* ADIM 1: Delivery Kodu */}
+          <div className={`transition-opacity duration-200 ${activeGroup ? "opacity-30 pointer-events-none" : "opacity-100"} w-full`}>
+            <label className="block text-sm font-black text-slate-600 uppercase tracking-widest mb-3 border-b-2 border-slate-200 pb-2">
+              1. ADIM: SİPARİŞ / DELIVERY NO
+            </label>
+            <form onSubmit={handleDeliveryScan} className="flex flex-col sm:flex-row gap-3 w-full">
+              <input
+                ref={deliveryRef}
+                type="text"
+                value={deliveryNo}
+                onChange={(e) => setDeliveryNo(e.target.value)}
+                disabled={loading || activeGroup !== null}
+                className="flex-1 h-14 bg-white border-2 border-slate-300 px-4 text-xl font-black font-mono text-slate-900 focus:outline-none focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] disabled:bg-slate-100 rounded-none uppercase placeholder:text-slate-300"
+                placeholder="BARKOD OKUTUNUZ"
+                autoComplete="off"
+              />
+              <button 
+                type="submit" 
+                disabled={loading || !deliveryNo.trim() || activeGroup !== null}
+                className="w-full sm:w-auto h-14 px-10 bg-[#dc3545] hover:bg-red-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-black text-lg uppercase tracking-widest transition-colors rounded-none border-2 border-red-800 shrink-0"
+              >
+                SORGULA
+              </button>
+            </form>
+          </div>
 
-                {/* Çoklu Kayıt ve SD Document Analizi Lojiği */}
-                <div className="bg-slate-50 border-b-2 border-slate-200 p-4 pl-6 sm:pl-8 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                   <div className="flex items-center gap-2">
-                     <span className="bg-[#dc3545] text-white px-3 py-1 font-black text-sm">{activeGroup.count} ADET</span>
-                     <span className="text-xs font-bold text-slate-600 uppercase tracking-widest">Kayıt Bulundu (Toplu Güncellenecek)</span>
-                   </div>
-                   <div className={`px-3 py-1 text-xs font-black uppercase tracking-widest border-2 ${activeGroup.sdDocumentsMatch ? 'bg-green-100 text-green-800 border-green-300' : 'bg-orange-100 text-orange-800 border-orange-300'}`}>
-                     SD DOCUMENT: {activeGroup.sdDocumentsMatch ? `TÜMÜ EŞLEŞİYOR (${activeGroup.uniqueSdDocuments[0] || 'BOŞ'})` : 'FARKLI KODLAR TESPİT EDİLDİ'}
-                   </div>
-                </div>
+          {/* ADIM 2: Aktif Sipariş Detayları */}
+          {activeGroup && (
+            <div className="flex flex-col gap-0 animate-in slide-in-from-bottom-2 fade-in duration-200 bg-white border-2 border-slate-300 shadow-sm relative rounded-none w-full min-w-0">
+              <div className="absolute top-0 left-0 w-[6px] h-full bg-[#dc3545]"></div>
 
-                <div className="p-5 sm:p-6 pl-6 sm:pl-8 w-full">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full min-w-0">
-                    
-                    <div className="flex flex-col min-w-0 bg-slate-50 border-2 border-slate-200 p-4 sm:p-5">
-                      <div className="flex items-center gap-2 mb-4 border-b-2 border-slate-200 pb-2">
-                        <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
-                        <span className="text-xs font-black text-slate-600 uppercase tracking-widest">ALICI BİLGİSİ</span>
-                      </div>
-                      
-                      <div className="mb-4">
-                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Ad Soyad</p>
-                        <div className="flex items-stretch justify-between bg-white border border-slate-200 p-2 min-h-[44px]">
-                          <span className="flex items-center text-base sm:text-lg font-black text-slate-900 uppercase break-words leading-tight truncate px-1">{activeGroup.primary.customer_name}</span>
-                          <CopyIcon fieldId="name" textToCopy={activeGroup.primary.customer_name} />
-                        </div>
-                      </div>
-
-                      <div>
-                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Telefon Numarası (Sadece 5'ten İtibaren)</p>
-                        <div className="flex items-stretch justify-between bg-white border border-slate-200 p-2 min-h-[44px]">
-                          <span className="flex items-center text-sm sm:text-base font-bold font-mono text-slate-700 tracking-tight truncate px-1">{activeGroup.primary.mobile_number}</span>
-                          <CopyIcon fieldId="phone" textToCopy={activeGroup.primary.mobile_number ? activeGroup.primary.mobile_number.substring(activeGroup.primary.mobile_number.indexOf('5')) : ""} />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col min-w-0 bg-slate-50 border-2 border-slate-200 p-4 sm:p-5">
-                      <div className="flex items-center gap-2 mb-4 border-b-2 border-slate-200 pb-2">
-                        <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path strokeLinecap="square" strokeWidth="2.5" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                        <span className="text-xs font-black text-slate-600 uppercase tracking-widest">TESLİMAT ADRESİ</span>
-                      </div>
-
-                      <div className="mb-4">
-                         <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Açık Adres (Sokak/Cadde)</p>
-                         <div className="flex items-stretch justify-between bg-white border border-slate-200 p-2">
-                            <span className="flex items-center text-xs sm:text-sm font-bold text-slate-800 uppercase leading-snug break-words px-1">
-                              {activeGroup.primary.street} {activeGroup.primary.street_2}
-                            </span>
-                            <CopyIcon fieldId="address" textToCopy={`${activeGroup.primary.street || ''} ${activeGroup.primary.street_2 || ''}`.trim()} />
-                         </div>
-                      </div>
-
-                      <div className="mb-4">
-                         <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">İl / İlçe</p>
-                         <div className="flex items-stretch justify-between bg-white border border-slate-200 p-2">
-                            <span className="flex items-center font-black text-slate-900 text-sm uppercase break-words px-1">
-                              {activeGroup.primary.city} / {activeGroup.primary.region}
-                            </span>
-                            <CopyIcon fieldId="city" textToCopy={`${activeGroup.primary.city || ''} / ${activeGroup.primary.region || ''}`} />
-                         </div>
-                      </div>
-
-                      <div className="mt-auto">
-                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Özel Formatlı Posta Kodu</p>
-                        <div className="flex items-stretch justify-between bg-white border border-slate-200 p-2 min-h-[44px]">
-                          <span className="flex items-center text-sm sm:text-base font-black font-mono text-slate-900 px-1">{activeGroup.primary.postal_code || "YOK"}</span>
-                          <CopyIcon fieldId="postal" textToCopy={activeGroup.primary.postal_code ? `Posta Kodu ${activeGroup.primary.postal_code}` : "Posta Kodu YOK"} />
-                        </div>
-                      </div>
-                    </div>
-
+              {/* SD Document Analizi Lojiği */}
+              <div className="bg-slate-50 border-b-2 border-slate-200 p-4 pl-6 sm:pl-8">
+                <div className="flex flex-col sm:flex-row gap-4">
+                  <div className="flex items-center gap-3 bg-white border-2 border-slate-200 px-4 py-2 shrink-0">
+                    <span className="bg-[#dc3545] text-white px-3 py-1 font-black text-lg">{activeGroup.count}</span>
+                    <span className="text-[10px] font-bold text-slate-700 uppercase tracking-widest leading-tight">KALEM<br/>BULUNDU</span>
                   </div>
-                </div>
-
-                {/* Barkod Eşleştirme Aksiyonu */}
-                <div className="bg-slate-100 border-t-2 border-slate-300 p-5 sm:p-6 pl-6 sm:pl-8 w-full">
-                  <label className="block text-sm font-black text-[#dc3545] uppercase tracking-widest mb-3 border-b-2 border-red-200 pb-2">
-                    2. ADIM: ARAS KARGO BARKODU
-                  </label>
-                  <form onSubmit={handleTrackingScan} className="flex flex-col sm:flex-row gap-3 w-full">
-                    <input
-                      ref={trackingRef}
-                      type="text"
-                      value={trackingNo}
-                      onChange={(e) => setTrackingNo(e.target.value)}
-                      disabled={loading}
-                      className="flex-1 min-h-[56px] sm:min-h-[64px] bg-white border-2 border-[#dc3545] px-4 sm:px-6 text-xl sm:text-3xl font-black font-mono text-slate-900 focus:outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600 rounded-none shadow-inner placeholder:text-red-200 uppercase w-full min-w-0"
-                      placeholder="TAKİP NO OKUTUNUZ"
-                      autoComplete="off"
-                    />
-                    <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto shrink-0">
-                      <button 
-                        type="submit" 
-                        disabled={loading || !trackingNo.trim()}
-                        className="w-full sm:w-auto min-h-[56px] sm:min-h-[64px] px-8 lg:px-12 bg-[#dc3545] hover:bg-red-700 disabled:bg-red-300 text-white font-black text-xl uppercase tracking-widest transition-colors shadow-none rounded-none border-2 border-red-800"
-                      >
-                        KAYDET
-                      </button>
-                      <button 
-                        type="button"
-                        onClick={handleCancel}
-                        disabled={loading}
-                        className="w-full sm:w-auto min-h-[56px] sm:min-h-[64px] px-6 lg:px-8 bg-slate-300 hover:bg-slate-400 text-slate-800 font-black text-lg uppercase tracking-widest transition-colors rounded-none border-2 border-slate-400"
-                      >
-                        İPTAL
-                      </button>
+                  
+                  {activeGroup.sdDocumentsMatch ? (
+                    <div className="flex-1 flex items-center gap-3 bg-green-50 border-2 border-green-500 px-4 py-2">
+                      <svg className="w-8 h-8 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black text-green-700 uppercase tracking-widest truncate">SD DOCUMENT: TÜMÜ EŞLEŞİYOR</p>
+                        <p className="text-sm font-black font-mono text-green-900 truncate">{activeGroup.uniqueSdDocuments[0] || 'KOD YOK'}</p>
+                      </div>
                     </div>
-                  </form>
+                  ) : (
+                    <div className="flex-1 flex items-center gap-3 bg-orange-50 border-2 border-orange-500 px-4 py-2">
+                      <svg className="w-8 h-8 text-orange-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="3" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black text-orange-700 uppercase tracking-widest truncate">DİKKAT: FARKLI SD DOCUMENT KODLARI</p>
+                        <p className="text-xs font-bold font-mono text-orange-900 break-all">{activeGroup.uniqueSdDocuments.join(', ')}</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
-            )}
-          </div>
 
-          {/* SAĞ KOLON: Log Terminali */}
-          <div className="col-span-1 lg:col-span-4 bg-white shadow-sm border-2 border-slate-300 flex flex-col rounded-none min-h-[400px] w-full">
-            <div className="p-4 sm:p-5 border-b-2 border-slate-200 bg-slate-100 flex justify-between items-center">
-              <h3 className="font-black text-slate-800 uppercase tracking-widest text-xs sm:text-sm">SON EŞLEŞTİRMELER</h3>
-              <span className="bg-[#dc3545] text-white text-xs font-black px-2 py-1 rounded-none border border-red-800">{recentScans.length}</span>
-            </div>
-            
-            <div className="flex-1 p-0 overflow-y-auto bg-slate-50 w-full">
-              {recentScans.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-slate-400 p-8 text-center">
-                  <svg className="w-10 h-10 mb-4 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                  <span className="text-[11px] uppercase tracking-widest font-black">BEKLEMEDE</span>
+              {/* Müşteri ve Adres Detayları (2 Kolon) */}
+              <div className="p-5 sm:p-6 pl-6 sm:pl-8 w-full border-b-2 border-slate-200">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full min-w-0">
+                  
+                  {/* Sol Kolon: Alıcı Bilgisi */}
+                  <div className="flex flex-col min-w-0 gap-4">
+                    <div className="flex flex-col gap-1">
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Ad Soyad</p>
+                      <div className="flex items-stretch justify-between bg-white border border-slate-200 p-2">
+                        <span className="flex items-center text-sm font-black text-slate-900 uppercase truncate px-1">{activeGroup.primary.customer_name}</span>
+                        <CopyIcon fieldId="name" textToCopy={activeGroup.primary.customer_name} />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Telefon Numarası</p>
+                      <div className="flex items-stretch justify-between bg-white border border-slate-200 p-2">
+                        <span className="flex items-center text-sm font-bold font-mono text-slate-700 truncate px-1">{activeGroup.primary.mobile_number}</span>
+                        <CopyIcon fieldId="phone" textToCopy={formatPhoneForCopy(activeGroup.primary.mobile_number)} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Sağ Kolon: Birleşik Teslimat Adresi */}
+                  <div className="flex flex-col min-w-0 gap-1 h-full">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Tam Teslimat Adresi & Posta Kodu</p>
+                    <div className="flex items-stretch justify-between bg-white border border-slate-200 p-2 flex-1">
+                      <span className="text-sm font-bold text-slate-800 uppercase leading-relaxed break-words px-1">
+                        {getFullAddress(activeGroup.primary)}
+                      </span>
+                      <div className="flex items-start">
+                        <CopyIcon fieldId="fullAddress" textToCopy={getFullAddress(activeGroup.primary)} />
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
-              ) : (
-                <ul className="flex flex-col divide-y-2 divide-slate-200 w-full">
-                  {recentScans.map((scan, index) => (
-                    <li key={scan.id + index} className="p-4 bg-white hover:bg-slate-50 transition-colors animate-in slide-in-from-right-2 fade-in rounded-none min-w-0 border-l-4 border-transparent hover:border-[#dc3545]">
-                      <div className="flex flex-col gap-2 mb-3">
-                        <span className="font-black text-slate-900 text-sm uppercase leading-tight break-words">{scan.customer_name}</span>
-                        <div className="flex items-stretch justify-between">
-                           <span className="flex items-center text-xs font-bold text-slate-500 font-mono">
-                             DLV: {scan.delivery_number}
-                           </span>
-                           <CopyIcon fieldId={`dlv-${index}`} textToCopy={scan.delivery_number} />
-                        </div>
-                      </div>
-                      <div className="flex items-stretch justify-between text-xs font-bold text-slate-800 bg-slate-100 border border-slate-200 p-1">
-                        <span className="flex items-center font-mono pl-2 break-all">TRK: {scan.aras_tracking_number}</span>
-                        <CopyIcon fieldId={`trk-${index}`} textToCopy={scan.aras_tracking_number || ""} />
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
+              </div>
 
+              {/* Barkod Eşleştirme Aksiyonu */}
+              <div className="bg-slate-50 p-5 sm:p-6 pl-6 sm:pl-8 w-full">
+                <label className="block text-sm font-black text-[#dc3545] uppercase tracking-widest mb-3 border-b-2 border-red-200 pb-2">
+                  2. ADIM: ARAS KARGO BARKODU
+                </label>
+                <form onSubmit={handleTrackingScan} className="flex flex-col sm:flex-row gap-3 w-full">
+                  <input
+                    ref={trackingRef}
+                    type="text"
+                    value={trackingNo}
+                    onChange={(e) => setTrackingNo(e.target.value)}
+                    disabled={loading}
+                    className="flex-1 h-14 bg-white border-2 border-[#dc3545] px-4 text-xl font-black font-mono text-slate-900 focus:outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600 rounded-none uppercase placeholder:text-red-200"
+                    placeholder="TAKİP NO OKUTUNUZ"
+                    autoComplete="off"
+                  />
+                  <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto shrink-0">
+                    <button 
+                      type="submit" 
+                      disabled={loading || !trackingNo.trim()}
+                      className="w-full sm:w-auto h-14 px-10 bg-[#dc3545] hover:bg-red-700 disabled:bg-red-300 text-white font-black text-lg uppercase tracking-widest transition-colors rounded-none border-2 border-red-800"
+                    >
+                      KAYDET
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={handleCancel}
+                      disabled={loading}
+                      className="w-full sm:w-auto h-14 px-6 bg-slate-300 hover:bg-slate-400 text-slate-800 font-black text-sm uppercase tracking-widest transition-colors rounded-none border-2 border-slate-400"
+                    >
+                      İPTAL
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
+
       </div>
 
       <ExcelUploadDrawer 
