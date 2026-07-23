@@ -6,7 +6,8 @@ import {
   saveArasTracking, 
   getProcessedExportData,
   getExactOriginalExportData,
-  getTodayProcessedCount
+  getKargoStats,
+  wipeAllShipments
 } from "@/app/actions/aras-integration";
 import ExcelUploadDrawer from "./ExcelUploadDrawer";
 
@@ -35,19 +36,22 @@ interface ActiveGroupData {
   primary: ShipmentData;
   sdDocumentsMatch: boolean;
   uniqueSdDocuments: string[];
+  isUpdateMode: boolean; 
 }
 
 export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps) {
   const [isExcelOpen, setIsExcelOpen] = useState(false);
+  const [isWipeModalOpen, setIsWipeModalOpen] = useState(false);
 
   const [deliveryNo, setDeliveryNo] = useState("");
   const [trackingNo, setTrackingNo] = useState("");
   
   const [activeGroup, setActiveGroup] = useState<ActiveGroupData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [todayCount, setTodayCount] = useState<number>(0);
   
-  const [uiStatus, setUiStatus] = useState<"idle" | "success" | "error" | "warning">("idle");
+  const [stats, setStats] = useState({ total: 0, processed: 0, today: 0 });
+  
+  const [uiStatus, setUiStatus] = useState<"idle" | "success" | "error" | "warning" | "update">("idle");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -56,12 +60,12 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
   const trackingRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    fetchTodayCount();
+    fetchStats();
   }, []);
 
   useEffect(() => {
-    if (!isExcelOpen) deliveryRef.current?.focus();
-  }, [isExcelOpen]);
+    if (!isExcelOpen && !isWipeModalOpen && !activeGroup) deliveryRef.current?.focus();
+  }, [isExcelOpen, isWipeModalOpen, activeGroup]);
 
   useEffect(() => {
     if (uiStatus === "success" || uiStatus === "error") {
@@ -70,12 +74,14 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     }
   }, [uiStatus]);
 
-  const fetchTodayCount = async () => {
-    const res = await getTodayProcessedCount();
-    if (res.success) setTodayCount(res.count);
+  const fetchStats = async () => {
+    const res = await getKargoStats();
+    if (res.success) {
+      setStats({ total: res.total, processed: res.processed, today: res.today });
+    }
   };
 
-  const triggerFeedback = (status: "success" | "error" | "warning", msg: string) => {
+  const triggerFeedback = (status: "success" | "error" | "warning" | "update", msg: string) => {
     setUiStatus(status);
     setStatusMessage(msg);
   };
@@ -87,52 +93,57 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     setTimeout(() => setCopiedField(null), 2000); 
   };
 
-  // Telefonu '5' rakamından kesecek özel formatlayıcı
   const formatPhoneForCopy = (phone: string | null | undefined) => {
     if (!phone) return "";
     const idx = phone.indexOf('5');
     return idx !== -1 ? phone.substring(idx) : phone;
   };
 
-  const handleDeliveryScan = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!deliveryNo.trim() || loading) return;
-
+  const loadDeliveryData = async (targetDeliveryNo: string) => {
     setLoading(true);
     setUiStatus("idle");
     setStatusMessage(null);
 
-    const result = await getShipmentsByDeliveryNumber(deliveryNo.trim());
+    const result = await getShipmentsByDeliveryNumber(targetDeliveryNo);
 
     if (result.success && result.data && result.data.length > 0) {
       const records = result.data as ShipmentData[];
       const alreadyProcessed = records.find(r => r.is_processed_aras);
       
-      if (alreadyProcessed) {
-        triggerFeedback("warning", `İHLAL: ${deliveryNo} siparişi eşleştirilmiş! (Takip: ${alreadyProcessed.aras_tracking_number})`);
-        setDeliveryNo("");
-        deliveryRef.current?.focus();
-      } else {
-        const sdDocuments = records.map(r => r.sd_document).filter(Boolean);
-        const uniqueSdDocuments = Array.from(new Set(sdDocuments));
-        const sdDocumentsMatch = uniqueSdDocuments.length <= 1;
+      const sdDocuments = records.map(r => r.sd_document).filter(Boolean);
+      const uniqueSdDocuments = Array.from(new Set(sdDocuments));
+      const sdDocumentsMatch = uniqueSdDocuments.length <= 1;
 
-        setActiveGroup({
-          records,
-          count: records.length,
-          primary: records[0],
-          sdDocumentsMatch,
-          uniqueSdDocuments
-        });
-        
-        setTimeout(() => trackingRef.current?.focus(), 50);
+      setActiveGroup({
+        records,
+        count: records.length,
+        primary: records[0],
+        sdDocumentsMatch,
+        uniqueSdDocuments,
+        isUpdateMode: !!alreadyProcessed
+      });
+
+      if (alreadyProcessed) {
+        triggerFeedback("update", `DİKKAT: Bu sipariş daha önce kargolanmış! Yeni barkod okutarak güncelleyebilirsiniz.`);
+        setTrackingNo(alreadyProcessed.aras_tracking_number || "");
+      } else {
+        setTrackingNo("");
       }
+      
+      setDeliveryNo("");
+      setTimeout(() => trackingRef.current?.focus(), 50);
     } else {
       triggerFeedback("error", "SİPARİŞ BULUNAMADI! BARKODU KONTROL EDİN.");
       setDeliveryNo("");
       deliveryRef.current?.focus();
     }
     setLoading(false);
+  };
+
+  const handleDeliveryScan = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!deliveryNo.trim() || loading) return;
+    await loadDeliveryData(deliveryNo.trim());
   };
 
   const handleTrackingScan = async (e: FormEvent) => {
@@ -143,17 +154,15 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     const result = await saveArasTracking(activeGroup.primary.delivery_number, trackingNo.trim(), employeeId);
 
     if (result.success) {
-      triggerFeedback("success", `EŞLEŞTİRME BAŞARILI: ${activeGroup.primary.customer_name}`);
+      triggerFeedback("success", activeGroup.isUpdateMode ? `GÜNCELLEME BAŞARILI: ${activeGroup.primary.customer_name}` : `EŞLEŞTİRME BAŞARILI: ${activeGroup.primary.customer_name}`);
       setActiveGroup(null);
-      setDeliveryNo("");
       setTrackingNo("");
-      fetchTodayCount(); // KPI Sayacını Anında Güncelle
+      fetchStats(); 
       setTimeout(() => deliveryRef.current?.focus(), 50);
     } else {
       triggerFeedback("error", "VERİTABANI YAZMA HATASI!");
       trackingRef.current?.focus();
     }
-    
     setLoading(false);
   };
 
@@ -163,7 +172,21 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     setDeliveryNo("");
     setUiStatus("idle");
     setStatusMessage(null);
-    deliveryRef.current?.focus();
+    setTimeout(() => deliveryRef.current?.focus(), 50);
+  };
+
+  const handleWipeDatabase = async () => {
+    setLoading(true);
+    const result = await wipeAllShipments();
+    if (result.success) {
+      triggerFeedback("success", "VERİTABANI BAŞARIYLA SIFIRLANDI!");
+      setIsWipeModalOpen(false);
+      handleCancel();
+      setStats({ total: 0, processed: 0, today: 0 }); 
+    } else {
+      triggerFeedback("error", "SİLME İŞLEMİ BAŞARISIZ!");
+    }
+    setLoading(false);
   };
 
   const exportTwoColumnExcel = async () => {
@@ -222,6 +245,7 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     switch (uiStatus) {
       case "success": return "bg-green-50 border-green-500";
       case "error": return "bg-red-50 border-red-500";
+      case "update": return "bg-blue-50 border-blue-500"; 
       case "warning": return "bg-orange-50 border-orange-500";
       default: return "bg-white border-slate-300";
     }
@@ -231,20 +255,22 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     <button 
       type="button"
       onClick={() => handleCopy(textToCopy, fieldId)}
-      className="flex-shrink-0 inline-flex items-center justify-center w-8 h-8 bg-slate-100 hover:bg-[#dc3545] text-slate-500 hover:text-white border border-slate-300 transition-colors rounded-none focus:outline-none focus:ring-2 focus:ring-[#dc3545] ml-2"
+      className="flex-shrink-0 inline-flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 bg-slate-100 hover:bg-[#dc3545] text-slate-500 hover:text-white border border-slate-300 transition-colors rounded-none focus:outline-none focus:ring-2 focus:ring-[#dc3545] ml-2"
       title="Kopyala"
     >
       {copiedField === fieldId ? (
-        <svg className="w-4 h-4 text-green-600 hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
+        <svg className="w-4 h-4 sm:w-5 sm:h-5 text-green-600 hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
       ) : (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+        <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
       )}
     </button>
   );
 
+  const progressPercent = stats.total > 0 ? Math.round((stats.processed / stats.total) * 100) : 0;
+
   return (
     <>
-      <div className="w-full flex flex-col gap-6 text-slate-800">
+      <div className="w-full max-w-5xl mx-auto flex flex-col gap-6 text-slate-800">
         
         {/* Endüstriyel Header Modülü */}
         <div className="w-full bg-white border-2 border-slate-200 border-l-8 border-[#dc3545] p-4 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 rounded-none shadow-sm">
@@ -267,45 +293,80 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
                   ARAS ENT.
                 </span>
               </div>
-              <p className="text-slate-500 font-bold uppercase tracking-wider text-xs truncate">
+              <p className="text-slate-500 font-bold uppercase tracking-wider text-xs truncate mb-2">
                 Müşteri Yedek Parça Kargo Operasyonları
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap lg:flex-nowrap items-center justify-center gap-3 w-full lg:w-auto shrink-0 mt-2 lg:mt-0">
-            <button 
-              onClick={() => setIsExcelOpen(true)}
-              className="h-10 bg-slate-800 hover:bg-slate-900 text-white px-4 font-black text-xs uppercase tracking-wider transition-colors flex justify-center items-center gap-2 border-2 border-slate-900 rounded-none shadow-none whitespace-nowrap"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M4 16v1h16v-1M12 4v10m-4-4l4 4 4-4"></path></svg>
-              <span>EXCEL YÜKLE</span>
-            </button>
-            <button 
-              onClick={exportTwoColumnExcel}
-              className="h-10 bg-white hover:bg-slate-50 text-[#dc3545] px-4 font-black text-xs uppercase tracking-wider transition-colors flex justify-center items-center gap-2 border-2 border-[#dc3545] rounded-none shadow-none whitespace-nowrap"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-              <span>ÇIKTI (2 KOLON)</span>
-            </button>
-            <button 
-              onClick={exportExactOriginalExcel}
-              className="h-10 bg-white hover:bg-slate-50 text-slate-800 px-4 font-black text-xs uppercase tracking-wider transition-colors flex justify-center items-center gap-2 border-2 border-slate-300 rounded-none shadow-none whitespace-nowrap"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
-              <span>ÇIKTI (TAM)</span>
-            </button>
+          {/* 3'lü KPI Modülü ve Progress Bar */}
+          <div className="flex flex-col gap-1 w-full lg:w-auto shrink-0 mt-2 lg:mt-0 bg-slate-50 border-2 border-slate-200 p-2">
+            <div className="flex items-center justify-between sm:justify-center gap-4 px-2">
+              <div className="flex flex-col items-center">
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">TOPLAM PAKET</span>
+                <span className="text-xl font-black font-mono text-slate-800 leading-none mt-0.5">{stats.total}</span>
+              </div>
+              <div className="w-px h-6 bg-slate-300"></div>
+              <div className="flex flex-col items-center">
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">İŞLENEN</span>
+                <span className="text-xl font-black font-mono text-green-600 leading-none mt-0.5">{stats.processed}</span>
+              </div>
+              <div className="w-px h-6 bg-slate-300"></div>
+              <div className="flex flex-col items-center">
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">BUGÜN</span>
+                <span className="text-xl font-black font-mono text-[#dc3545] leading-none mt-0.5">{stats.today}</span>
+              </div>
+            </div>
+            <div className="w-full bg-slate-200 h-1.5 mt-1 relative">
+              <div className="bg-green-500 h-1.5 transition-all duration-500" style={{ width: `${progressPercent}%` }}></div>
+            </div>
           </div>
+
+        </div>
+
+        {/* Aksiyon Butonları Grubu */}
+        <div className="flex flex-wrap lg:flex-nowrap items-center justify-end gap-3 w-full shrink-0">
+          <button 
+            onClick={() => setIsWipeModalOpen(true)}
+            className="h-10 bg-red-50 hover:bg-red-100 text-red-600 px-4 font-black text-xs uppercase tracking-wider transition-colors flex justify-center items-center gap-2 border-2 border-red-200 rounded-none shadow-none whitespace-nowrap mr-auto"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+            <span className="hidden sm:inline">TÜM KAYITLARI SİL</span>
+            <span className="sm:hidden">SİL</span>
+          </button>
+          
+          <button 
+            onClick={() => setIsExcelOpen(true)}
+            className="h-10 bg-slate-800 hover:bg-slate-900 text-white px-4 font-black text-xs uppercase tracking-wider transition-colors flex justify-center items-center gap-2 border-2 border-slate-900 rounded-none shadow-none whitespace-nowrap"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M4 16v1h16v-1M12 4v10m-4-4l4 4 4-4"></path></svg>
+            <span>EXCEL YÜKLE</span>
+          </button>
+          <button 
+            onClick={exportTwoColumnExcel}
+            className="h-10 bg-white hover:bg-slate-50 text-[#dc3545] px-4 font-black text-xs uppercase tracking-wider transition-colors flex justify-center items-center gap-2 border-2 border-[#dc3545] rounded-none shadow-none whitespace-nowrap"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+            <span>ÇIKTI (2 KOLON)</span>
+          </button>
+          <button 
+            onClick={exportExactOriginalExcel}
+            className="h-10 bg-white hover:bg-slate-50 text-slate-800 px-4 font-black text-xs uppercase tracking-wider transition-colors flex justify-center items-center gap-2 border-2 border-slate-300 rounded-none shadow-none whitespace-nowrap"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+            <span>ÇIKTI (TAM)</span>
+          </button>
         </div>
 
         <div className="w-full grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           
-          {/* SOL KOLON: Aktif İşlem Modülü (Daha Kompakt) */}
+          {/* SOL KOLON: Aktif İşlem Modülü */}
           <div className={`col-span-1 lg:col-span-8 shadow-sm border-2 transition-colors duration-200 p-5 flex flex-col gap-5 rounded-none ${getContainerStyles()} w-full min-w-0`}>
             
             {statusMessage && (
               <div className={`p-4 text-sm font-black uppercase tracking-widest border-2 shadow-none animate-in fade-in rounded-none break-words ${
                 uiStatus === "error" ? "bg-red-50 text-red-700 border-red-500" :
+                uiStatus === "update" ? "bg-blue-50 text-blue-700 border-blue-500" :
                 uiStatus === "warning" ? "bg-orange-50 text-orange-700 border-orange-500" :
                 "bg-green-50 text-green-700 border-green-500"
               }`}>
@@ -342,7 +403,7 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
             {/* ADIM 2: Aktif Sipariş Detayları */}
             {activeGroup && (
               <div className="flex flex-col gap-0 animate-in slide-in-from-bottom-2 fade-in duration-200 bg-white border-2 border-slate-300 shadow-sm relative rounded-none w-full min-w-0">
-                <div className="absolute top-0 left-0 w-1.5 h-full bg-[#dc3545]"></div>
+                <div className={`absolute top-0 left-0 w-1.5 h-full ${activeGroup.isUpdateMode ? 'bg-blue-500' : 'bg-[#dc3545]'}`}></div>
 
                 {/* SD Document Analizi Lojiği */}
                 <div className="bg-slate-50 border-b-2 border-slate-200 p-3 pl-5 sm:pl-6">
@@ -423,10 +484,10 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
                   </div>
                 </div>
 
-                {/* Barkod Eşleştirme Aksiyonu */}
-                <div className="bg-slate-100 p-4 sm:p-5 pl-5 sm:pl-6 w-full">
-                  <label className="block text-xs font-black text-[#dc3545] uppercase tracking-widest mb-2 border-b-2 border-red-200 pb-1">
-                    2. ADIM: ARAS KARGO BARKODU
+                {/* Barkod Eşleştirme Aksiyonu (Düzeltme Moduna Duyarlı) */}
+                <div className={`${activeGroup.isUpdateMode ? 'bg-blue-50' : 'bg-slate-100'} p-4 sm:p-5 pl-5 sm:pl-6 w-full`}>
+                  <label className={`block text-xs font-black uppercase tracking-widest mb-2 border-b-2 pb-1 ${activeGroup.isUpdateMode ? 'text-blue-600 border-blue-200' : 'text-[#dc3545] border-red-200'}`}>
+                    {activeGroup.isUpdateMode ? '2. ADIM: YENİ ARAS KARGO BARKODU' : '2. ADIM: ARAS KARGO BARKODU'}
                   </label>
                   <form onSubmit={handleTrackingScan} className="flex flex-col sm:flex-row gap-3 w-full">
                     <input
@@ -435,17 +496,17 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
                       value={trackingNo}
                       onChange={(e) => setTrackingNo(e.target.value)}
                       disabled={loading}
-                      className="flex-1 h-12 bg-white border-2 border-[#dc3545] px-4 text-xl font-black font-mono text-slate-900 focus:outline-none focus:border-red-600 focus:ring-2 focus:ring-red-600 rounded-none uppercase placeholder:text-red-200"
-                      placeholder="TAKİP NO OKUTUNUZ"
+                      className={`flex-1 h-12 bg-white border-2 px-4 text-xl font-black font-mono text-slate-900 focus:outline-none focus:ring-2 rounded-none uppercase ${activeGroup.isUpdateMode ? 'border-blue-500 focus:border-blue-600 focus:ring-blue-600 placeholder:text-blue-200' : 'border-[#dc3545] focus:border-red-600 focus:ring-red-600 placeholder:text-red-200'}`}
+                      placeholder={activeGroup.isUpdateMode ? "YENİ TAKİP NO OKUTUNUZ" : "TAKİP NO OKUTUNUZ"}
                       autoComplete="off"
                     />
                     <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto shrink-0">
                       <button 
                         type="submit" 
                         disabled={loading || !trackingNo.trim()}
-                        className="w-full sm:w-auto h-12 px-8 bg-[#dc3545] hover:bg-red-700 disabled:bg-red-300 text-white font-black text-sm uppercase tracking-widest transition-colors rounded-none border-2 border-red-800"
+                        className={`w-full sm:w-auto h-12 px-8 text-white font-black text-sm uppercase tracking-widest transition-colors rounded-none border-2 shadow-none ${activeGroup.isUpdateMode ? 'bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 border-blue-800' : 'bg-[#dc3545] hover:bg-red-700 disabled:bg-red-300 border-red-800'}`}
                       >
-                        KAYDET
+                        {activeGroup.isUpdateMode ? 'GÜNCELLE' : 'KAYDET'}
                       </button>
                       <button 
                         type="button"
@@ -465,7 +526,6 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
           {/* SAĞ KOLON: Bilgi ve Durum Paneli (Info Card) */}
           <div className="col-span-1 lg:col-span-4 flex flex-col gap-6 w-full h-full">
             
-            {/* Animasyonlu Bilgi Panosu */}
             <div className="bg-white shadow-sm border-2 border-slate-300 rounded-none overflow-hidden flex flex-col">
               <div className="w-full h-48 sm:h-56 bg-slate-100 border-b-2 border-slate-300 relative">
                 <img 
@@ -482,23 +542,15 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
                 </div>
                 <div className="flex flex-col gap-2 border-t-2 border-slate-100 pt-4">
                   <div className="flex items-center justify-between text-xs font-bold">
-                    <span className="text-slate-500">API Bağlantısı</span>
-                    <span className="text-green-600 bg-green-50 px-2 py-0.5 border border-green-200">AKTİF</span>
+                    <span className="text-slate-500">Terminal Aktifliği</span>
+                    <span className="text-green-600 bg-green-50 px-2 py-0.5 border border-green-200">ÇEVRİMİÇİ</span>
                   </div>
                   <div className="flex items-center justify-between text-xs font-bold">
                     <span className="text-slate-500">Veritabanı Senk.</span>
-                    <span className="text-green-600 bg-green-50 px-2 py-0.5 border border-green-200">AKTİF</span>
+                    <span className="text-green-600 bg-green-50 px-2 py-0.5 border border-green-200">BAĞLANDI</span>
                   </div>
                 </div>
               </div>
-            </div>
-
-            {/* KPI İstatistik Kartı */}
-            <div className="bg-white shadow-sm border-2 border-slate-300 rounded-none p-5 flex flex-col items-center justify-center text-center gap-2 relative overflow-hidden">
-              <div className="absolute -right-4 -top-4 w-16 h-16 bg-[#dc3545] opacity-10 rounded-full blur-xl"></div>
-              <span className="text-xs font-black text-slate-500 uppercase tracking-widest">BUGÜN İŞLENEN TEKİL SİPARİŞ</span>
-              <span className="text-5xl font-black font-mono text-[#dc3545] drop-shadow-sm">{todayCount}</span>
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1 border-t-2 border-slate-100 pt-2 w-full">Terminalde Anlık Güncellenir</span>
             </div>
 
           </div>
@@ -508,9 +560,47 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
 
       <ExcelUploadDrawer 
         isOpen={isExcelOpen} 
-        onClose={() => setIsExcelOpen(false)} 
+        onClose={() => {
+          setIsExcelOpen(false);
+          fetchStats(); // Excel yüklemesi kapanınca sayacı güncelle
+        }} 
         employeeId={employeeId} 
       />
+
+      {/* KRİTİK ONAY MODALI (TÜMÜNÜ SİL) */}
+      {isWipeModalOpen && (
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/80 p-4 backdrop-blur-sm">
+          <div className="bg-white border-2 border-red-600 shadow-2xl w-full max-w-lg rounded-none overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="bg-red-600 p-4 flex items-center gap-3">
+              <svg className="w-6 h-6 text-white shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="square" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+              <h2 className="text-white font-black text-lg sm:text-xl tracking-widest uppercase">KRİTİK UYARI: VERİTABANI SIFIRLAMA</h2>
+            </div>
+            <div className="p-6 sm:p-8">
+              <p className="text-slate-800 font-black text-lg mb-2 uppercase">Tüm kayıtlar kalıcı olarak silinecektir!</p>
+              <p className="text-slate-500 font-bold text-sm mb-8 leading-relaxed">
+                Bu işlem bugüne kadar yüklenen Excel tablolarını ve yapılan tüm kargo eşleştirmelerini veritabanından tamamen silecektir. 
+                İşlem geri alınamaz. Yeni bir Excel yüklemeden önce eski kayıtları temizlemek istediğinizden emin misiniz?
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button 
+                  onClick={handleWipeDatabase} 
+                  disabled={loading}
+                  className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white font-black h-12 uppercase tracking-widest border-2 border-red-800 transition-colors"
+                >
+                  {loading ? "SİLİNİYOR..." : "EVET, TÜMÜNÜ SİL"}
+                </button>
+                <button 
+                  onClick={() => setIsWipeModalOpen(false)} 
+                  disabled={loading}
+                  className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-800 font-black h-12 uppercase tracking-widest border-2 border-slate-400 transition-colors"
+                >
+                  İPTAL
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

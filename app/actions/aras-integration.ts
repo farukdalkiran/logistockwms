@@ -26,7 +26,6 @@ export async function getShipmentsByDeliveryNumber(deliveryNumber: string) {
 
 export async function saveArasTracking(deliveryNumber: string, trackingNumber: string, employeeId: string) {
   try {
-    // WMS Kuralı: Aynı delivery_number'a ait tüm satırlar tek seferde Aras Kodu ile güncellenir.
     const { error } = await supabaseAdmin
       .from("erp_raw_shipments")
       .update({
@@ -46,26 +45,59 @@ export async function saveArasTracking(deliveryNumber: string, trackingNumber: s
   }
 }
 
-export async function getTodayProcessedCount() {
+// 3'LÜ KPI İSTATİSTİK MOTORU (Toplam, İşlenen, Bugün)
+export async function getKargoStats() {
   try {
-    const today = new Date().toISOString().split('T')[0];
     const { data, error } = await supabaseAdmin
       .from("erp_raw_shipments")
-      .select("delivery_number")
-      .eq("is_processed_aras", true)
-      .gte("processed_at", `${today}T00:00:00.000Z`);
+      .select("delivery_number, is_processed_aras, processed_at");
 
-    if (error) return { success: false, count: 0 };
-    
-    // Aynı siparişteki kalemleri tekil (1) saymak için Set kullanıyoruz
-    const uniqueDeliveries = new Set(data.map(d => d.delivery_number));
-    return { success: true, count: uniqueDeliveries.size };
+    if (error) throw error;
+
+    const uniqueAll = new Set();
+    const uniqueProcessed = new Set();
+    const uniqueToday = new Set();
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    data.forEach(row => {
+      uniqueAll.add(row.delivery_number);
+      if (row.is_processed_aras) {
+        uniqueProcessed.add(row.delivery_number);
+        if (row.processed_at && row.processed_at.startsWith(todayStr)) {
+          uniqueToday.add(row.delivery_number);
+        }
+      }
+    });
+
+    return {
+      success: true,
+      total: uniqueAll.size,
+      processed: uniqueProcessed.size,
+      today: uniqueToday.size
+    };
   } catch (e) {
-    return { success: false, count: 0 };
+    return { success: false, total: 0, processed: 0, today: 0 };
   }
 }
 
-// 2 KOLONLU EXCEL ÇIKTISI İÇİN: Sadece Tekil (Mükerrer Olmayan) Eşleşmiş Kayıtlar
+// TÜM KAYITLARI SİLEN KRİTİK WIPE MOTORU
+export async function wipeAllShipments() {
+  try {
+    const { error } = await supabaseAdmin
+      .from("erp_raw_shipments")
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000'); 
+
+    if (error) return { success: false, error: "Silme işlemi başarısız oldu." };
+    
+    revalidatePath("/management/cargo");
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: "Sunucu bağlantı hatası." };
+  }
+}
+
+// 2 KOLONLU EXCEL ÇIKTISI
 export async function getProcessedExportData() {
   try {
     const { data, error } = await supabaseAdmin
@@ -89,7 +121,7 @@ export async function getProcessedExportData() {
   }
 }
 
-// ORİJİNAL ŞABLON ÇIKTISI İÇİN: Eşleşmiş/Eşleşmemiş Tüm Veri
+// ORİJİNAL ŞABLON ÇIKTISI
 export async function getExactOriginalExportData() {
   try {
     const { data, error } = await supabaseAdmin
