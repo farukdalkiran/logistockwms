@@ -26,6 +26,7 @@ export async function getShipmentsByDeliveryNumber(deliveryNumber: string) {
 
 export async function saveArasTracking(deliveryNumber: string, trackingNumber: string, employeeId: string) {
   try {
+    // WMS Kuralı: Aynı delivery_number'a ait tüm satırlar tek seferde Aras Kodu ile güncellenir.
     const { error } = await supabaseAdmin
       .from("erp_raw_shipments")
       .update({
@@ -56,6 +57,7 @@ export async function getTodayProcessedCount() {
 
     if (error) return { success: false, count: 0 };
     
+    // Aynı siparişteki kalemleri tekil (1) saymak için Set kullanıyoruz
     const uniqueDeliveries = new Set(data.map(d => d.delivery_number));
     return { success: true, count: uniqueDeliveries.size };
   } catch (e) {
@@ -63,7 +65,7 @@ export async function getTodayProcessedCount() {
   }
 }
 
-// 2 KOLONLU EXCEL ÇIKTISI İÇİN: İşlenmiş (is_processed_aras = true) ve Tekil Kayıtlar
+// 2 KOLONLU EXCEL ÇIKTISI İÇİN: Sadece Tekil (Mükerrer Olmayan) Eşleşmiş Kayıtlar
 export async function getProcessedExportData() {
   try {
     const { data, error } = await supabaseAdmin
@@ -74,7 +76,6 @@ export async function getProcessedExportData() {
 
     if (error) return { success: false, error: "Veri çekilemedi." };
     
-    // Aynı Delivery Number defalarca excelle yazılmasın diye haritalama (Map) ile temizliyoruz
     const uniqueMap = new Map();
     data.forEach(item => {
        if (!uniqueMap.has(item.delivery_number)) {
@@ -83,6 +84,28 @@ export async function getProcessedExportData() {
     });
 
     return { success: true, data: Array.from(uniqueMap.values()) };
+  } catch (err: any) {
+    return { success: false, error: "Sunucu hatası." };
+  }
+}
+
+// ORİJİNAL ŞABLON ÇIKTISI İÇİN: Eşleşmiş/Eşleşmemiş Tüm Veri
+export async function getExactOriginalExportData() {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("erp_raw_shipments")
+      .select(`
+        shipment_number, customer_name, email, mobile_number, street, street_2, 
+        city, region, postal_code, country, customer_material, sd_document, 
+        delivery_number, material, description_text, quantity, uom, 
+        export_price, export_price_currency, local_currency_rate, 
+        country_of_origin, commodity_code, net_weight_gm, invoice_number, 
+        aras_tracking_number
+      `)
+      .order("created_at", { ascending: false });
+
+    if (error) return { success: false, error: "Veri çekilemedi." };
+    return { success: true, data };
   } catch (err: any) {
     return { success: false, error: "Sunucu hatası." };
   }
