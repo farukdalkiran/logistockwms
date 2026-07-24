@@ -1,14 +1,14 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Plus, Clock, AlertCircle, CalendarDays, ArrowRight, Check, Info, Calendar, FileText, Lock, ListChecks, ChevronLeft, ChevronRight, CheckCircle2, XCircle, History, ShieldAlert, Ban, MessageSquare, TerminalSquare } from "lucide-react";
+import { useState, useRef, useEffect, useMemo } from "react";
+import { Plus, Clock, AlertCircle, CalendarDays, ArrowRight, Check, Info, Calendar, FileText, Lock, ListChecks, ChevronLeft, ChevronRight, CheckCircle2, XCircle, History, ShieldAlert, Ban, MessageSquare, TerminalSquare, Umbrella, HeartPulse, Scale, UserMinus, AlertTriangle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { submitLeaveRequest, cancelLeaveRequestServer } from "@/app/actions/leave-requests";
 import { useRouter } from "next/navigation";
 import { useWms } from "@/components/providers/WmsSessionProvider";
 
 
-type EmployeeData = { id: string; full_name: string; branch_id: string; leave_balance: number; position_title: string };
+type EmployeeData = { id: string; full_name: string; branch_id: string; leave_balance: number; position_title: string; employment_date: string };
 type FeedbackData = { type: "success" | "error"; msg: string };
 
 export default function LeaveRequestPanel() {
@@ -24,6 +24,7 @@ export default function LeaveRequestPanel() {
   const [leaveRequests, setLeaveRequests] = useState<any[]>([]);
   const [recentLogs, setRecentLogs] = useState<any[]>([]);
 
+  const [leaveCategory, setLeaveCategory] = useState<"YILLIK" | "SAGLIK" | "MAZERET" | "UCRETSIZ" | "DIGER" | "">("");
   const [leaveType, setLeaveType] = useState("");
   const [customType, setCustomType] = useState("");
   const [isHalfDay, setIsHalfDay] = useState(false);
@@ -39,6 +40,8 @@ export default function LeaveRequestPanel() {
 
   const isManager = employee ? ["yönetici", "müdür", "şef", "admin", "developer", "uzman", "lider"].some(k => employee.position_title?.toLowerCase().includes(k)) : false;
   const willAutoApprove = leaveType === 'SAGLIK_RAPORU' || isManager;
+
+  const deductableLeaves = ['YILLIK_IZIN']; 
 
   useEffect(() => {
     if (step === "LOGIN") {
@@ -81,8 +84,6 @@ export default function LeaveRequestPanel() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    console.log("WMS Yetki Kontrolü ->", { isGlobal, managerBranchId, girilenTerminalId: terminalId });
-
     if (terminalId.length !== 5) {
       setFeedback({ type: "error", msg: "GEÇERSİZ ID (5 HANELİ OLMALI)" });
       setTerminalId("");
@@ -101,7 +102,7 @@ export default function LeaveRequestPanel() {
 
       let query = supabase
         .from("employees")
-        .select("id, full_name, branch_id, leave_balance, position_title")
+        .select("id, full_name, branch_id, leave_balance, position_title, employment_date")
         .eq("id", terminalId)
         .eq("is_active", true);
 
@@ -137,11 +138,10 @@ export default function LeaveRequestPanel() {
     }
   };
 
-const confirmCancel = async () => {
+  const confirmCancel = async () => {
     if (!cancelModal || !employee) return;
     setLoading(true);
     try {
-      // 1. RLS kalkanını delen Server Action'ı çağır (Tüm veritabanı yükünü sunucuya devrediyoruz)
       const result = await cancelLeaveRequestServer(
         cancelModal.id,
         employee.id,
@@ -155,15 +155,10 @@ const confirmCancel = async () => {
         throw new Error(result.message);
       }
 
-      // 2. İşlem başarılıysa İstemci (Client) tarafındaki bakiyeyi güncelle
-      if (cancelModal.status === 'APPROVED') {
-        const nonRefundable = ['UCRETSİZ', 'ÜCRETSİZ', 'UCRETSIZ', 'SAGLIK_RAPORU', 'EVLILIK', 'VEFAT', 'DOGUM', 'MAZERET'];
-        if (!nonRefundable.includes(cancelModal.leave_type)) {
-          setEmployee({ ...employee, leave_balance: employee.leave_balance + cancelModal.requested_days });
-        }
+      if (cancelModal.status === 'APPROVED' && deductableLeaves.includes(cancelModal.leave_type)) {
+         setEmployee({ ...employee, leave_balance: employee.leave_balance + cancelModal.requested_days });
       }
 
-      // 3. Tabloları tazele
       await fetchData(employee.id, currentMonthDate);
       
     } catch (err: any) {
@@ -211,7 +206,7 @@ const confirmCancel = async () => {
           onClick={() => toggleDateSelection(dateString)}
           className={`h-11 w-full flex items-center justify-center rounded-none font-mono font-black text-xs transition-all border ${
             isSelected 
-              ? "bg-[#dc3545] text-white border-[#dc3545] shadow-sm z-10 relative" 
+              ? "bg-[#dc3545] text-white border-[#dc3545] shadow-sm z-10 relative scale-105" 
               : "bg-white text-slate-700 border-slate-200 hover:border-[#0F172A] hover:bg-slate-50"
           }`}
         >
@@ -226,9 +221,25 @@ const confirmCancel = async () => {
   const submitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!employee) return;
+    
+    if (leaveType === "") {
+        alert("Lütfen kategorilerden bir izin tipi seçiniz.");
+        return;
+    }
+
     if (selectedDates.length === 0) {
       alert("Lütfen takvimden en az bir gün seçiniz.");
       return;
+    }
+
+    const requestedDays = isHalfDay ? selectedDates.length * 0.5 : selectedDates.length;
+    
+    if (deductableLeaves.includes(leaveType)) {
+      const remainingBalanceAfterRequest = employee.leave_balance - requestedDays;
+      if (remainingBalanceAfterRequest < -14) {
+        alert(`WMS KURAL İHLALİ:\nMevcut Yıllık İzin Bakiyeniz: ${employee.leave_balance} Gün\nİstenen: ${requestedDays} Gün\n\nBu talep bakiyenizi -14'ün altına (${remainingBalanceAfterRequest} Gün) düşüreceği için SİSTEM TARAFINDAN REDDEDİLMİŞTİR.`);
+        return;
+      }
     }
 
     setLoading(true);
@@ -250,12 +261,18 @@ const confirmCancel = async () => {
       await fetchData(employee.id, currentMonthDate);
       setStep("DASHBOARD");
       
-      setLeaveType(""); setSelectedDates([]); setReason(""); setIsHalfDay(false); setCustomType("");
+      setLeaveCategory(""); setLeaveType(""); setSelectedDates([]); setReason(""); setIsHalfDay(false); setCustomType("");
       router.refresh();
     } else {
       alert(`HATA: ${result.message}`);
     }
     setLoading(false);
+  };
+
+  const handleCategorySelect = (cat: "YILLIK" | "SAGLIK" | "MAZERET" | "UCRETSIZ" | "DIGER", typeVal: string) => {
+      setLeaveCategory(cat);
+      setLeaveType(typeVal);
+      if(cat !== "DIGER") setCustomType("");
   };
 
   const formatDate = (dateStr: string) => {
@@ -277,10 +294,40 @@ const confirmCancel = async () => {
     }
   };
 
+  // --- WMS İSTATİSTİK HESAPLAMA MOTORU ---
+  const leaveStats = useMemo(() => {
+    if (!employee || !employee.employment_date) {
+       return { seniority: 0, totalEarned: 0, totalUsed: 0 };
+    }
+
+    const empDate = new Date(employee.employment_date);
+    const now = new Date();
+    
+    // Kıdem hesaplama (Yıl)
+    let yearsDiff = now.getFullYear() - empDate.getFullYear();
+    if (now.getMonth() < empDate.getMonth() || (now.getMonth() === empDate.getMonth() && now.getDate() < empDate.getDate())) {
+      yearsDiff--;
+    }
+    
+    // Toplam Hak Edilen İzin (1-5 yıl: 14, 6+ yıl: 20)
+    let totalEarned = 0;
+    for (let i = 1; i <= yearsDiff; i++) {
+      totalEarned += (i >= 6 ? 20 : 14);
+    }
+
+    // Toplam Kullanılan (Kazanılan - Mevcut Bakiye)
+    const totalUsed = totalEarned - employee.leave_balance;
+
+    return {
+      seniority: yearsDiff,
+      totalEarned,
+      totalUsed
+    };
+  }, [employee]);
+
   return (
     <div className="w-full flex flex-col bg-slate-100 border-2 border-slate-300 select-none relative rounded-none shadow-xl">
       
-      {/* İPTAL / GERİ ÇEKME MODALI - Endüstriyel Keskin Tasarım */}
       {cancelModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm px-4">
           <div className="bg-white rounded-none shadow-2xl w-full max-w-md border-t-4 border-[#dc3545] animate-in zoom-in-95 duration-200 overflow-hidden">
@@ -291,7 +338,7 @@ const confirmCancel = async () => {
              <div className="p-6">
                <p className="text-sm font-bold text-slate-600 mb-6 leading-relaxed">
                   {cancelModal.status === 'APPROVED' 
-                     ? "ONAYLANMIŞ izninizi iptal etmek üzeresiniz. Bu işlem sistem tarafından loglanacak ve uygunsa bakiye iadeniz sağlanacaktır. Onaylıyor musunuz?"
+                     ? "ONAYLANMIŞ izninizi iptal etmek üzeresiniz. İşlem sistem tarafından loglanacak ve uygunsa bakiye iadeniz sağlanacaktır. Onaylıyor musunuz?"
                      : "BEKLEYEN izin talebinizi iptal edip geri çekmek üzeresiniz. Onaylıyor musunuz?"}
                </p>
                <div className="flex gap-3">
@@ -305,10 +352,8 @@ const confirmCancel = async () => {
         </div>
       )}
 
-{/* GLOBAL HEADER & BİLGİ ALANI - WMS Command Center Style (EN ÜSTTE SABİT) */}
+      {/* HEADER */}
       <div className="w-full flex flex-col z-20 relative shadow-xl border-b-4 border-[#dc3545]">
-        
-        {/* 1. ÜST KISIM: ORİJİNAL HEADER (HER ZAMAN GÖRÜNÜR) */}
         <div className="w-full bg-[#0F172A] p-5 flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <div className="bg-[#dc3545] p-2.5 rounded-none border border-red-400/30">
@@ -339,15 +384,10 @@ const confirmCancel = async () => {
           )}
         </div>
 
-        {/* 2. ALT KISIM: KUTULU BİLGİ MODÜLÜ VE 1:1 KARE GÖRSEL ALANI (SADECE GİRİŞ YAPILINCA AÇILIR) */}
         {employee && step === "DASHBOARD" && (
           <div className="w-full bg-slate-900 border-t border-slate-800 flex flex-col lg:flex-row items-stretch animate-in slide-in-from-top-4 fade-in duration-500">
-            
-            {/* Sistem Bilgi ve Kullanım Paneli (Sol Taraf) */}
             <div className="flex-1 p-6 md:p-8 flex flex-col justify-center">
-              
               <div className="w-full bg-[#0b1121] border border-slate-700 shadow-inner flex flex-col">
-                
                 <div className="bg-slate-800/50 border-b border-slate-700 p-4 flex items-center gap-3">
                   <div className="bg-[#dc3545] p-1">
                     <TerminalSquare className="w-4 h-4 text-white" />
@@ -365,7 +405,7 @@ const confirmCancel = async () => {
                      <div className="flex flex-col">
                        <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest mb-1">NASIL KULLANILIR?</span>
                        <span className="text-[10px] font-bold text-slate-400 leading-relaxed">
-                         Sisteme 5 haneli ID'niz ile giriş yaptıktan sonra, "Yeni İzin Talebi" butonuna basarak takvimden günleri seçin. Süreyi ve tipi belirleyip talebi yönetici onayına gönderin.
+                         "Yeni İzin Talebi" butonuna basarak menüden kategori seçin ve takvimden günleri işaretleyin.
                        </span>
                      </div>
                    </div>
@@ -377,7 +417,7 @@ const confirmCancel = async () => {
                      <div className="flex flex-col">
                        <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest mb-1">OTOMATİK PUANTAJ</span>
                        <span className="text-[10px] font-bold text-slate-400 leading-relaxed">
-                         Onaylanan izinleriniz, manuel bir işleme gerek kalmadan puantajınıza o gün için otomatik olarak 8 saat (mola: 0) şeklinde işlenir.
+                         Onaylanan tüm izinleriniz, manuel bir işleme gerek kalmadan puantajınıza net 8 saat (mola: 0) olarak işlenir.
                        </span>
                      </div>
                    </div>
@@ -387,9 +427,9 @@ const confirmCancel = async () => {
                        <ShieldAlert className="w-4 h-4 text-amber-400" />
                      </div>
                      <div className="flex flex-col">
-                       <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest mb-1">OTO-ONAY VE GÜVENLİK</span>
+                       <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest mb-1">-14 GÜN LİMİT KURALI</span>
                        <span className="text-[10px] font-bold text-slate-400 leading-relaxed">
-                         Yönetici hesapları ve Sağlık Raporları sistemden doğrudan onay alır. Tüm iptal ve gönderim hareketleri kimlik ID'niz üzerinden loglanır.
+                         Sadece Yıllık İzin talepleriniz bakiyeden düşer. Bakiyenizi -14 günün altına düşürecek Yıllık İzin talepleri sistem tarafından bloke edilir.
                        </span>
                      </div>
                    </div>
@@ -401,17 +441,15 @@ const confirmCancel = async () => {
                      <div className="flex flex-col">
                        <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest mb-1">İPTAL VE BAKİYE İADESİ</span>
                        <span className="text-[10px] font-bold text-slate-400 leading-relaxed">
-                         Geçmiş loglarınızdan onaylanmış veya bekleyen izinlerinizi iptal edebilirsiniz. İptal anında, kullanılan gün bakiyesi iade edilir ve hatalı loglar silinir.
+                         Onaylanmış veya bekleyen izinlerinizi iptal edebilirsiniz. İptal anında, bakiyeden düşülmüşse gün iade edilir ve hatalı loglar silinir.
                        </span>
                      </div>
                    </div>
                 </div>
-
               </div>
             </div>
 
-            {/* Görsel Alanı (Sağ Taraf) */}
-            <div className="flex flex-col items-center justify-center p-6 bg-slate-950 border-t lg:border-t-0 lg:border-l border-slate-800">
+            <div className="flex flex-col items-center justify-center p-6 bg-slate-950 border-t lg:border-t-0 lg:border-l border-slate-800 hidden md:flex">
               <div className="w-48 h-48 md:w-56 md:h-56 xl:w-72 xl:h-72 shrink-0 border-4 border-[#0F172A] shadow-2xl relative overflow-hidden group bg-slate-50">
                 <div className="absolute inset-0 bg-[#dc3545] opacity-0 group-hover:opacity-10 transition-opacity duration-300 z-10 pointer-events-none"></div>
                 <img 
@@ -421,12 +459,10 @@ const confirmCancel = async () => {
                 />
               </div>
             </div>
-
           </div>
         )}
       </div>
 
-      {/* LOGIN SCREEN */}
       {step === "LOGIN" && (
         <div className="flex flex-col md:flex-row w-full min-h-[500px] bg-white animate-in fade-in duration-300">
           <div className="w-full md:w-5/12 bg-[#0F172A] p-12 flex flex-col justify-center relative overflow-hidden border-r-2 border-slate-800">
@@ -439,7 +475,7 @@ const confirmCancel = async () => {
             <div className="relative z-10 border-l-4 border-[#dc3545] pl-6">
               <h2 className="text-2xl font-black tracking-[0.15em] uppercase text-white mb-2">OPERASYONEL KİMLİK</h2>
               <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest leading-relaxed">
-                İZİN YÖNETİM MODÜLÜNE ERİŞMEK VE MEVCUT BAKİYELERİ KONTROL ETMEK İÇİN KİŞİSEL 5 HANELİ TERMİNAL ID NUMARANIZI GİRİNİZ.
+                İZİN YÖNETİM MODÜLÜNE ERİŞMEK İÇİN KİŞİSEL 5 HANELİ TERMİNAL ID NUMARANIZI GİRİNİZ.
               </p>
             </div>
           </div>
@@ -478,11 +514,9 @@ const confirmCancel = async () => {
         </div>
       )}
 
-      {/* DASHBOARD - Komuta Merkezi Görünümü */}
       {step === "DASHBOARD" && employee && (
         <div className="flex flex-col w-full min-h-[700px] bg-slate-50 animate-in fade-in duration-300">
           
-          {/* ACTION BAR (Yeni tasarım mantığı: Tabloların yanındaki dev boşluk yerine üst bar) */}
           <div className="w-full bg-white border-b-2 border-slate-200 p-4 flex flex-col md:flex-row items-center justify-between gap-4">
              <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-slate-100 border-2 border-slate-200 flex items-center justify-center">
@@ -503,64 +537,76 @@ const confirmCancel = async () => {
 
           <div className="p-6 flex flex-col gap-6">
             
-            {/* KPI KARTLARI - Dark Endüstriyel */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-<div className="bg-[#0F172A] border-l-4 border-emerald-500 p-6 flex flex-col justify-between relative overflow-hidden h-[160px] shadow-sm group">
-  
-  {/* WMS Endüstriyel Izgara (Grid) Arka Planı */}
-  <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:16px_16px] pointer-events-none"></div>
-  
-  {/* Sağ Alt Dekoratif İkon */}
-  <CalendarDays className="absolute -right-8 -bottom-8 w-40 h-40 text-emerald-500 opacity-5 group-hover:opacity-10 group-hover:scale-110 transition-all duration-700 ease-out" strokeWidth={1} />
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                
+                {/* WMS YENİ: GENİŞLETİLMİŞ İZİN BAKİYE KARTI */}
+                <div className="bg-[#0F172A] border-l-4 border-emerald-500 flex flex-col sm:flex-row relative overflow-hidden shadow-sm group">
+                  <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:16px_16px] pointer-events-none"></div>
+                  <Umbrella className="absolute -right-8 -bottom-8 w-40 h-40 text-emerald-500 opacity-5 group-hover:opacity-10 group-hover:scale-110 transition-all duration-700 ease-out" strokeWidth={1} />
+                
+                  {/* SOL: Ana Bakiye Rakamı */}
+                  <div className="flex-1 p-6 relative z-10 flex justify-between items-start border-b sm:border-b-0 sm:border-r border-slate-700">
+                    <div className="flex flex-col h-full justify-between">
+                      <div>
+                        <div className="flex items-center gap-2.5 mb-2">
+                          <div className="relative flex items-center justify-center">
+                            <div className="w-2 h-2 bg-emerald-500 rounded-none absolute animate-ping opacity-75"></div>
+                            <div className="w-1.5 h-1.5 bg-emerald-400 rounded-none relative z-10 shadow-[0_0_8px_rgba(52,211,153,0.8)]"></div>
+                          </div>
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] drop-shadow-sm">YILLIK İZİN BAKİYESİ</span>
+                        </div>
+                        <div className="flex items-baseline gap-2 mt-2">
+                          <span className={`text-7xl font-black font-mono tracking-tighter drop-shadow-md leading-none ${employee.leave_balance < 0 ? 'text-[#dc3545]' : 'text-white'}`}>
+                            {employee.leave_balance}
+                          </span>
+                          <span className="text-sm font-black text-emerald-500 uppercase tracking-[0.25em]">GÜN</span>
+                        </div>
+                      </div>
 
-  <div className="relative z-10 flex justify-between items-start">
-    <div className="flex flex-col">
-      {/* Başlık ve Aktif Led */}
-      <div className="flex items-center gap-2.5 mb-2">
-        <div className="relative flex items-center justify-center">
-          <div className="w-2 h-2 bg-emerald-500 rounded-none absolute animate-ping opacity-75"></div>
-          <div className="w-1.5 h-1.5 bg-emerald-400 rounded-none relative z-10 shadow-[0_0_8px_rgba(52,211,153,0.8)]"></div>
-        </div>
-        <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] drop-shadow-sm">KULLANILABİLİR İZİN BAKİYESİ</span>
-      </div>
-      
-      {/* Ana Rakam Alanı - Terminal Tipi */}
-      <div className="flex items-baseline gap-2 mt-1">
-        <span className="text-6xl font-black text-white font-mono tracking-tighter drop-shadow-md">
-          {employee.leave_balance}
-        </span>
-        <span className="text-xs font-black text-emerald-500 uppercase tracking-[0.25em]">GÜN</span>
-      </div>
-    </div>
+                      <div className="mt-6 flex items-center gap-4">
+                        <div className="flex-1 flex gap-1 h-1.5">
+                          <div className="bg-emerald-500 h-full w-full max-w-[15%]"></div>
+                          <div className="bg-emerald-500 h-full w-full max-w-[25%]"></div>
+                          <div className="bg-emerald-500/60 h-full w-full max-w-[20%]"></div>
+                          <div className="bg-emerald-500/30 h-full w-full max-w-[10%]"></div>
+                          <div className="bg-slate-700/50 h-full w-full flex-1 border-t border-b border-slate-700"></div>
+                        </div>
+                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] whitespace-nowrap">
+                          GÜNCEL NET VERİ
+                        </span>
+                      </div>
+                    </div>
+                  </div>
 
-    {/* Sağ Üst WMS Statü Modülü */}
-    <div className="flex flex-col items-end gap-1.5">
-      <div className="bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 flex items-center gap-2 backdrop-blur-sm">
-         <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
-         <span className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.15em]">SİSTEM AKTİF</span>
-      </div>
-      <span className="text-[8px] text-slate-500 font-mono font-bold tracking-widest uppercase bg-[#0F172A] px-1">
-        ID: {employee.id}
-      </span>
-    </div>
-  </div>
+                  {/* SAĞ: İstatistik Detay Matriksi */}
+                  <div className="w-full sm:w-64 bg-slate-900/50 p-6 relative z-10 flex flex-col justify-center gap-4">
+                     <div className="flex flex-col border-b border-slate-800 pb-3">
+                        <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">İŞE GİRİŞ TARİHİ</span>
+                        <span className="text-sm font-black text-slate-300 font-mono tracking-wider">{employee.employment_date ? formatDate(employee.employment_date) : '-'}</span>
+                     </div>
+                     <div className="flex justify-between items-end border-b border-slate-800 pb-3">
+                        <div className="flex flex-col">
+                           <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">KIDEM YILI</span>
+                           <span className="text-sm font-black text-slate-300 font-mono tracking-wider">{leaveStats.seniority} YIL</span>
+                        </div>
+                        <div className="flex flex-col text-right">
+                           <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">KAZANILAN</span>
+                           <span className="text-sm font-black text-emerald-500 font-mono tracking-wider">+{leaveStats.totalEarned}</span>
+                        </div>
+                     </div>
+                     <div className="flex justify-between items-end">
+                        <div className="flex flex-col">
+                           <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">TOPLAM KULLANILAN</span>
+                        </div>
+                        <div className="flex flex-col text-right">
+                           <span className="text-xl font-black text-[#dc3545] font-mono tracking-wider leading-none">-{leaveStats.totalUsed}</span>
+                        </div>
+                     </div>
+                  </div>
 
-  {/* Alt Dekoratif Veri Blokları (Matematiksel max değer gerektirmez, endüstriyel görsel katar) */}
-  <div className="relative z-10 mt-auto flex items-center gap-4">
-    <div className="flex-1 flex gap-1 h-1.5">
-      <div className="bg-emerald-500 h-full w-full max-w-[15%]"></div>
-      <div className="bg-emerald-500 h-full w-full max-w-[25%]"></div>
-      <div className="bg-emerald-500/60 h-full w-full max-w-[20%]"></div>
-      <div className="bg-emerald-500/30 h-full w-full max-w-[10%]"></div>
-      <div className="bg-slate-700/50 h-full w-full flex-1 border-t border-b border-slate-700"></div>
-    </div>
-    <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] whitespace-nowrap">
-      GÜNCEL NET VERİ
-    </span>
-  </div>
-</div>
+                </div>
               
-              <div className="bg-white border-2 border-slate-200 p-6 flex flex-col justify-between h-[160px] shadow-sm">
+              <div className="bg-white border-2 border-slate-200 p-6 flex flex-col justify-between shadow-sm min-h-[160px]">
                 <div className="flex items-start justify-between">
                   <div>
                     <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-2">ONAY BEKLEYEN TALEPLER</span>
@@ -581,10 +627,7 @@ const confirmCancel = async () => {
               </div>
             </div>
 
-            {/* TABLOLAR - Alt alta ve Geniş */}
             <div className="flex flex-col xl:flex-row gap-6">
-               
-               {/* GEÇMİŞ İZİNLER */}
                <div className="flex-1 bg-white border-2 border-slate-200 shadow-sm flex flex-col min-h-[350px]">
                  <div className="bg-[#0F172A] p-4 border-b-4 border-slate-800 flex items-center justify-between">
                    <div className="flex items-center gap-3">
@@ -605,7 +648,7 @@ const confirmCancel = async () => {
                          <th className="p-4 text-center">İşlem</th>
                        </tr>
                      </thead>
-<tbody>
+                     <tbody>
                         {leaveRequests.length === 0 ? (
                           <tr>
                             <td colSpan={6} className="p-8 text-center text-xs font-black text-slate-400 uppercase tracking-widest bg-slate-50 border-b border-slate-200">
@@ -615,13 +658,9 @@ const confirmCancel = async () => {
                         ) : (
                           leaveRequests.map((req) => (
                             <tr key={req.id} className="border-b border-slate-200 hover:bg-slate-100 transition-colors">
-                              
-                              {/* OLUŞTURULMA */}
                               <td className="p-4 text-center align-middle font-mono text-xs font-bold text-slate-500">
                                 {formatDate(req.created_at)}
                               </td>
-                              
-                              {/* TARİH ARALIĞI */}
                               <td className="p-4 text-center align-middle font-mono text-xs font-black text-slate-800">
                                 <div className="flex items-center justify-center gap-2">
                                   <span className="bg-white border border-slate-300 px-2 py-0.5 shadow-sm">{formatDate(req.start_date)}</span>
@@ -629,20 +668,14 @@ const confirmCancel = async () => {
                                   <span className="bg-white border border-slate-300 px-2 py-0.5 shadow-sm">{formatDate(req.end_date)}</span>
                                 </div>
                               </td>
-                              
-                              {/* İZİN TİPİ */}
                               <td className="p-4 text-center align-middle font-black text-[10px] text-slate-700 uppercase tracking-widest">
                                 <span className="bg-slate-200 border border-slate-300 px-2.5 py-1 shadow-inner">
                                   {req.leave_type === 'DIGER' ? req.custom_leave_type : req.leave_type.replace('_', ' ')}
                                 </span>
                               </td>
-                              
-                              {/* SÜRE */}
                               <td className="p-4 text-center align-middle font-mono text-sm font-black text-[#dc3545]">
                                 {req.requested_days} <span className="text-[9px] text-slate-500 ml-0.5">GÜN</span>
                               </td>
-                              
-                              {/* DURUM VE LOG */}
                               <td className="p-4 text-center align-middle">
                                 <div className="flex flex-col items-center justify-center gap-1.5">
                                   {getStatusBadge(req.status)}
@@ -654,8 +687,6 @@ const confirmCancel = async () => {
                                   )}
                                 </div>
                               </td>
-                              
-                              {/* AKSİYON */}
                               <td className="p-4 text-center align-middle">
                                 {(req.status === 'PENDING' || req.status === 'APPROVED') ? (
                                    <button 
@@ -668,16 +699,14 @@ const confirmCancel = async () => {
                                    <span className="text-[10px] font-bold text-slate-400 tracking-widest uppercase">-</span>
                                 )}
                               </td>
-                              
                             </tr>
                           ))
                         )}
-                      </tbody>
+                     </tbody>
                    </table>
                  </div>
                </div>
 
-               {/* AYLIK LOG */}
                <div className="flex-1 bg-white border-2 border-slate-200 shadow-sm flex flex-col min-h-[350px]">
                  <div className="bg-[#0F172A] p-4 border-b-4 border-[#dc3545] flex items-center justify-between">
                    <div className="flex items-center gap-3">
@@ -743,17 +772,16 @@ const confirmCancel = async () => {
                    </table>
                  </div>
                </div>
-
             </div>
           </div>
         </div>
       )}
 
-      {/* REQUEST FORM - Endüstriyel Keskin Tasarım */}
+      {/* REQUEST FORM - GENİŞ & KATEGORİK TASARIM */}
       {step === "REQUEST_FORM" && employee && (
-        <div className="flex flex-col w-full bg-slate-50 animate-in fade-in duration-300 min-h-[700px]">
+        <div className="flex flex-col w-full bg-slate-100 animate-in fade-in duration-300 min-h-[700px]">
           
-          <div className="bg-[#0F172A] p-5 border-b-4 border-[#dc3545] flex justify-between items-center">
+          <div className="bg-[#0F172A] p-5 border-b-4 border-[#dc3545] flex justify-between items-center shadow-md z-10">
             <h3 className="text-sm font-black text-white uppercase tracking-[0.1em] flex items-center gap-3">
               <Plus className="w-5 h-5 text-[#dc3545]" strokeWidth={3} /> YENİ İZİN TALEBİ OLUŞTUR
             </h3>
@@ -762,12 +790,13 @@ const confirmCancel = async () => {
             </button>
           </div>
 
-          <form onSubmit={submitRequest} className="p-6 md:p-8 flex flex-col lg:flex-row gap-8">
+          <form onSubmit={submitRequest} className="p-6 md:p-8 flex flex-col xl:flex-row gap-8 max-w-[1600px] mx-auto w-full">
             
-            <div className="w-full lg:w-1/2 flex flex-col gap-6">
+            {/* SOL KOLON: KATEGORİ SEÇİMİ VE DETAYLAR */}
+            <div className="w-full xl:w-7/12 flex flex-col gap-6">
               
               {willAutoApprove && leaveType !== '' && (
-                 <div className="bg-slate-900 border-l-4 border-emerald-500 p-4 flex items-start gap-3 shadow-md">
+                 <div className="bg-slate-900 border-l-4 border-emerald-500 p-4 flex items-start gap-3 shadow-md animate-in slide-in-from-top-2">
                    <ShieldAlert className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
                    <div className="flex flex-col">
                      <span className="text-[10px] font-black uppercase text-emerald-400 tracking-widest">SİSTEM BİLGİSİ: OTO-ONAY AKTİF</span>
@@ -778,80 +807,154 @@ const confirmCancel = async () => {
                  </div>
               )}
 
-              <div className="flex flex-col gap-2">
-                <label className="text-[10px] font-black text-[#0F172A] uppercase tracking-[0.15em]">İZİN TİPİ SEÇİMİ</label>
-                <select required value={leaveType} onChange={(e) => setLeaveType(e.target.value)} className="h-14 border-2 border-slate-300 rounded-none px-4 text-xs font-black text-slate-800 focus:border-[#0F172A] outline-none uppercase shadow-inner cursor-pointer transition-all bg-white">
-                  <option value="">LÜTFEN BİR TİP SEÇİNİZ...</option>
-                  <option value="UCRETLI">Ücretli İzin</option>
-                  <option value="UCRETSİZ">Ücretsiz İzin</option>
-                  <option value="YILLIK_IZIN">Yıllık Ücretli İzin</option>
-                  <option value="EVLILIK">Evlilik İzni</option>
-                  <option value="MAZERET">Mazeret İzni</option>
-                  <option value="VEFAT">Vefat İzni</option>
-                  <option value="DOGUM">Doğum İzni</option>
-                  <option value="SAGLIK_RAPORU" className="text-[#dc3545] font-black">SAĞLIK RAPORU (SİSTEM OTO-ONAY)</option>
-                  <option value="DIGER">Diğer...</option>
-                </select>
-                {leaveType === "DIGER" && (
-                  <input type="text" required placeholder="Manuel belirtin..." value={customType} onChange={(e) => setCustomType(e.target.value)} className="mt-3 h-14 border-2 border-[#dc3545] rounded-none px-4 text-xs font-black outline-none uppercase bg-white text-[#0F172A] shadow-inner" />
+              {/* KATEGORİ SEÇİMİ (YENİ UI) */}
+              <div className="flex flex-col gap-4">
+                 <div className="flex items-center justify-between">
+                    <label className="text-xs font-black text-[#0F172A] uppercase tracking-[0.15em] flex items-center gap-2">
+                      <span className="w-2 h-2 bg-[#dc3545]"></span> 1. İZİN TİPİ SEÇİMİ
+                    </label>
+                    {leaveType && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 border border-emerald-200">SEÇİM YAPILDI</span>}
+                 </div>
+
+                 {/* YILLIK İZİN (DEV BUTON - BAKİYEDEN DÜŞER) */}
+                 <button
+                    type="button"
+                    onClick={() => handleCategorySelect("YILLIK", "YILLIK_IZIN")}
+                    className={`relative w-full h-24 p-6 border-2 flex items-center gap-6 text-left transition-all overflow-hidden ${
+                       leaveCategory === "YILLIK" 
+                         ? "bg-[#0F172A] border-[#0F172A] shadow-lg" 
+                         : "bg-white border-slate-300 hover:border-emerald-500 hover:shadow-md"
+                    }`}
+                 >
+                    {leaveCategory === "YILLIK" && <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:16px_16px] pointer-events-none"></div>}
+                    <div className={`p-3 shrink-0 ${leaveCategory === "YILLIK" ? "bg-emerald-500 text-[#0F172A]" : "bg-emerald-100 text-emerald-700"}`}>
+                       <Umbrella className="w-8 h-8" />
+                    </div>
+                    <div className="flex flex-col relative z-10">
+                       <span className={`text-xl font-black uppercase tracking-widest ${leaveCategory === "YILLIK" ? "text-white" : "text-[#0F172A]"}`}>YILLIK ÜCRETLİ İZİN</span>
+                       <span className={`text-[10px] font-bold tracking-widest uppercase mt-1 ${leaveCategory === "YILLIK" ? "text-emerald-400" : "text-slate-500"}`}>
+                          Mevcut Bakiyenizden Düşer (Bakiye: {employee.leave_balance} Gün)
+                       </span>
+                    </div>
+                    {leaveCategory === "YILLIK" && <CheckCircle2 className="w-8 h-8 text-emerald-500 absolute right-6" />}
+                 </button>
+
+                 {/* DİĞER İZİNLER GRID (BAKİYEDEN DÜŞMEZ) */}
+                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    <button type="button" onClick={() => handleCategorySelect("SAGLIK", "SAGLIK_RAPORU")} className={`h-20 flex flex-col justify-center items-center gap-2 border-2 transition-all p-2 ${leaveCategory === "SAGLIK" ? "bg-red-50 border-red-500 text-red-700 shadow-sm" : "bg-white border-slate-300 text-slate-600 hover:border-red-300 hover:bg-red-50/50"}`}>
+                       <HeartPulse className={`w-6 h-6 ${leaveCategory === "SAGLIK" ? "text-red-600" : "text-slate-400"}`} />
+                       <span className="text-[10px] font-black uppercase tracking-widest text-center">SAĞLIK RAPORU</span>
+                    </button>
+                    
+                    <button type="button" onClick={() => handleCategorySelect("MAZERET", "MAZERET")} className={`h-20 flex flex-col justify-center items-center gap-2 border-2 transition-all p-2 ${leaveCategory === "MAZERET" ? "bg-blue-50 border-blue-500 text-blue-700 shadow-sm" : "bg-white border-slate-300 text-slate-600 hover:border-blue-300 hover:bg-blue-50/50"}`}>
+                       <Scale className={`w-6 h-6 ${leaveCategory === "MAZERET" ? "text-blue-600" : "text-slate-400"}`} />
+                       <span className="text-[10px] font-black uppercase tracking-widest text-center leading-tight">RESMİ MAZERET<br/><span className="text-[8px] opacity-70">(Evlilik, Doğum, vb.)</span></span>
+                    </button>
+
+                    <button type="button" onClick={() => handleCategorySelect("UCRETSIZ", "UCRETSİZ")} className={`h-20 flex flex-col justify-center items-center gap-2 border-2 transition-all p-2 ${leaveCategory === "UCRETSIZ" ? "bg-slate-800 border-slate-800 text-white shadow-sm" : "bg-white border-slate-300 text-slate-600 hover:border-slate-800 hover:bg-slate-100"}`}>
+                       <UserMinus className={`w-6 h-6 ${leaveCategory === "UCRETSIZ" ? "text-slate-300" : "text-slate-400"}`} />
+                       <span className="text-[10px] font-black uppercase tracking-widest text-center">ÜCRETSİZ İZİN</span>
+                    </button>
+
+                    <button type="button" onClick={() => handleCategorySelect("DIGER", "DIGER")} className={`h-20 flex flex-col justify-center items-center gap-2 border-2 transition-all p-2 ${leaveCategory === "DIGER" ? "bg-slate-200 border-slate-400 text-slate-800 shadow-sm" : "bg-white border-slate-300 text-slate-600 hover:border-slate-400"}`}>
+                       <Info className={`w-6 h-6 ${leaveCategory === "DIGER" ? "text-slate-600" : "text-slate-400"}`} />
+                       <span className="text-[10px] font-black uppercase tracking-widest text-center">DİĞER...</span>
+                    </button>
+                 </div>
+
+                 {/* Alt Kategori Detayları */}
+                 {leaveCategory === "MAZERET" && (
+                    <div className="flex gap-2 animate-in slide-in-from-top-1">
+                       {['EVLILIK', 'DOGUM', 'VEFAT', 'MAZERET'].map(sub => (
+                         <button key={sub} type="button" onClick={() => setLeaveType(sub)} className={`flex-1 h-10 border border-blue-200 text-[10px] font-black uppercase tracking-widest transition-colors ${leaveType === sub ? "bg-blue-600 text-white" : "bg-blue-50 text-blue-700 hover:bg-blue-100"}`}>
+                            {sub === 'MAZERET' ? 'GENEL MAZERET' : sub}
+                         </button>
+                       ))}
+                    </div>
+                 )}
+                 {leaveCategory === "DIGER" && (
+                    <input type="text" required placeholder="Lütfen İzin Sebebini Kısaca Belirtin..." value={customType} onChange={(e) => setCustomType(e.target.value)} className="h-12 border-2 border-slate-400 rounded-none px-4 text-xs font-bold outline-none uppercase bg-white text-[#0F172A] animate-in slide-in-from-top-1" />
+                 )}
+              </div>
+
+              {/* SÜRE VE AÇIKLAMA */}
+              <div className="flex flex-col lg:flex-row gap-6 mt-2">
+                 <div className="flex flex-col gap-2 w-full lg:w-1/3">
+                   <label className="text-[10px] font-black text-[#0F172A] uppercase tracking-[0.15em] flex items-center gap-2">
+                     <span className="w-2 h-2 bg-[#dc3545]"></span> 2. KAPSAM
+                   </label>
+                   <div className="flex flex-col gap-2">
+                     <button type="button" onClick={() => setIsHalfDay(false)} className={`h-14 border-2 text-xs font-black uppercase tracking-widest transition-all ${!isHalfDay ? "bg-[#0F172A] border-[#0F172A] text-white shadow-sm" : "bg-white border-slate-300 text-slate-500 hover:border-[#0F172A]"}`}>TAM GÜN</button>
+                     <button type="button" onClick={() => setIsHalfDay(true)} className={`h-14 border-2 text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${isHalfDay ? "bg-amber-500 border-amber-600 text-amber-950 shadow-sm" : "bg-white border-slate-300 text-slate-500 hover:border-amber-500"}`}>
+                        <div className="w-3 h-3 rounded-full border-2 border-current relative overflow-hidden"><div className="absolute left-0 top-0 bottom-0 w-1/2 bg-current"></div></div>
+                        YARIM GÜN
+                     </button>
+                   </div>
+                 </div>
+
+                 <div className="flex flex-col gap-2 flex-1">
+                   <label className="text-[10px] font-black text-[#0F172A] uppercase tracking-[0.15em] flex items-center gap-2">
+                     <span className="w-2 h-2 bg-slate-300"></span> 3. AÇIKLAMA (OPSİYONEL)
+                   </label>
+                   <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Yöneticinize iletilmek üzere not ekleyebilirsiniz..." className="w-full border-2 border-slate-300 rounded-none p-4 text-sm font-bold text-slate-700 focus:border-[#0F172A] outline-none flex-1 min-h-[120px] resize-none bg-white"></textarea>
+                 </div>
+              </div>
+
+            </div>
+
+            {/* SAĞ KOLON: TAKVİM VE ONAY */}
+            <div className="w-full xl:w-5/12 flex flex-col gap-6">
+              
+              <div className="flex flex-col bg-white border-2 border-[#0F172A] p-6 shadow-xl h-full flex-1">
+                <div className="flex items-center justify-between mb-6 border-b-2 border-slate-100 pb-4">
+                  <label className="text-xs font-black text-[#0F172A] uppercase tracking-[0.15em] flex items-center gap-2">
+                     <CalendarDays className="w-5 h-5 text-[#dc3545]" /> 4. TARİH SEÇİMİ
+                  </label>
+                  <span className="bg-[#dc3545] text-white px-3 py-1.5 text-[11px] font-black tracking-widest shadow-sm">{selectedDates.length} GÜN</span>
+                </div>
+                
+                <div className="flex items-center justify-between bg-slate-50 p-2 border border-slate-200 mb-4">
+                  <button type="button" onClick={handlePrevMonth} className="p-2 bg-white border border-slate-200 hover:border-slate-400 transition-colors shadow-sm"><ChevronLeft className="w-4 h-4 text-slate-800" /></button>
+                  <span className="text-sm font-black text-[#0F172A] uppercase tracking-widest">
+                    {currentMonthDate.toLocaleDateString("tr-TR", { month: "long", year: "numeric" })}
+                  </span>
+                  <button type="button" onClick={handleNextMonth} className="p-2 bg-white border border-slate-200 hover:border-slate-400 transition-colors shadow-sm"><ChevronRight className="w-4 h-4 text-slate-800" /></button>
+                </div>
+
+                <div className="grid grid-cols-7 gap-2 mb-2 text-center bg-[#0F172A] text-white p-2.5">
+                  {['PZT', 'SAL', 'ÇAR', 'PER', 'CUM', 'CTS', 'PAZ'].map(d => (
+                    <span key={d} className="text-[10px] font-black uppercase tracking-widest">{d}</span>
+                  ))}
+                </div>
+                <div className="grid grid-cols-7 gap-1.5 bg-slate-50 p-2 border border-slate-200 flex-1 content-start">
+                  {generateCalendarDays()}
+                </div>
+
+                {leaveCategory === "YILLIK" && selectedDates.length > 0 && employee.leave_balance - (isHalfDay ? selectedDates.length * 0.5 : selectedDates.length) < 0 && (
+                   <div className="mt-4 p-3 bg-red-50 border border-red-200 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+                      <p className="text-[10px] font-bold text-red-700 leading-relaxed uppercase">
+                        Dikkat: Bu talep bakiyenizi eksiye ({(employee.leave_balance - (isHalfDay ? selectedDates.length * 0.5 : selectedDates.length))}) düşürecektir. -14 limitini aşmadığınız sürece talebi gönderebilirsiniz.
+                      </p>
+                   </div>
                 )}
               </div>
 
-              <div className="flex flex-col gap-2">
-                <label className="text-[10px] font-black text-[#0F172A] uppercase tracking-[0.15em]">KAPSAM (SÜRE TİPİ)</label>
-                <div className="flex bg-slate-200 p-1 border-2 border-slate-300 h-14">
-                  <button type="button" onClick={() => setIsHalfDay(false)} className={`flex-1 text-xs font-black uppercase tracking-widest transition-all ${!isHalfDay ? "bg-[#0F172A] text-white shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>TAM GÜN</button>
-                  <button type="button" onClick={() => setIsHalfDay(true)} className={`flex-1 text-xs font-black uppercase tracking-widest transition-all ${isHalfDay ? "bg-[#0F172A] text-white shadow-sm" : "text-slate-500 hover:text-slate-800"}`}>YARIM GÜN</button>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-2 flex-1">
-                <label className="text-[10px] font-black text-[#0F172A] uppercase tracking-[0.15em]">AÇIKLAMA / İZİN NOTU</label>
-                <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Yöneticinize iletilmek üzere not ekleyebilirsiniz..." className="w-full border-2 border-slate-300 rounded-none p-4 text-sm font-bold text-slate-700 focus:border-[#0F172A] outline-none flex-1 min-h-[140px] resize-none shadow-inner"></textarea>
-              </div>
-            </div>
-
-            <div className="w-full lg:w-1/2 flex flex-col gap-6">
-              
-              <div className="flex flex-col bg-white border-2 border-slate-300 p-6 shadow-sm">
-                <div className="flex items-center justify-between mb-6">
-                  <label className="text-[10px] font-black text-[#0F172A] uppercase tracking-[0.15em]">ÇOKLU TARİH SEÇİCİ</label>
-                  <span className="bg-[#0F172A] text-white px-3 py-1 text-[10px] font-black tracking-widest">{selectedDates.length} GÜN SEÇİLDİ</span>
-                </div>
-                
-                <div className="flex items-center justify-between bg-slate-100 p-2 border border-slate-300 mb-4">
-                  <button type="button" onClick={handlePrevMonth} className="p-2 hover:bg-slate-200 transition-colors border border-transparent hover:border-slate-300"><ChevronLeft className="w-4 h-4 text-slate-800" /></button>
-                  <span className="text-xs font-black text-slate-800 uppercase tracking-widest">
-                    {currentMonthDate.toLocaleDateString("tr-TR", { month: "long", year: "numeric" })}
-                  </span>
-                  <button type="button" onClick={handleNextMonth} className="p-2 hover:bg-slate-200 transition-colors border border-transparent hover:border-slate-300"><ChevronRight className="w-4 h-4 text-slate-800" /></button>
-                </div>
-
-                <div className="grid grid-cols-7 gap-2 mb-2 text-center bg-slate-800 text-white p-2">
-                  {['PZT', 'SAL', 'ÇAR', 'PER', 'CUM', 'CTS', 'PAZ'].map(d => (
-                    <span key={d} className="text-[9px] font-black uppercase tracking-widest">{d}</span>
-                  ))}
-                </div>
-                <div className="grid grid-cols-7 gap-1.5 bg-slate-50 p-2 border border-slate-200">
-                  {generateCalendarDays()}
-                </div>
-              </div>
-
-              <div className="mt-auto bg-slate-900 border-l-4 border-[#dc3545] p-6 shadow-xl flex items-center justify-between gap-6 relative overflow-hidden">
-                <div className="flex flex-col text-left relative z-10">
-                   <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">HESAPLANAN SÜRE</span>
-                   <span className="text-4xl font-black text-white font-mono tracking-wide">
-                     {isHalfDay ? selectedDates.length * 0.5 : selectedDates.length} <span className="text-sm text-[#dc3545] ml-1 tracking-widest">GÜN</span>
+              <div className="mt-auto bg-[#0F172A] border-l-8 border-[#dc3545] p-1 shadow-2xl flex items-stretch h-20 shrink-0">
+                <div className="flex flex-col justify-center pl-5 pr-8 bg-[#0F172A] text-white shrink-0">
+                   <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">HESAPLANAN</span>
+                   <span className="text-3xl font-black font-mono tracking-wide leading-none">
+                     {isHalfDay ? selectedDates.length * 0.5 : selectedDates.length} <span className="text-xs text-[#dc3545] ml-0.5 tracking-widest">GÜN</span>
                    </span>
                 </div>
                 
                 <button 
                   type="submit" 
-                  disabled={loading || selectedDates.length === 0} 
-                  className={`relative z-10 h-16 px-8 rounded-none text-[11px] font-black tracking-widest uppercase transition-all flex items-center justify-center gap-3 active:scale-95 border-2 ${
-                    loading || selectedDates.length === 0
-                      ? "bg-slate-800 text-slate-500 cursor-not-allowed border-slate-700" 
-                      : "bg-[#dc3545] border-[#dc3545] hover:bg-red-700 hover:border-red-700 text-white shadow-lg"
+                  disabled={loading || selectedDates.length === 0 || leaveType === ""} 
+                  className={`flex-1 relative z-10 text-[12px] font-black tracking-[0.2em] uppercase transition-all flex items-center justify-center gap-3 active:scale-[0.98] ${
+                    loading || selectedDates.length === 0 || leaveType === ""
+                      ? "bg-slate-800 text-slate-500 cursor-not-allowed" 
+                      : "bg-[#dc3545] hover:bg-red-600 text-white"
                   }`}
                 >
                   {loading ? "İŞLENİYOR..." : <><Check className="w-5 h-5" strokeWidth={3} /> {willAutoApprove ? 'OTO-ONAYLA VE İŞLE' : 'TALEBİ GÖNDER'}</>}

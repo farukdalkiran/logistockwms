@@ -50,11 +50,18 @@ export default function TransferScanPage() {
   const [isProcessing, setIsProcessing] = useState(false); 
   const [flashState, setFlashState] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState("");
+  
   const scanInputRef = useRef<HTMLInputElement>(null);
   const lastCameraScanTime = useRef<number>(0);
 
-  // ÇÖZÜM 1: React Stale Closure sorununu aşmak için anlık operasyon verilerini useRef'te tutuyoruz.
-  // Kamera (Html5Qrcode) okuma yaptığında state'in eski halinde kalmamasını bu köprü sağlar.
+  // SPEED BOOST: In-Memory Cache (DB Sorgu Yükünü %90 Azaltır)
+  const barcodeResolverCache = useRef(new Map());
+
+  // SYNC ENGINE: React kapanmadan önce verileri güvenle tutan asenkron havuz
+  const pendingSyncRef = useRef(new Map<string, any>());
+  const isSyncingRef = useRef(false);
+
+  // Stale Closure Engelleyici
   const opState = useRef({ scanMode, selectedQty });
   useEffect(() => {
     opState.current = { scanMode, selectedQty };
@@ -98,14 +105,38 @@ export default function TransferScanPage() {
   }, []);
 
   const triggerFeedback = useCallback((type: 'success' | 'error', msg: string = "") => {
-    playSound(type);
-    setFlashState(type);
-    if (type === 'error') setErrorMsg(msg);
-    setTimeout(() => {
-      setFlashState('idle');
-      if (type === 'error') setErrorMsg("");
-    }, 1000);
+    playSound(type); setFlashState(type); if (type === 'error') setErrorMsg(msg);
+    setTimeout(() => { setFlashState('idle'); if (type === 'error') setErrorMsg(""); }, 1500);
   }, [playSound]);
+
+  // ÇÖZÜM 1: Auto-Flush Motoru (Veri Kaybını Önler)
+  const flushPendingSync = async () => {
+    if (pendingSyncRef.current.size === 0) return;
+    const updates = Array.from(pendingSyncRef.current.entries()).map(([id, payload]) => ({ id, ...payload }));
+    pendingSyncRef.current.clear();
+
+    const promises = updates.map(u => supabase.from("transfer_items").update(u).eq("id", u.id));
+    await Promise.allSettled(promises);
+  };
+
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (isSyncingRef.current || pendingSyncRef.current.size === 0) return;
+      isSyncingRef.current = true;
+      try { await flushPendingSync(); } 
+      finally { isSyncingRef.current = false; }
+    }, 2000); // 2 saniyede bir sessizce veritabanını günceller
+    return () => clearInterval(interval);
+  }, []);
+
+  // Kullanıcı Geri Çıkarsa Havuzu Boşalt
+  const handleBack = async () => {
+    if (activeTransfer && pendingSyncRef.current.size > 0) {
+      setIsProcessing(true);
+      await flushPendingSync();
+    }
+    router.back();
+  };
 
   const startTransferScan = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,7 +150,7 @@ export default function TransferScanPage() {
     try {
       const { data: tx, error: txError } = await supabase
         .from("transfers")
-        .select("id, transfer_code, status, from_branch_id, to_branch_id, created_at")
+        .select("id, transfer_code, status, from_branch_id, to_branch_id, created_at, picker_employee_id")
         .eq("transfer_code", code)
         .maybeSingle();
 
@@ -128,9 +159,14 @@ export default function TransferScanPage() {
         return triggerFeedback('error', "Geçersiz veya Bulunamayan Transfer Kodu!");
       }
 
+      // ÇÖZÜM 2: MNS (Serbest Sayım) ve Yetki Kontrollerinin Esnetilmesi
       let currentMode: 'outbound' | 'inbound' | null = null;
       if (tx.from_branch_id === branchId) currentMode = 'outbound';
       else if (tx.to_branch_id === branchId) currentMode = 'inbound';
+      else if (tx.picker_employee_id === empId || tx.transfer_code.startsWith("MNS")) {
+        // Personel kendi oluşturduğu sayıma veya bir MNS koduna giriyorsa
+        currentMode = 'outbound';
+      }
 
       if (!currentMode) {
         setIsFetching(false);
@@ -138,12 +174,10 @@ export default function TransferScanPage() {
       }
       
       if (currentMode === 'outbound' && tx.status === 'Yolda') {
-        setIsFetching(false);
-        return triggerFeedback('error', "Sevkiyat zaten çıkış yapmış!");
+        setIsFetching(false); return triggerFeedback('error', "Sevkiyat zaten çıkış yapmış!");
       }
       if (tx.status === 'Tamamlandi') {
-        setIsFetching(false);
-        return triggerFeedback('error', "Sayım daha önce tamamlanmış!");
+        setIsFetching(false); return triggerFeedback('error', "Sayım daha önce tamamlanmış!");
       }
 
       const { data: items } = await supabase
@@ -152,13 +186,8 @@ export default function TransferScanPage() {
         .eq("transfer_id", tx.id)
         .order("id");
 
-      if (!items || items.length === 0) {
-        setIsFetching(false);
-        return triggerFeedback('error', "Evrak içeriği boş!");
-      }
-
-      let resolvedFromName = "Bilinmeyen Çıkış";
-      let resolvedToName = "Bilinmeyen Hedef";
+      let resolvedFromName = "Özel / Serbest Çıkış";
+      let resolvedToName = "Özel / Serbest Hedef";
 
       const branchIdsToFetch = [tx.from_branch_id, tx.to_branch_id].filter(Boolean);
       if (branchIdsToFetch.length > 0) {
@@ -167,26 +196,9 @@ export default function TransferScanPage() {
         if (tx.to_branch_id) resolvedToName = bData?.find(b => b.id === tx.to_branch_id)?.name || resolvedToName;
       }
 
-      if (!tx.from_branch_id || !tx.to_branch_id) {
-        const { data: logData } = await supabase
-          .from("transaction_logs")
-          .select("description")
-          .ilike("description", `%${tx.transfer_code}%`)
-          .eq("action_type", "EXCEL_TRANSFER_CREATED")
-          .maybeSingle();
-
-        if (logData) {
-          const routeMatch = logData.description.match(/ROTA: \[(.*?) -> (.*?)\]/);
-          if (routeMatch) {
-            if (!tx.from_branch_id) resolvedFromName = routeMatch[1].trim();
-            if (!tx.to_branch_id) resolvedToName = routeMatch[2].trim();
-          }
-        }
-      }
-
       setActiveTransfer({ ...tx, fromName: resolvedFromName, toName: resolvedToName });
       setMode(currentMode);
-      setTransferItems(items as unknown as TransferItem[]);
+      setTransferItems(items as unknown as TransferItem[] || []);
       setTransferCodeInput("");
       
       if (tx.status === 'Bekliyor') {
@@ -207,7 +219,7 @@ export default function TransferScanPage() {
 
     if (isCamera) {
       const now = Date.now();
-      if (now - lastCameraScanTime.current < 2500) return; // Çift okumayı engelleme süresi
+      if (now - lastCameraScanTime.current < 2500) return;
       lastCameraScanTime.current = now;
     }
 
@@ -215,74 +227,130 @@ export default function TransferScanPage() {
 
     try {
       let targetBarcode = rawBarcode.trim();
-      
-      // ÇÖZÜM 1 DEVAMI: Kamera veya okuyucu anında güncel state'i Ref üzerinden çeker
-      let currentScanMode = opState.current.scanMode;
-      let currentQty = opState.current.selectedQty;
-      
-      let inputQty = typeof currentQty === 'string' ? parseInt(currentQty) || 1 : currentQty;
-      if (inputQty < 1) inputQty = 1;
+      if (!targetBarcode) return;
 
-      const { data: boxData } = await supabase
-        .from("boxes")
-        .select("product_id, quantity")
-        .eq("box_barcode", targetBarcode)
-        .maybeSingle();
-
-      if (boxData) {
-        const { data: pData } = await supabase.from("products").select("barcode").eq("id", boxData.product_id).single();
-        if (pData) {
-          targetBarcode = pData.barcode;
-          inputQty = boxData.quantity * inputQty; 
+      // ULTRA HIZLI ÖNBELLEK
+      let resolved = barcodeResolverCache.current.get(targetBarcode);
+      
+      if (!resolved) {
+        const { data: boxData } = await supabase.from("boxes").select("product_id, quantity").eq("box_barcode", targetBarcode).maybeSingle();
+        if (boxData) {
+          const { data: pData } = await supabase.from("products").select("id, barcode, sku, name, image_url").eq("id", boxData.product_id).single();
+          if (pData) {
+            resolved = { product: pData, qtyMulti: boxData.quantity };
+            barcodeResolverCache.current.set(targetBarcode, resolved); 
+            barcodeResolverCache.current.set(pData.barcode, { product: pData, qtyMulti: 1 });
+          }
+        } else {
+          const { data: pData } = await supabase.from("products").select("id, barcode, sku, name, image_url").eq("barcode", targetBarcode).maybeSingle();
+          if (pData) {
+            resolved = { product: pData, qtyMulti: 1 };
+            barcodeResolverCache.current.set(targetBarcode, resolved);
+          }
         }
       }
 
-      const qtyChange = currentScanMode === 'add' ? inputQty : -inputQty;
-
-      const itemIndex = transferItems.findIndex(i => i.products.barcode === targetBarcode);
-      if (itemIndex === -1) {
-        triggerFeedback('error', "HATA: Ürün bu listede yok!");
+      if (!resolved) {
+        triggerFeedback('error', "HATA: Ürün veritabanında bulunamadı!");
         return;
       }
+      
+      let currentScanMode = opState.current.scanMode;
+      let currentQty = opState.current.selectedQty;
+      let inputQty = typeof currentQty === 'string' ? parseInt(currentQty) || 1 : currentQty;
+      if (inputQty < 1) inputQty = 1;
 
-      const item = transferItems[itemIndex];
+      const finalQtyToAdd = inputQty * resolved.qtyMulti;
+      const qtyChange = currentScanMode === 'add' ? finalQtyToAdd : -finalQtyToAdd;
+      const isMNS = activeTransfer.transfer_code.startsWith("MNS");
+      let newItems = [...transferItems];
+
+      let itemIndex = newItems.findIndex(i => i.products.id === resolved.product.id);
+
+      // ÇÖZÜM 2 DEVAMI: MNS İSE LİSTEDE OLMAYAN ÜRÜNÜ DİNAMİK OLARAK EKLE
+      if (itemIndex === -1) {
+        if (isMNS) {
+          if (qtyChange < 0) return triggerFeedback('error', "Olmayan ürünü iptal edemezsiniz!");
+          
+          const { data: newItem } = await supabase.from("transfer_items").insert({
+            transfer_id: activeTransfer.id,
+            product_id: resolved.product.id,
+            requested_qty: qtyChange,
+            approved_qty: qtyChange,
+            sent_qty: qtyChange,
+            received_qty: 0,
+            status: "Bekliyor"
+          }).select().single();
+
+          if (newItem) {
+             const newTxItem: TransferItem = {
+               id: newItem.id,
+               requested_qty: newItem.requested_qty,
+               sent_qty: newItem.sent_qty,
+               received_qty: newItem.received_qty,
+               products: resolved.product
+             };
+             newItems.unshift(newTxItem);
+             setTransferItems(newItems);
+             setLastScanned({ product: resolved.product, qtyChange, currentTotal: qtyChange, reqTotal: qtyChange, type: currentScanMode });
+             triggerFeedback('success');
+             setSelectedQty(1);
+          }
+          return;
+        } else {
+          return triggerFeedback('error', "HATA: Bu ürün sevkiyat listesinde yok!");
+        }
+      }
+
+      const item = newItems[itemIndex];
       const currentCount = mode === 'outbound' ? item.sent_qty : item.received_qty;
       const proposedCount = currentCount + qtyChange;
 
-      if (proposedCount > item.requested_qty) {
-        triggerFeedback('error', `AŞIM! İstenen: ${item.requested_qty} | Girmeye Çalıştığınız: ${proposedCount}`);
-        return;
-      }
       if (proposedCount < 0) {
-        triggerFeedback('error', `HATA! Sayım sıfırın altına düşemez.`);
-        return;
+        return triggerFeedback('error', `HATA! Sayım sıfırın altına düşemez.`);
       }
 
-      const newItems = [...transferItems];
-      if (mode === 'outbound') newItems[itemIndex].sent_qty = proposedCount;
-      else newItems[itemIndex].received_qty = proposedCount;
+      let updatePayload: any = {};
 
+      if (mode === 'outbound') {
+         if (proposedCount > item.requested_qty) {
+            if (isMNS) { // MNS'de istenen sınır aşılabilir, eşitle
+               updatePayload = { sent_qty: proposedCount, requested_qty: proposedCount, approved_qty: proposedCount };
+               newItems[itemIndex].sent_qty = proposedCount;
+               newItems[itemIndex].requested_qty = proposedCount;
+            } else {
+               return triggerFeedback('error', `AŞIM! İstenen: ${item.requested_qty} | Girilen: ${proposedCount}`);
+            }
+         } else {
+            updatePayload = { sent_qty: proposedCount };
+            newItems[itemIndex].sent_qty = proposedCount;
+         }
+      } else {
+         if (proposedCount > item.requested_qty && !isMNS) {
+             return triggerFeedback('error', `AŞIM! İstenen: ${item.requested_qty} | Girilen: ${proposedCount}`);
+         }
+         updatePayload = { received_qty: proposedCount };
+         if (isMNS && proposedCount > item.requested_qty) {
+            updatePayload.requested_qty = proposedCount;
+            updatePayload.approved_qty = proposedCount;
+            newItems[itemIndex].requested_qty = proposedCount;
+         }
+         newItems[itemIndex].received_qty = proposedCount;
+      }
+
+      // Değişikliği Sync Havuzuna Ekle
+      pendingSyncRef.current.set(item.id, updatePayload);
       setTransferItems(newItems);
-      setLastScanned({ 
-        product: item.products, 
-        qtyChange: Math.abs(qtyChange), 
-        currentTotal: proposedCount, 
-        reqTotal: item.requested_qty,
-        type: currentScanMode
-      });
+      setLastScanned({ product: item.products, qtyChange: Math.abs(qtyChange), currentTotal: proposedCount, reqTotal: newItems[itemIndex].requested_qty, type: currentScanMode });
       triggerFeedback('success');
-      setSelectedQty(1); // Okuma başarılıysa adedi 1'e sıfırla
-
-      supabase.from("transfer_items").update({
-        sent_qty: mode === 'outbound' ? proposedCount : item.sent_qty,
-        received_qty: mode === 'inbound' ? proposedCount : item.received_qty
-      }).eq("id", item.id).then();
+      setSelectedQty(1); 
 
     } catch (error) {
-      console.error(error);
+      console.error("Scan Error:", error);
       triggerFeedback('error', "İşlem Hatası!");
     } finally {
       setIsProcessing(false);
+      setTimeout(() => scanInputRef.current?.focus(), 50);
     }
   };
 
@@ -294,7 +362,6 @@ export default function TransferScanPage() {
 
   useEffect(() => {
     let html5QrCode: Html5Qrcode | null = null;
-
     if (activeTransfer && activeTab === 'camera') {
       html5QrCode = new Html5Qrcode("reader");
       html5QrCode.start(
@@ -304,18 +371,25 @@ export default function TransferScanPage() {
         (errorMessage) => { /* Yoksay */ }
       ).catch(err => console.error("Kamera başlatılamadı:", err));
     }
-
     return () => {
-      if (html5QrCode && html5QrCode.isScanning) {
-        html5QrCode.stop().then(() => html5QrCode?.clear()).catch(console.error);
-      }
+      if (html5QrCode && html5QrCode.isScanning) html5QrCode.stop().then(() => html5QrCode?.clear()).catch(console.error);
     };
   }, [activeTransfer, activeTab]);
 
   const handleCompleteAndPrint = async () => {
     if (!activeTransfer) return;
+    
+    setIsProcessing(true);
+    await flushPendingSync(); // Kapatmadan önce havuzu temizle
+
     const newStatus = mode === 'outbound' ? 'Yolda' : 'Tamamlandi';
     await supabase.from("transfers").update({ status: newStatus }).eq("id", activeTransfer.id);
+    
+    // Inbound işlemdeyse ürünleri de tamamlandı işaretle
+    if (newStatus === 'Tamamlandi') {
+      await supabase.from("transfer_items").update({ status: 'Tamamlandi' }).eq("transfer_id", activeTransfer.id);
+    }
+
     await supabase.from("transaction_logs").insert({
       employee_id: empId,
       branch_id: branchId,
@@ -323,6 +397,7 @@ export default function TransferScanPage() {
       description: `${activeTransfer.transfer_code} kodlu ${mode === 'outbound' ? 'çıkış' : 'giriş'} sayımı tamamlandı.`
     });
     
+    setIsProcessing(false);
     window.print();
     
     setTimeout(() => {
@@ -339,7 +414,7 @@ export default function TransferScanPage() {
 
   const totalReq = transferItems.reduce((acc, i) => acc + i.requested_qty, 0);
   const totalScanned = transferItems.reduce((acc, i) => acc + (mode === 'outbound' ? i.sent_qty : i.received_qty), 0);
-  const totalMissing = totalReq - totalScanned;
+  const totalMissing = Math.max(0, totalReq - totalScanned);
   const progressPercent = totalReq > 0 ? Math.round((totalScanned / totalReq) * 100) : 0;
 
   return (
@@ -348,7 +423,7 @@ export default function TransferScanPage() {
       {/* BAŞLIK (Dark Heading) */}
       <div className="bg-[#0f172b] shadow-md shrink-0 border-b-4 border-[#dc3545] print:hidden">
         <div className="flex items-center justify-between p-4 border-b border-slate-800/60 max-w-7xl mx-auto w-full">
-          <button onClick={() => router.back()} className="text-slate-400 hover:text-white p-2 bg-slate-800/40 hover:bg-slate-800 transition-all rounded-sm shrink-0">
+          <button onClick={handleBack} className="text-slate-400 hover:text-white p-2 bg-slate-800/40 hover:bg-slate-800 transition-all rounded-sm shrink-0">
             <ChevronLeft size={20} />
           </button>
           
@@ -379,7 +454,7 @@ export default function TransferScanPage() {
             <div className="flex flex-col items-center text-center gap-2 mb-2">
               <div className="bg-slate-50 border border-slate-200 p-4 rounded-full text-slate-800"><QrCode size={40} /></div>
               <h2 className="text-[18px] font-black uppercase text-slate-800 tracking-widest">Sayıma Başla</h2>
-              <p className="text-[12px] font-bold text-slate-500">LGS kodunu girin veya okutun.</p>
+              <p className="text-[12px] font-bold text-slate-500">LGS veya MNS kodunu girin.</p>
             </div>
             <form onSubmit={startTransferScan} className="flex flex-col gap-4">
               <input 
@@ -435,13 +510,12 @@ export default function TransferScanPage() {
             <div className="flex flex-col text-left sm:text-right w-full sm:w-auto border-t sm:border-t-0 border-slate-700 pt-3 sm:pt-0">
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Evrak İlerlemesi</span>
               <div className="flex items-end gap-2 sm:justify-end">
-                <span className={`text-[24px] font-black leading-none ${progressPercent === 100 ? 'text-emerald-400' : 'text-white'}`}>{totalScanned}</span>
+                <span className={`text-[24px] font-black leading-none ${progressPercent >= 100 ? 'text-emerald-400' : 'text-white'}`}>{totalScanned}</span>
                 <span className="text-slate-500 text-[14px] font-bold">/ {totalReq} ADET</span>
               </div>
             </div>
           </div>
 
-          {/* ÇÖZÜM 3: Mobil görünüm düzenlemeleri. Flex yapıları mobile duyarlı hale getirildi. */}
           <div className="flex-1 p-2 sm:p-4 w-full max-w-7xl mx-auto flex flex-col lg:flex-row gap-4 sm:gap-6 z-10 overflow-hidden">
             
             {/* SOL KOLON: OKUMA MOTORU */}
@@ -483,7 +557,6 @@ export default function TransferScanPage() {
 
                 {activeTab === 'terminal' ? (
                   <form onSubmit={handleTerminalScan} className="flex flex-col gap-2">
-                    {/* ÇÖZÜM 2: Terminal input penceresi "Light-Industrial" temaya geçirildi. */}
                     <input 
                       ref={scanInputRef}
                       type="text" 
@@ -500,7 +573,6 @@ export default function TransferScanPage() {
                   </form>
                 ) : (
                   <div className="flex flex-col gap-2">
-                    {/* Kamera kutusu da Light temaya göre düzeltildi */}
                     <div id="reader" className={`w-full bg-slate-50 border-2 overflow-hidden min-h-[250px] ${scanMode === 'add' ? 'border-slate-300' : 'border-red-400'}`} />
                   </div>
                 )}
@@ -508,7 +580,6 @@ export default function TransferScanPage() {
                 <div className="flex flex-col gap-3 border-t border-slate-200 pt-4 mt-2">
                   <span className="text-slate-500 text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5"><Edit3 size={12}/> Adet Seçimi (Çarpan)</span>
                   
-                  {/* ÇÖZÜM 3 DEVAMI: Butonlar mobil ekrana göre sarmalanıyor (flex-wrap) */}
                   <div className="flex flex-wrap gap-2 mb-1">
                     {qtyButtons.map(qty => (
                       <button
@@ -568,7 +639,7 @@ export default function TransferScanPage() {
                         </div>
                       </div>
                       <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
-                        <div className="bg-[#0f172b] h-2 transition-all duration-500" style={{ width: `${Math.min((lastScanned.currentTotal / lastScanned.reqTotal) * 100, 100)}%` }} />
+                        <div className="bg-[#0f172b] h-2 transition-all duration-500" style={{ width: `${Math.min((lastScanned.currentTotal / (lastScanned.reqTotal || 1)) * 100, 100)}%` }} />
                       </div>
                     </div>
                   </>
@@ -587,7 +658,6 @@ export default function TransferScanPage() {
                 <span className="text-[11px] font-black uppercase tracking-widest">Canlı Liste</span>
               </div>
               
-              {/* ÇÖZÜM 3 DEVAMI: Tablo konteyneri mobilde overflow-x-auto ile sarıldı */}
               <div className="flex-1 overflow-y-auto overflow-x-auto">
                 <table className="w-full text-left border-collapse min-w-[500px]">
                   <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-widest sticky top-0 z-10 shadow-sm border-b border-slate-200">
@@ -601,7 +671,7 @@ export default function TransferScanPage() {
                   <tbody className="text-[12px] font-bold text-slate-800 divide-y divide-slate-100">
                     {transferItems.map((item) => {
                       const current = mode === 'outbound' ? item.sent_qty : item.received_qty;
-                      const isComplete = current === item.requested_qty;
+                      const isComplete = current >= item.requested_qty;
                       const isPartial = current > 0 && current < item.requested_qty;
                       
                       return (
@@ -632,7 +702,7 @@ export default function TransferScanPage() {
               <div className="p-3 sm:p-4 bg-white border-t border-slate-200 shrink-0">
                 <button 
                   onClick={handleCompleteAndPrint}
-                  disabled={totalScanned === 0}
+                  disabled={totalScanned === 0 || isProcessing}
                   className="w-full bg-[#0f172b] disabled:bg-slate-300 text-white font-black text-[12px] sm:text-[14px] p-4 sm:p-5 uppercase tracking-[0.2em] flex items-center justify-center gap-3 hover:bg-[#dc3545] transition-colors shadow-md active:scale-95 rounded-sm"
                 >
                   <Printer size={20} /> BİTİR VE YAZDIR

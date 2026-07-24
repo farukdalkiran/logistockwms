@@ -261,6 +261,18 @@ export const Navbar = () => {
             "Depo Müdürü",
           ],
         },
+                {
+          name: "Yıllık İzin Yönetimi",
+          path: "/management/hr/leave-management",
+          moduleCode: "hr",
+          allowedRoles: [
+            "Developer",
+            "Admin",
+            "İK Bölge Müdürü",
+            "Mağaza Müdürü",
+            "Depo Müdürü",
+          ],
+        },
       ],
     },
     {

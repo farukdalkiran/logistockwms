@@ -45,8 +45,12 @@ export default function ManualTransferScanPage() {
   
   const [isProcessing, setIsProcessing] = useState(false); 
   const [isSaving, setIsSaving] = useState(false);
-  const [savedCode, setSavedCode] = useState<string | null>(null);
+  
+  const [activeTransferId, setActiveTransferId] = useState<string | null>(null);
+  const [activeTransferCode, setActiveTransferCode] = useState<string | null>(null);
+  const [isFinished, setIsFinished] = useState(false);
   const [savedStatus, setSavedStatus] = useState<string | null>(null);
+  
   const [flashState, setFlashState] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState("");
   
@@ -54,23 +58,32 @@ export default function ManualTransferScanPage() {
   const lastCameraScanTime = useRef<number>(0);
   const qtyButtons = [1, 2, 3, 4, 5, 10];
 
-  // ÇÖZÜM 1: Stale Closure Engelleyici Ref'ler (Hızlı okumada listenin ezilmesini önler)
+  // SPEED BOOST: In-Memory Cache 
+  const barcodeResolverCache = useRef(new Map());
+  
+  // CONCURRENCY LOCK
+  const activeTransferRef = useRef<{ id: string, code: string } | null>(null);
+  const headerCreationPromise = useRef<Promise<{ id: string, code: string }> | null>(null);
+
+  // AUTO-SYNC ENGINE: React kapanmadan önce verileri güvenle tutan asenkron havuz
+  const pendingSyncSet = useRef(new Set<string>());
+  const isSyncingRef = useRef(false);
+
+  // Stale Closure Engelleyiciler
   const opState = useRef({ scanMode, selectedQty });
   const itemsRef = useRef<ScannedItem[]>([]); 
 
   useEffect(() => { opState.current = { scanMode, selectedQty }; }, [scanMode, selectedQty]);
 
-  // ÇÖZÜM 2: Agresif Focus (Donanım okuyucular için kesintisiz giriş)
+  // Agresif Focus
   useEffect(() => {
     const interval = setInterval(() => {
-      if (isSetupComplete && activeTab === 'terminal' && !isProcessing && !savedCode) {
-        if (document.activeElement !== scanInputRef.current) {
-          scanInputRef.current?.focus();
-        }
+      if (isSetupComplete && activeTab === 'terminal' && !isProcessing && !isFinished && !isSaving) {
+        if (document.activeElement !== scanInputRef.current) scanInputRef.current?.focus();
       }
     }, 800);
     return () => clearInterval(interval);
-  }, [isSetupComplete, activeTab, isProcessing, savedCode]);
+  }, [isSetupComplete, activeTab, isProcessing, isFinished, isSaving]);
 
   useEffect(() => {
     const initData = async () => {
@@ -106,7 +119,7 @@ export default function ManualTransferScanPage() {
 
   const triggerFeedback = useCallback((type: 'success' | 'error', msg: string = "") => {
     playSound(type); setFlashState(type); if (type === 'error') setErrorMsg(msg);
-    setTimeout(() => { setFlashState('idle'); if (type === 'error') setErrorMsg(""); }, 1000);
+    setTimeout(() => { setFlashState('idle'); if (type === 'error') setErrorMsg(""); }, 1500);
   }, [playSound]);
 
   const handleStartCount = (e: React.FormEvent) => {
@@ -124,49 +137,179 @@ export default function ManualTransferScanPage() {
     setTimeout(() => scanInputRef.current?.focus(), 200);
   };
 
+  const createHeaderTask = async () => {
+    const finalFromBranchId = (!isCustomFrom && fromBranchId) ? fromBranchId : null;
+    const finalToBranchId = (!isCustomTo && toBranchId) ? toBranchId : null;
+
+    const { data: lastTransfer } = await supabase.from("transfers").select("transfer_code").like("transfer_code", "MNS%").order("created_at", { ascending: false }).limit(1).maybeSingle();
+    
+    let finalNumber = 1001;
+    if (lastTransfer?.transfer_code) {
+      const numPart = lastTransfer.transfer_code.replace("MNS", "");
+      finalNumber = (parseInt(numPart, 10) || 1000) + 1;
+    }
+    const currentTransferCode = `MNS${finalNumber}`;
+
+    // YENİ WMS KURALI: "Toplaniyor" ile açılır ki sayıma sonradan MNS koduyla devam edilebilsin.
+    const { data: transferRecord, error: txError } = await supabase.from("transfers").insert({
+      transfer_code: currentTransferCode,
+      status: "Toplaniyor", 
+      from_branch_id: finalFromBranchId,
+      to_branch_id: finalToBranchId,
+      picker_employee_id: empId,
+    }).select("id").single();
+
+    if (txError) throw txError;
+    return { id: transferRecord.id, code: currentTransferCode };
+  };
+
+  // --- KUSURSUZ SYNC ENGINE (AUTO-FLUSH) ---
+  const executeSync = async () => {
+    if (!activeTransferRef.current?.id || pendingSyncSet.current.size === 0) return;
+
+    const transferId = activeTransferRef.current.id;
+    const syncTargets = new Set(pendingSyncSet.current);
+    pendingSyncSet.current.clear(); // Hızlıca temizle ki yeni okunanlar sıraya girsin
+
+    try {
+      // Sadece değişen hedefleri db'den çekip kıyaslıyoruz
+      const { data: existing } = await supabase
+        .from("transfer_items")
+        .select("id, product_id")
+        .eq("transfer_id", transferId)
+        .in("product_id", Array.from(syncTargets));
+
+      const existingMap = new Map((existing || []).map(e => [e.product_id, e.id]));
+      const upserts = [];
+      const deletes = [];
+
+      for (const productId of syncTargets) {
+        const itemInState = itemsRef.current.find(i => i.product.id === productId);
+
+        if (!itemInState || itemInState.quantity === 0) {
+          // Sıfırlandıysa veya silindiyse
+          if (existingMap.has(productId)) deletes.push(existingMap.get(productId));
+        } else {
+          if (existingMap.has(productId)) {
+            // Güncelleme
+            upserts.push(
+              supabase.from("transfer_items").update({
+                requested_qty: itemInState.quantity,
+                approved_qty: itemInState.quantity,
+                sent_qty: itemInState.quantity,
+              }).eq("id", existingMap.get(productId))
+            );
+          } else {
+            // Yeni Ekleme
+            upserts.push(
+              supabase.from("transfer_items").insert({
+                transfer_id: transferId,
+                product_id: productId,
+                requested_qty: itemInState.quantity,
+                approved_qty: itemInState.quantity,
+                sent_qty: itemInState.quantity,
+                received_qty: 0,
+                status: "Bekliyor"
+              })
+            );
+          }
+        }
+      }
+
+      if (deletes.length > 0) upserts.push(supabase.from("transfer_items").delete().in("id", deletes));
+      await Promise.allSettled(upserts);
+
+    } catch (err) {
+      console.error("Auto-sync Hatası:", err);
+      // Hata olursa hedefleri tekrar havuza at
+      syncTargets.forEach(id => pendingSyncSet.current.add(id));
+    }
+  };
+
+  // 1.5 Saniyede Bir Arka Planda Sessiz Eşitleme
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (isSyncingRef.current || pendingSyncSet.current.size === 0) return;
+      isSyncingRef.current = true;
+      await executeSync();
+      isSyncingRef.current = false;
+    }, 1500);
+    return () => clearInterval(interval);
+  }, []);
+
+  // KULLANICI GERİ TUŞUNA BASARSA ÖNCE VERİYİ YAZ SONRA ÇIK
+  const handleBack = async () => {
+    if (activeTransferId && pendingSyncSet.current.size > 0) {
+      setIsSaving(true);
+      triggerFeedback('success', "Veriler eşitleniyor...");
+      await executeSync(); // Bekleyen her şeyi kesin olarak yaz
+    }
+    router.back();
+  };
+
   const processBarcode = async (rawBarcode: string, isCamera: boolean = false) => {
-    if (!rawBarcode || isProcessing) return;
+    if (!rawBarcode || isFinished) return;
     if (isCamera) {
       const now = Date.now();
       if (now - lastCameraScanTime.current < 2000) return;
       lastCameraScanTime.current = now;
     }
 
+    let targetBarcode = rawBarcode.trim();
+    if (!targetBarcode) return;
+
     setIsProcessing(true);
 
     try {
-      let targetBarcode = rawBarcode.trim();
+      let transferInfo = activeTransferRef.current;
+      if (!transferInfo) {
+        if (!headerCreationPromise.current) {
+          headerCreationPromise.current = createHeaderTask();
+        }
+        transferInfo = await headerCreationPromise.current;
+        activeTransferRef.current = transferInfo;
+        setActiveTransferId(transferInfo.id);
+        setActiveTransferCode(transferInfo.code);
+      }
+
+      let resolved = barcodeResolverCache.current.get(targetBarcode);
+      
+      if (!resolved) {
+        const { data: boxData } = await supabase.from("boxes").select("product_id, quantity").eq("box_barcode", targetBarcode).maybeSingle();
+        
+        if (boxData) {
+          const { data: pData } = await supabase.from("products").select("id, barcode, sku, name, image_url").eq("id", boxData.product_id).single();
+          if (pData) {
+            resolved = { product: pData, qtyMulti: boxData.quantity };
+            barcodeResolverCache.current.set(targetBarcode, resolved); 
+            barcodeResolverCache.current.set(pData.barcode, { product: pData, qtyMulti: 1 });
+          }
+        } else {
+          const { data: pData } = await supabase.from("products").select("id, barcode, sku, name, image_url").eq("barcode", targetBarcode).maybeSingle();
+          if (pData) {
+            resolved = { product: pData, qtyMulti: 1 };
+            barcodeResolverCache.current.set(targetBarcode, resolved);
+          }
+        }
+      }
+
+      if (!resolved) {
+        triggerFeedback('error', "HATA: Ürün veritabanında bulunamadı!");
+        return;
+      }
+
       let currentScanMode = opState.current.scanMode;
       let currentQty = opState.current.selectedQty;
       
       let inputQty = typeof currentQty === 'string' ? parseInt(currentQty) || 1 : currentQty;
       if (inputQty < 1) inputQty = 1;
 
-      // Hızlı Okuma Ref Klonlaması
+      const finalQtyToAdd = inputQty * resolved.qtyMulti;
+      const qtyChange = currentScanMode === 'add' ? finalQtyToAdd : -finalQtyToAdd;
+
       let currentItems = [...itemsRef.current];
+      let existingItemIndex = currentItems.findIndex(i => i.product.id === resolved.product.id);
 
-      const { data: boxData } = await supabase.from("boxes").select("product_id, quantity").eq("box_barcode", targetBarcode).maybeSingle();
-      if (boxData) {
-        const { data: pData } = await supabase.from("products").select("barcode").eq("id", boxData.product_id).single();
-        if (pData) { targetBarcode = pData.barcode; inputQty = boxData.quantity * inputQty; }
-      }
-
-      let existingItemIndex = currentItems.findIndex(i => i.product.barcode === targetBarcode);
-      let productDetails = null;
-
-      // DB'ye sadece ürün listede yoksa git (Performans artışı)
-      if (existingItemIndex === -1) {
-        const { data: newProduct, error: pErr } = await supabase.from("products").select("id, barcode, sku, name, image_url").eq("barcode", targetBarcode).maybeSingle();
-        if (pErr || !newProduct) {
-          triggerFeedback('error', "HATA: Ürün veritabanında bulunamadı!");
-          return;
-        }
-        productDetails = newProduct;
-      } else {
-        productDetails = currentItems[existingItemIndex].product;
-      }
-
-      const qtyChange = currentScanMode === 'add' ? inputQty : -inputQty;
       const currentCount = existingItemIndex !== -1 ? currentItems[existingItemIndex].quantity : 0;
       const proposedQty = currentCount + qtyChange;
 
@@ -175,24 +318,22 @@ export default function ManualTransferScanPage() {
         return;
       }
 
-      // Senkron Ref Güncellemesi ve Silme (0 Mantığı)
       if (existingItemIndex > -1) {
-        if (proposedQty === 0) {
-          currentItems.splice(existingItemIndex, 1);
-        } else {
-          currentItems[existingItemIndex] = { ...currentItems[existingItemIndex], quantity: proposedQty };
-        }
+        if (proposedQty === 0) currentItems.splice(existingItemIndex, 1);
+        else currentItems[existingItemIndex] = { ...currentItems[existingItemIndex], quantity: proposedQty };
       } else {
-        if (proposedQty > 0) {
-          currentItems.unshift({ product: productDetails, quantity: proposedQty });
-        }
+        if (proposedQty > 0) currentItems.unshift({ product: resolved.product, quantity: proposedQty });
       }
 
-      itemsRef.current = currentItems; // Ref'i anında güncelle (Stale closure bitti)
-      setScannedItems(currentItems);   // UI'ı tetikle
+      // STATE VE REF GÜNCELLEMESİ
+      itemsRef.current = currentItems;
+      setScannedItems(currentItems);
       
+      // DEĞİŞEN ÜRÜNÜ SYNC HAVUZUNA AT
+      pendingSyncSet.current.add(resolved.product.id);
+
       setLastScanned({ 
-        product: productDetails, 
+        product: resolved.product, 
         qtyChange: Math.abs(qtyChange), 
         currentTotal: proposedQty,
         type: currentScanMode
@@ -201,11 +342,14 @@ export default function ManualTransferScanPage() {
       triggerFeedback('success');
       setSelectedQty(1);
 
-    } catch (error) {
-      triggerFeedback('error', "İşlem Hatası!");
+    } catch (error: any) {
+      const errMsg = error.message || error.details || "Bilinmeyen DB Hatası";
+      console.error("Scan Process Error:", errMsg);
+      if (!activeTransferRef.current) headerCreationPromise.current = null;
+      triggerFeedback('error', `İşlem Hatası: ${errMsg}`);
     } finally {
       setIsProcessing(false);
-      setTimeout(() => scanInputRef.current?.focus(), 50); // Kesin geri odaklanma
+      setTimeout(() => scanInputRef.current?.focus(), 50); 
     }
   };
 
@@ -217,7 +361,7 @@ export default function ManualTransferScanPage() {
 
   useEffect(() => {
     let html5QrCode: Html5Qrcode | null = null;
-    if (isSetupComplete && activeTab === 'camera' && !savedCode) {
+    if (isSetupComplete && activeTab === 'camera' && !isFinished) {
       html5QrCode = new Html5Qrcode("reader");
       html5QrCode.start(
         { facingMode: "environment" },
@@ -231,19 +375,23 @@ export default function ManualTransferScanPage() {
         html5QrCode.stop().then(() => html5QrCode?.clear()).catch(console.error);
       }
     };
-  }, [isSetupComplete, activeTab, savedCode]);
+  }, [isSetupComplete, activeTab, isFinished]);
 
-  // ÇÖZÜM 3: MNS Yönlendirme (Statü) ve Veritabanı Lojiği
   const saveToDatabase = async () => {
-    const finalItemsToSave = itemsRef.current; // Ref'ten en güncel listeyi al
+    if (!activeTransferId || !activeTransferCode) return triggerFeedback('error', "Açık bir evrak bulunamadı!");
+    
+    const finalItemsToSave = itemsRef.current;
     if (finalItemsToSave.length === 0) return triggerFeedback('error', "Liste boş!");
-    setIsProcessing(true); setIsSaving(true);
+    
+    setIsSaving(true);
 
     try {
-      const finalFromBranchId = isCustomFrom ? null : fromBranchId;
-      const finalToBranchId = isCustomTo ? null : toBranchId;
+      // Kapatmadan önce havuzdaki tüm verileri boşalt ve eşitle
+      await executeSync();
 
-      // Akıllı Statü Lojiği: Bize giriyorsa bitti, bizden çıkıyorsa yolda.
+      const finalFromBranchId = (!isCustomFrom && fromBranchId) ? fromBranchId : null;
+      const finalToBranchId = (!isCustomTo && toBranchId) ? toBranchId : null;
+
       let finalStatus = "Bekliyor";
       if (!isCustomTo && finalToBranchId === branchId) {
         finalStatus = "Tamamlandi";
@@ -251,54 +399,41 @@ export default function ManualTransferScanPage() {
         finalStatus = "Yolda";
       }
 
-      const { data: lastTransfer } = await supabase.from("transfers").select("transfer_code").like("transfer_code", "MNS%").order("created_at", { ascending: false }).limit(1).maybeSingle();
+      // Üst Evrak (Header) Güncelleme
+      const { error: headerError } = await supabase.from("transfers").update({
+        status: finalStatus
+      }).eq("id", activeTransferId);
 
-      let finalNumber = 1001;
-      if (lastTransfer?.transfer_code) {
-        const numPart = lastTransfer.transfer_code.replace("MNS", "");
-        finalNumber = (parseInt(numPart, 10) || 1000) + 1;
+      if (headerError) throw headerError;
+
+      // Eğer varış şubesindeyse item'ları da Tamamlandıya çek
+      if (finalStatus === "Tamamlandi") {
+        const itemUpdates = finalItemsToSave.map(item => 
+          supabase.from("transfer_items")
+            .update({ received_qty: item.quantity, status: 'Tamamlandi' })
+            .eq("transfer_id", activeTransferId)
+            .eq("product_id", item.product.id)
+        );
+        await Promise.all(itemUpdates);
       }
-      const newTransferCode = `MNS${finalNumber}`;
-
-      const { data: transferRecord, error: txError } = await supabase.from("transfers").insert({
-          transfer_code: newTransferCode,
-          status: finalStatus, 
-          from_branch_id: finalFromBranchId,
-          to_branch_id: finalToBranchId,
-          picker_employee_id: empId,
-        }).select("id").single();
-
-      if (txError) throw txError;
-
-      // Karşı taraf check-in yapabilsin diye quantity mantığı
-      const itemsToInsert = finalItemsToSave.map((item) => ({
-        transfer_id: transferRecord.id,
-        product_id: item.product.id,
-        requested_qty: item.quantity,
-        approved_qty: item.quantity,
-        sent_qty: item.quantity, 
-        received_qty: finalStatus === 'Tamamlandi' ? item.quantity : 0,
-        status: finalStatus === 'Tamamlandi' ? "Tamamlandi" : "Bekliyor",
-      }));
-
-      const { error: itemsError } = await supabase.from("transfer_items").insert(itemsToInsert);
-      if (itemsError) throw itemsError;
 
       const fromNameForLog = isCustomFrom ? customFromBranch.trim() : branches.find(b => b.id === fromBranchId)?.name;
       const toNameForLog = isCustomTo ? customToBranch.trim() : branches.find(b => b.id === toBranchId)?.name;
 
       await supabase.from("transaction_logs").insert({
-        employee_id: empId, branch_id: branchId, action_type: "MANUAL_SCAN_CREATED",
-        description: `${newTransferCode} kodlu sayım/transfer fişi oluşturuldu (${finalStatus}). ROTA: [${fromNameForLog || '-'} -> ${toNameForLog || '-'}]`
+        employee_id: empId, branch_id: branchId, action_type: "MANUAL_SCAN_COMPLETED",
+        description: `${activeTransferCode} evrakının okuması bitirildi (${finalStatus}). ROTA: [${fromNameForLog || '-'} -> ${toNameForLog || '-'}]`
       });
 
-      setSavedCode(newTransferCode); setSavedStatus(finalStatus);
+      setSavedStatus(finalStatus);
+      setIsFinished(true);
       setTimeout(() => window.print(), 500);
 
-    } catch (err) {
+    } catch (err: any) {
+      console.error("Save Error:", err.message || err);
       triggerFeedback('error', "Kayıt Hatası!");
     } finally {
-      setIsProcessing(false); setIsSaving(false);
+      setIsSaving(false);
     }
   };
 
@@ -313,7 +448,7 @@ export default function ManualTransferScanPage() {
     const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.href = url; link.setAttribute("download", `${savedCode || 'MNS_SAYIM'}_RAPORU.csv`);
+    link.href = url; link.setAttribute("download", `${activeTransferCode || 'MNS_SAYIM'}_RAPORU.csv`);
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
@@ -326,8 +461,9 @@ export default function ManualTransferScanPage() {
       {/* BAŞLIK (Dark Heading) */}
       <div className="bg-[#0f172b] shadow-md shrink-0 border-b-4 border-[#dc3545] print:hidden">
         <div className="flex items-center justify-between p-4 border-b border-slate-800/60 max-w-7xl mx-auto w-full">
-          <button onClick={() => router.back()} className="text-slate-400 hover:text-white p-2 bg-slate-800/40 hover:bg-slate-800 transition-all rounded-sm shrink-0">
-            <ChevronLeft size={20} />
+          {/* ÇÖZÜM 2: Geri butonu artık handleBack tetikleyerek Auto-Flush'ı devreye sokar */}
+          <button onClick={handleBack} disabled={isSaving} className="text-slate-400 hover:text-white p-2 bg-slate-800/40 hover:bg-slate-800 transition-all rounded-sm shrink-0 disabled:opacity-50">
+            {isSaving ? <div className="w-5 h-5 border-2 border-slate-400 border-t-white rounded-full animate-spin"/> : <ChevronLeft size={20} />}
           </button>
           <div className="flex flex-col sm:flex-row items-center gap-2 text-center sm:text-left">
             <div className="flex items-center gap-2">
@@ -408,7 +544,10 @@ export default function ManualTransferScanPage() {
             <div className="flex items-center gap-3 w-full sm:w-auto">
               <div className={`p-2 sm:p-3 border-2 shadow-sm bg-purple-600 border-purple-400 text-white shrink-0`}><Package size={20} className="sm:w-6 sm:h-6" /></div>
               <div className="flex flex-col min-w-0">
-                <span className="text-[11px] sm:text-[12px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-0.5"><Hash size={12}/> {savedCode ? `${savedCode} OLUŞTURULDU` : "SERBEST SAYIM MODU"}</span>
+                <span className="text-[11px] sm:text-[12px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-0.5">
+                  <Hash size={12}/> {activeTransferCode ? `${activeTransferCode} OLUŞTURULDU` : "SERBEST SAYIM MODU"}
+                  {pendingSyncSet.current.size > 0 && <span className="animate-pulse bg-amber-500 w-2 h-2 rounded-full ml-2" title="Kayıt Bekliyor"/>}
+                </span>
                 <span className="text-[14px] sm:text-[16px] font-black tracking-widest uppercase flex items-center gap-2 w-full"><span className="text-white truncate" title={routeDisplay}>{routeDisplay}</span></span>
               </div>
             </div>
@@ -426,7 +565,7 @@ export default function ManualTransferScanPage() {
             
             {/* SOL: OKUMA MOTORU */}
             <div className="w-full lg:w-[420px] flex flex-col gap-4 shrink-0 overflow-y-auto lg:overflow-visible pb-4 lg:pb-0">
-              {!savedCode && (
+              {!isFinished && (
                 <>
                   <div className="flex bg-white border border-slate-200 p-1.5 rounded-sm shadow-sm">
                     <button onClick={() => setActiveTab('terminal')} className={`flex-1 flex items-center justify-center gap-2 py-3 text-[12px] font-black uppercase tracking-widest transition-all ${activeTab === 'terminal' ? 'bg-[#0f172b] text-white shadow-md' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'}`}><ScanLine size={16} /> Terminal</button>
@@ -441,7 +580,7 @@ export default function ManualTransferScanPage() {
 
                     {activeTab === 'terminal' ? (
                       <form onSubmit={handleTerminalScan} className="flex flex-col gap-2">
-                        <input ref={scanInputRef} type="text" value={scanInput} onChange={e => setScanInput(e.target.value)} placeholder="BARKOD OKUTUN" disabled={isProcessing} className={`w-full text-center font-black text-[24px] uppercase p-4 border-2 focus:outline-none tracking-widest transition-colors shadow-inner disabled:opacity-50 ${scanMode === 'add' ? 'bg-white text-slate-900 border-slate-300 focus:border-emerald-500 placeholder:text-slate-300' : 'bg-red-50 text-[#dc3545] border-red-200 focus:border-[#dc3545] placeholder:text-red-200'}`} />
+                        <input ref={scanInputRef} type="text" value={scanInput} onChange={e => setScanInput(e.target.value)} placeholder="BARKOD OKUTUN" disabled={isProcessing || isSaving} className={`w-full text-center font-black text-[24px] uppercase p-4 border-2 focus:outline-none tracking-widest transition-colors shadow-inner disabled:opacity-50 ${scanMode === 'add' ? 'bg-white text-slate-900 border-slate-300 focus:border-emerald-500 placeholder:text-slate-300' : 'bg-red-50 text-[#dc3545] border-red-200 focus:border-[#dc3545] placeholder:text-red-200'}`} />
                         <button type="submit" className="hidden" /> 
                       </form>
                     ) : (
@@ -488,9 +627,9 @@ export default function ManualTransferScanPage() {
                   </div>
                 ) : (
                   <div className="flex flex-col items-center text-slate-300 gap-3 py-10 my-auto">
-                    {savedCode ? <CheckCircle2 size={56} className="text-emerald-500"/> : <QrCode size={48} className="text-slate-200" />}
+                    {isFinished ? <CheckCircle2 size={56} className="text-emerald-500"/> : <QrCode size={48} className="text-slate-200" />}
                     <span className="font-black text-[11px] text-slate-400 uppercase tracking-widest text-center px-4">
-                      {savedCode ? "İşlem Tamamlandı. Evrak Oluşturuldu." : "İlk barkodu okutmanız bekleniyor"}
+                      {isFinished ? "İşlem Tamamlandı. Evrak Oluşturuldu." : "İlk barkodu okutmanız bekleniyor"}
                     </span>
                   </div>
                 )}
@@ -529,7 +668,7 @@ export default function ManualTransferScanPage() {
               </div>
               
               <div className="p-3 sm:p-4 bg-slate-50 border-t border-slate-200 shrink-0 flex flex-col gap-3">
-                {!savedCode ? (
+                {!isFinished ? (
                   <button onClick={saveToDatabase} disabled={totalScanned === 0 || isSaving} className="w-full bg-[#0f172b] disabled:bg-slate-300 disabled:text-slate-500 text-white font-black text-[12px] sm:text-[14px] p-4 sm:p-5 uppercase tracking-[0.1em] flex items-center justify-center gap-3 hover:bg-[#dc3545] transition-colors shadow-md active:scale-95 rounded-sm">
                     {isSaving ? <div className="w-5 h-5 border-2 border-slate-400 border-t-white rounded-full animate-spin"/> : <Printer size={20} />} İŞLEMİ BİTİR, KAYDET VE ETİKET YAZDIR
                   </button>
@@ -561,7 +700,7 @@ export default function ManualTransferScanPage() {
             <p className="text-[14px] font-black mt-1 uppercase tracking-widest bg-black text-white py-1 inline-block px-4">{savedStatus === 'Yolda' ? 'GİDEN TRANSFER RAPORU' : 'MAL KABUL / SAYIM RAPORU'}</p>
           </div>
           <div className="flex flex-col gap-1.5 border-b-2 border-black pb-2 mb-2 text-[12px] font-bold uppercase shrink-0">
-            <div className="flex justify-between items-end"><span className="text-gray-600">EVRAK KODU:</span> <span className="text-[18px] font-black leading-none">{savedCode || "KAYDEDİLMEMİŞ TASLAK"}</span></div>
+            <div className="flex justify-between items-end"><span className="text-gray-600">EVRAK KODU:</span> <span className="text-[18px] font-black leading-none">{activeTransferCode || "KAYDEDİLMEMİŞ TASLAK"}</span></div>
             <div className="flex justify-between"><span className="text-gray-600">TARİH:</span> <span>{new Date().toLocaleDateString('tr-TR')} {new Date().toLocaleTimeString('tr-TR',{hour:'2-digit',minute:'2-digit'})}</span></div>
             <div className="flex justify-between"><span className="text-gray-600">OPERATÖR:</span> <span>{empName}</span></div>
             <div className="flex justify-between"><span className="text-gray-600">ROTA:</span> <span className="text-right truncate max-w-[60mm]">{routeDisplay}</span></div>
