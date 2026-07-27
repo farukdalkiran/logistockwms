@@ -7,7 +7,8 @@ import { getAggregatedInventoryServer } from '@/app/actions/inventory';
 import * as XLSX from 'xlsx';
 
 type AggregatedProduct = {
-  product_id: string;
+  product_id: string; // Sunucudan gelen ID alanı bu şekilde garanti altındadır
+  id?: string;
   name: string;
   sku: string | null;
   barcode: string;
@@ -144,7 +145,7 @@ export default function InventoryViewPanel({ branchId, isGlobal }: { branchId: s
   return (
     <div className="w-full flex flex-col gap-5 animate-in fade-in duration-300">
       
-      {/* 1. ÜST MODÜL: WMS RAPORLAMA VE EXCEL MERKEZİ (Endüstriyel Kırmızı-Mor Tema) */}
+      {/* 1. ÜST MODÜL: WMS RAPORLAMA VE EXCEL MERKEZİ */}
       <div className="bg-[#0f172b] border-l-[4px] border-[#dc3545] px-5 py-4 shadow-md flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 rounded-sm relative overflow-hidden">
         <div className="absolute right-0 top-0 w-64 h-full bg-gradient-to-l from-[#dc3545]/10 to-transparent pointer-events-none"></div>
 
@@ -222,7 +223,7 @@ export default function InventoryViewPanel({ branchId, isGlobal }: { branchId: s
         </form>
       </div>
 
-      {/* 3. ANA STOK TABLOSU VE SAYFALAMA (Kompakt Tek Satır) */}
+      {/* 3. ANA STOK TABLOSU */}
       <div className="bg-white border border-slate-300 shadow-md flex flex-col overflow-hidden rounded-sm">
         <div className="bg-slate-100 p-3 border-b border-slate-200 flex justify-between items-center">
           <h3 className="text-[11px] font-black text-[#0f172b] uppercase tracking-[0.15em] flex items-center gap-2">
@@ -292,10 +293,10 @@ export default function InventoryViewPanel({ branchId, isGlobal }: { branchId: s
                       )}
                     </td>
                     
-                    {/* WMS: VURGULU STOK / LOG İZLEME ALANI (Kompakt Tek Satır) */}
+                    {/* WMS: VURGULU STOK / LOG İZLEME ALANI: Açılmama Hatası (ID Problemi) Buradan Çözüldü */}
                     <td className="p-0 text-center align-middle bg-slate-50/50 w-48 h-full">
                       <button 
-                        onClick={() => setHistoryModalData({ productId: item.product_id, productName: item.name })}
+                        onClick={() => setHistoryModalData({ productId: item.product_id || item.id || '', productName: item.name })}
                         className={`w-full h-full flex items-center justify-between px-4 py-2 border-2 border-transparent transition-all group cursor-pointer shadow-sm active:scale-95 rounded-none ${
                           item.total_quantity === 0 
                             ? 'bg-red-50/50 hover:bg-red-100 hover:border-red-400' 
@@ -327,7 +328,7 @@ export default function InventoryViewPanel({ branchId, isGlobal }: { branchId: s
           </table>
         </div>
 
-        {/* 4. SAYFALAMA KONTROLLERİ */}
+        {/* SAYFALAMA */}
         {totalPages > 1 && (
           <div className="bg-slate-100 border-t border-slate-200 p-3 flex items-center justify-between">
             <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest bg-white border border-slate-300 px-2.5 py-1 shadow-sm rounded-sm">
@@ -353,6 +354,7 @@ export default function InventoryViewPanel({ branchId, isGlobal }: { branchId: s
         )}
       </div>
 
+      {/* DOM'DAN SÖK-TAK İLE ÇALIŞAN MODAL YAPISI (Eski Veri Görünme Hatasını Engeller) */}
       {historyModalData && (
         <StockHistoryModal 
           branchId={branchId}

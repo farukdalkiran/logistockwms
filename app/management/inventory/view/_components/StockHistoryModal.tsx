@@ -4,15 +4,14 @@ import { useEffect, useState } from 'react';
 import { X, Loader2, Layers, MapPin, Activity, ShieldCheck, AlertTriangle } from 'lucide-react';
 import { getStockHistoryModalDataServer } from '@/app/actions/inventory';
 
+// VERCEL TYPE ERROR ÇÖZÜMÜ: employees objesi yerine düz string kullanıyoruz
 type LogItem = {
   id: string;
   created_at: string;
   action_type: string;
   description: string;
   new_value?: string; 
-  employees: {
-    full_name: string;
-  };
+  employee_name: string; 
 };
 
 type ShelfItem = {
@@ -37,6 +36,7 @@ export default function StockHistoryModal({
   const [shelves, setShelves] = useState<ShelfItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // ESC TUŞU İLE KAPATMA
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', handleEsc);
@@ -44,6 +44,8 @@ export default function StockHistoryModal({
   }, [onClose]);
 
   useEffect(() => {
+    if (!productId) return; // ID yoksa boşuna arama yapma
+
     const fetchModalData = async () => {
       try {
         const safeProductName = productName || "";
@@ -56,8 +58,28 @@ export default function StockHistoryModal({
           searchKeyword
         );
 
-        setShelves(shelves);
-        setLogs(logs);
+        // VERCEL HATASINI ÇÖZEN YER: Karmaşık veriyi düzleştiriyoruz (Flattening)
+        const formattedLogs: LogItem[] = (logs || []).map((log: any) => {
+          let empName = "SİSTEM (OTOMASYON)";
+          if (log.employees) {
+            if (Array.isArray(log.employees) && log.employees.length > 0) {
+              empName = log.employees[0]?.full_name || empName;
+            } else if (!Array.isArray(log.employees) && log.employees.full_name) {
+              empName = log.employees.full_name;
+            }
+          }
+          return {
+            id: log.id,
+            created_at: log.created_at,
+            action_type: log.action_type,
+            description: log.description,
+            new_value: log.new_value,
+            employee_name: empName,
+          };
+        });
+
+        setShelves(shelves || []);
+        setLogs(formattedLogs);
         
       } catch (err) {
         console.error("Modal Veri Çekme Hatası:", err);
@@ -97,13 +119,19 @@ export default function StockHistoryModal({
     return null; 
   };
 
+  // ARKA PLANA TIKLAYINCA KAPATMA
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) onClose();
+  };
+
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/90 backdrop-blur-md p-4 sm:p-6 animate-in fade-in duration-200">
-      
-      {/* MERKEZİ GENİŞ MODAL */}
+    <div 
+      onClick={handleBackdropClick}
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/90 backdrop-blur-md p-4 sm:p-6 animate-in fade-in duration-200"
+    >
       <div className="w-full max-w-6xl bg-slate-100 shadow-2xl flex flex-col animate-in zoom-in-95 duration-200 border border-slate-700 rounded-sm overflow-hidden h-[95vh] lg:h-[85vh]">
         
-        {/* HEADER: Kırmızı ve Mor Geçişli */}
+        {/* HEADER */}
         <div className="bg-[#0f172b] p-4 flex items-center justify-between shrink-0 border-b-[4px] border-gradient-to-r from-purple-700 via-[#dc3545] to-[#0f172b]">
            <div className="flex items-center gap-3">
              <div className="bg-gradient-to-br from-purple-600 to-[#dc3545] p-2 rounded-sm shadow-[0_0_15px_rgba(107,33,168,0.4)]">
@@ -114,7 +142,10 @@ export default function StockHistoryModal({
                <p className="text-[10px] font-bold text-purple-300 uppercase tracking-widest">{productName || 'Bilinmeyen Ürün'}</p>
              </div>
            </div>
-           <button onClick={onClose} className="text-slate-400 hover:text-white p-1.5 bg-slate-800 hover:bg-[#dc3545] rounded-sm transition-colors border border-slate-700 active:scale-90">
+           
+           {/* ÇARPI İLE KAPATMA BUTONU */}
+           <button onClick={onClose} className="text-slate-400 hover:text-white p-2 bg-slate-800 hover:bg-[#dc3545] rounded-sm transition-colors border border-slate-700 active:scale-90 flex items-center gap-1 group">
+             <span className="text-[10px] font-bold uppercase tracking-widest hidden sm:block group-hover:text-white">Kapat</span>
              <X size={20} />
            </button>
         </div>
@@ -128,7 +159,7 @@ export default function StockHistoryModal({
             </div>
           ) : (
             <>
-              {/* 1. PANEL: RAF BİLGİSİ (Kırmızı Vurgulu) */}
+              {/* 1. PANEL: RAF BİLGİSİ */}
               <div className="flex flex-col bg-white border border-slate-300 shadow-sm rounded-sm overflow-hidden shrink-0">
                 <div className="bg-slate-50 p-2.5 border-b border-slate-200 flex items-center gap-2">
                   <div className="p-1 bg-red-100 rounded-sm"><MapPin size={14} className="text-[#dc3545]" /></div>
@@ -185,7 +216,7 @@ export default function StockHistoryModal({
                 </div>
               </div>
 
-              {/* 2. PANEL: LOG TABLOSU (Mor Vurgulu, Kompakt Satırlar) */}
+              {/* 2. PANEL: LOG TABLOSU */}
               <div className="flex-1 flex flex-col bg-white border border-slate-300 shadow-sm rounded-sm overflow-hidden">
                 <div className="bg-purple-50 p-2.5 border-b border-purple-200 flex items-center gap-2 shrink-0">
                   <div className="p-1 bg-purple-200 rounded-sm"><ShieldCheck size={14} className="text-purple-700" /></div>
@@ -221,7 +252,6 @@ export default function StockHistoryModal({
                               <td className="px-3 py-2 border-r border-slate-100 font-mono text-[10px] text-slate-500 whitespace-nowrap">
                                 {formatDate(log.created_at)}
                               </td>
-                              
                               <td className="px-3 py-2 border-r border-slate-100">
                                 <div className="flex items-center gap-1">
                                   <MapPin size={12} className="text-slate-400 shrink-0" />
@@ -230,7 +260,6 @@ export default function StockHistoryModal({
                                   </span>
                                 </div>
                               </td>
-
                               <td className="px-3 py-2 border-r border-slate-100">
                                 <span className={`text-[9px] font-black px-1.5 py-0.5 uppercase tracking-widest border rounded-sm ${
                                   isAddition ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 
@@ -240,7 +269,6 @@ export default function StockHistoryModal({
                                   {log.action_type.replace(/_/g, ' ')}
                                 </span>
                               </td>
-
                               <td className="px-3 py-2 border-r border-slate-100 text-center font-mono bg-slate-50/50">
                                 {log.new_value ? (
                                   <span className={`text-[14px] font-black ${
@@ -253,13 +281,11 @@ export default function StockHistoryModal({
                                   <span className="text-[12px] text-slate-400">-</span>
                                 )}
                               </td>
-
                               <td className="px-3 py-2 border-r border-slate-100">
                                 <span className="text-[10px] font-black text-[#0f172b] uppercase tracking-wider truncate max-w-[140px] block">
-                                  {log.employees?.full_name || 'SİSTEM (OTOMASYON)'}
+                                  {log.employee_name}
                                 </span>
                               </td>
-
                               <td className="px-3 py-2 text-[10px] font-bold text-slate-600 leading-tight">
                                 {extractReason(log.description)}
                               </td>
