@@ -6,7 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { 
   ChevronLeft, TerminalSquare, UserCircle, MapPin, 
   ArrowRight, Hash, QrCode, AlertTriangle, CheckCircle2, 
-  Package, Printer, ScanLine, Smartphone, Edit3, PlusCircle, MinusCircle
+  Package, Printer, ScanLine, Smartphone, Edit3, PlusCircle, MinusCircle, Database
 } from "lucide-react";
 import { Html5Qrcode } from "html5-qrcode";
 
@@ -54,7 +54,7 @@ export default function TransferScanPage() {
   const scanInputRef = useRef<HTMLInputElement>(null);
   const lastCameraScanTime = useRef<number>(0);
 
-  // SPEED BOOST: In-Memory Cache (DB Sorgu Yükünü %90 Azaltır)
+  // SPEED BOOST: In-Memory Cache (DB Sorgu Yükünü Azaltır)
   const barcodeResolverCache = useRef(new Map());
 
   // SYNC ENGINE: React kapanmadan önce verileri güvenle tutan asenkron havuz
@@ -125,11 +125,10 @@ export default function TransferScanPage() {
       isSyncingRef.current = true;
       try { await flushPendingSync(); } 
       finally { isSyncingRef.current = false; }
-    }, 2000); // 2 saniyede bir sessizce veritabanını günceller
+    }, 2000); 
     return () => clearInterval(interval);
   }, []);
 
-  // Kullanıcı Geri Çıkarsa Havuzu Boşalt
   const handleBack = async () => {
     if (activeTransfer && pendingSyncRef.current.size > 0) {
       setIsProcessing(true);
@@ -156,28 +155,28 @@ export default function TransferScanPage() {
 
       if (txError || !tx) {
         setIsFetching(false);
-        return triggerFeedback('error', "Geçersiz veya Bulunamayan Transfer Kodu!");
+        return triggerFeedback('error', "Geçersiz veya Bulunamayan Evrak Kodu!");
       }
 
-      // ÇÖZÜM 2: MNS (Serbest Sayım) ve Yetki Kontrollerinin Esnetilmesi
+      // WMS MOD BELİRLEME (GÖNDERİCİ Mİ? ALICI MI?)
       let currentMode: 'outbound' | 'inbound' | null = null;
+      const isMNS = tx.transfer_code.startsWith("MNS");
+
       if (tx.from_branch_id === branchId) currentMode = 'outbound';
       else if (tx.to_branch_id === branchId) currentMode = 'inbound';
-      else if (tx.picker_employee_id === empId || tx.transfer_code.startsWith("MNS")) {
-        // Personel kendi oluşturduğu sayıma veya bir MNS koduna giriyorsa
-        currentMode = 'outbound';
-      }
+      else if (isMNS || tx.picker_employee_id === empId) currentMode = 'outbound'; 
 
       if (!currentMode) {
         setIsFetching(false);
         return triggerFeedback('error', "ERİŞİM REDDEDİLDİ: Bu evrak şubenize ait değil!");
       }
       
+      // STATÜ KONTROLLERİ
       if (currentMode === 'outbound' && tx.status === 'Yolda') {
         setIsFetching(false); return triggerFeedback('error', "Sevkiyat zaten çıkış yapmış!");
       }
       if (tx.status === 'Tamamlandi') {
-        setIsFetching(false); return triggerFeedback('error', "Sayım daha önce tamamlanmış!");
+        setIsFetching(false); return triggerFeedback('error', "Sayım evrağı tamamlanıp kapatılmış!");
       }
 
       const { data: items } = await supabase
@@ -201,7 +200,8 @@ export default function TransferScanPage() {
       setTransferItems(items as unknown as TransferItem[] || []);
       setTransferCodeInput("");
       
-      if (tx.status === 'Bekliyor') {
+      // İlk okutmada LGS evrağı ise Toplanıyor yap
+      if (tx.status === 'Bekliyor' && !isMNS) {
         await supabase.from("transfers").update({ status: 'Toplaniyor' }).eq("id", tx.id);
       }
 
@@ -229,7 +229,7 @@ export default function TransferScanPage() {
       let targetBarcode = rawBarcode.trim();
       if (!targetBarcode) return;
 
-      // ULTRA HIZLI ÖNBELLEK
+      // ULTRA HIZLI ÖNBELLEK ÇÖZÜMLEME
       let resolved = barcodeResolverCache.current.get(targetBarcode);
       
       if (!resolved) {
@@ -251,7 +251,7 @@ export default function TransferScanPage() {
       }
 
       if (!resolved) {
-        triggerFeedback('error', "HATA: Ürün veritabanında bulunamadı!");
+        triggerFeedback('error', "HATA: Ürün sistemde (DB) bulunamadı!");
         return;
       }
       
@@ -262,14 +262,18 @@ export default function TransferScanPage() {
 
       const finalQtyToAdd = inputQty * resolved.qtyMulti;
       const qtyChange = currentScanMode === 'add' ? finalQtyToAdd : -finalQtyToAdd;
+      
       const isMNS = activeTransfer.transfer_code.startsWith("MNS");
-      let newItems = [...transferItems];
+      // DİKKAT: İster LGS ister MNS olsun, Alım (Inbound) aşamasına geçmişse KATI kural uygulanır.
+      const isFlexibleOutbound = isMNS && mode === 'outbound'; 
 
+      let newItems = [...transferItems];
       let itemIndex = newItems.findIndex(i => i.products.id === resolved.product.id);
 
-      // ÇÖZÜM 2 DEVAMI: MNS İSE LİSTEDE OLMAYAN ÜRÜNÜ DİNAMİK OLARAK EKLE
+      // --- 1. LİSTEDE OLMAYAN ÜRÜN KONTROLÜ ---
       if (itemIndex === -1) {
-        if (isMNS) {
+        if (isFlexibleOutbound) {
+          // SADECE GÖNDERİCİ AŞAMASINDAKİ MNS (Serbest Sayım) dinamik ürün ekleyebilir.
           if (qtyChange < 0) return triggerFeedback('error', "Olmayan ürünü iptal edemezsiniz!");
           
           const { data: newItem } = await supabase.from("transfer_items").insert({
@@ -278,8 +282,8 @@ export default function TransferScanPage() {
             requested_qty: qtyChange,
             approved_qty: qtyChange,
             sent_qty: qtyChange,
-            received_qty: 0,
-            status: "Bekliyor"
+            received_qty: qtyChange, // MNS'de sayım direkt tamamlanır
+            status: "Tamamlandi"
           }).select().single();
 
           if (newItem) {
@@ -298,50 +302,72 @@ export default function TransferScanPage() {
           }
           return;
         } else {
-          return triggerFeedback('error', "HATA: Bu ürün sevkiyat listesinde yok!");
+          // LGS (Gönderi/Teslim) veya MNS (Sadece Teslim) Aşaması -> Katı Kural (Listede Yok)
+          return triggerFeedback('error', "AŞIM / HATA: Bu ürün gönderim listesinde (veya transferde) bulunmuyor!");
         }
       }
 
+      // --- 2. LİSTEDE OLAN ÜRÜN LİMİT KONTROLLERİ ---
       const item = newItems[itemIndex];
       const currentCount = mode === 'outbound' ? item.sent_qty : item.received_qty;
       const proposedCount = currentCount + qtyChange;
 
       if (proposedCount < 0) {
-        return triggerFeedback('error', `HATA! Sayım sıfırın altına düşemez.`);
+        return triggerFeedback('error', `HATA: Sayım sıfırın altına düşemez.`);
       }
 
       let updatePayload: any = {};
-
+      
+      // Limit Belirleme: 
+      // Gönderici ve Esnek (MNS) -> Sınır Yok (Infinity)
+      // Gönderici ve Katı (LGS) -> Sınır: requested_qty (İstenen)
+      // Alıcı (Teslim/Inbound - LGS ve MNS Fark Etmez) -> Sınır: sent_qty (Gönderilen)
+      let reqLimit = Infinity;
       if (mode === 'outbound') {
-         if (proposedCount > item.requested_qty) {
-            if (isMNS) { // MNS'de istenen sınır aşılabilir, eşitle
-               updatePayload = { sent_qty: proposedCount, requested_qty: proposedCount, approved_qty: proposedCount };
-               newItems[itemIndex].sent_qty = proposedCount;
-               newItems[itemIndex].requested_qty = proposedCount;
-            } else {
-               return triggerFeedback('error', `AŞIM! İstenen: ${item.requested_qty} | Girilen: ${proposedCount}`);
-            }
+         reqLimit = isFlexibleOutbound ? Infinity : item.requested_qty;
+      } else if (mode === 'inbound') {
+         reqLimit = item.sent_qty; // Teslim alımında MNS de olsa gönderileni aşamaz
+      }
+
+      if (proposedCount > reqLimit) {
+         if (isFlexibleOutbound) {
+           // MNS Gönderim Aşamasında sınır yok, ne okutursa veritabanındaki talebi de artırır
+           updatePayload = { 
+             sent_qty: proposedCount, 
+             received_qty: proposedCount, 
+             requested_qty: proposedCount, 
+             approved_qty: proposedCount 
+           };
+           newItems[itemIndex].sent_qty = proposedCount;
+           newItems[itemIndex].received_qty = proposedCount;
+           newItems[itemIndex].requested_qty = proposedCount;
          } else {
-            updatePayload = { sent_qty: proposedCount };
-            newItems[itemIndex].sent_qty = proposedCount;
+           // Limit aşıldı!
+           const limitName = mode === 'outbound' ? 'İstenen' : 'Gönderilen';
+           return triggerFeedback('error', `AŞIM KORUMASI: ${limitName} (${reqLimit}) miktarını geçemezsiniz!`);
          }
       } else {
-         if (proposedCount > item.requested_qty && !isMNS) {
-             return triggerFeedback('error', `AŞIM! İstenen: ${item.requested_qty} | Girilen: ${proposedCount}`);
+         if (mode === 'outbound') {
+           updatePayload = { sent_qty: proposedCount };
+           newItems[itemIndex].sent_qty = proposedCount;
+           if (isFlexibleOutbound) { // MNS'te okunan kadar talebi de düşür/artır
+             updatePayload.requested_qty = proposedCount;
+             updatePayload.approved_qty = proposedCount;
+             updatePayload.received_qty = proposedCount;
+             newItems[itemIndex].requested_qty = proposedCount;
+           }
+         } else {
+           updatePayload = { received_qty: proposedCount };
+           newItems[itemIndex].received_qty = proposedCount;
          }
-         updatePayload = { received_qty: proposedCount };
-         if (isMNS && proposedCount > item.requested_qty) {
-            updatePayload.requested_qty = proposedCount;
-            updatePayload.approved_qty = proposedCount;
-            newItems[itemIndex].requested_qty = proposedCount;
-         }
-         newItems[itemIndex].received_qty = proposedCount;
       }
 
       // Değişikliği Sync Havuzuna Ekle
       pendingSyncRef.current.set(item.id, updatePayload);
       setTransferItems(newItems);
-      setLastScanned({ product: item.products, qtyChange: Math.abs(qtyChange), currentTotal: proposedCount, reqTotal: newItems[itemIndex].requested_qty, type: currentScanMode });
+      
+      const referenceTotal = isFlexibleOutbound ? proposedCount : reqLimit;
+      setLastScanned({ product: item.products, qtyChange: Math.abs(qtyChange), currentTotal: proposedCount, reqTotal: referenceTotal, type: currentScanMode });
       triggerFeedback('success');
       setSelectedQty(1); 
 
@@ -380,12 +406,13 @@ export default function TransferScanPage() {
     if (!activeTransfer) return;
     
     setIsProcessing(true);
-    await flushPendingSync(); // Kapatmadan önce havuzu temizle
+    await flushPendingSync(); // Havuzu son kez temizle
 
-    const newStatus = mode === 'outbound' ? 'Yolda' : 'Tamamlandi';
+    const isMNS = activeTransfer.transfer_code.startsWith("MNS");
+    const newStatus = (isMNS || mode === 'inbound') ? 'Tamamlandi' : 'Yolda';
+    
     await supabase.from("transfers").update({ status: newStatus }).eq("id", activeTransfer.id);
     
-    // Inbound işlemdeyse ürünleri de tamamlandı işaretle
     if (newStatus === 'Tamamlandi') {
       await supabase.from("transfer_items").update({ status: 'Tamamlandi' }).eq("transfer_id", activeTransfer.id);
     }
@@ -393,8 +420,8 @@ export default function TransferScanPage() {
     await supabase.from("transaction_logs").insert({
       employee_id: empId,
       branch_id: branchId,
-      action_type: mode === 'outbound' ? "TRANSFER_OUTBOUND_COMPLETE" : "TRANSFER_INBOUND_COMPLETE",
-      description: `${activeTransfer.transfer_code} kodlu ${mode === 'outbound' ? 'çıkış' : 'giriş'} sayımı tamamlandı.`
+      action_type: isMNS ? "MNS_COUNT_COMPLETE" : (mode === 'outbound' ? "TRANSFER_OUTBOUND_COMPLETE" : "TRANSFER_INBOUND_COMPLETE"),
+      description: `${activeTransfer.transfer_code} kodlu ${isMNS ? 'serbest sayım' : (mode === 'outbound' ? 'çıkış' : 'giriş')} tamamlandı.`
     });
     
     setIsProcessing(false);
@@ -412,7 +439,11 @@ export default function TransferScanPage() {
     if (activeTransfer && activeTab === 'terminal') scanInputRef.current?.focus();
   };
 
-  const totalReq = transferItems.reduce((acc, i) => acc + i.requested_qty, 0);
+  // Dinamik Raporlama Lojiği
+  const isMNS = activeTransfer?.transfer_code.startsWith("MNS");
+  const isFlexibleOutbound = isMNS && mode === 'outbound';
+
+  const totalReq = transferItems.reduce((acc, i) => acc + (isFlexibleOutbound ? Math.max(i.requested_qty, i.sent_qty) : (mode === 'outbound' ? i.requested_qty : i.sent_qty)), 0);
   const totalScanned = transferItems.reduce((acc, i) => acc + (mode === 'outbound' ? i.sent_qty : i.received_qty), 0);
   const totalMissing = Math.max(0, totalReq - totalScanned);
   const progressPercent = totalReq > 0 ? Math.round((totalScanned / totalReq) * 100) : 0;
@@ -420,41 +451,79 @@ export default function TransferScanPage() {
   return (
     <div className="min-h-screen bg-slate-50 font-['Quicksand'] flex flex-col antialiased select-none print:bg-white" onClick={forceFocus}>
       
-      {/* BAŞLIK (Dark Heading) */}
-      <div className="bg-[#0f172b] shadow-md shrink-0 border-b-4 border-[#dc3545] print:hidden">
-        <div className="flex items-center justify-between p-4 border-b border-slate-800/60 max-w-7xl mx-auto w-full">
-          <button onClick={handleBack} className="text-slate-400 hover:text-white p-2 bg-slate-800/40 hover:bg-slate-800 transition-all rounded-sm shrink-0">
-            <ChevronLeft size={20} />
-          </button>
-          
-          <div className="flex flex-col sm:flex-row items-center gap-2 text-center sm:text-left">
-            <div className="flex items-center gap-2">
-              <img src="/logo-placeholder.png" alt="Logo" className="h-6 w-auto object-contain hidden sm:block" onError={(e) => (e.currentTarget.style.display = 'none')} />
-              <TerminalSquare size={18} className="text-[#dc3545] sm:hidden" />
-              <span className="text-white text-[14px] sm:text-[15px] font-black uppercase tracking-widest line-clamp-1">
-                Terminal Sayım Motoru
-              </span>
-            </div>
-          </div>
-          
-          <div className="w-10 shrink-0" />
-        </div>
-        <div className="bg-slate-950 py-2.5 px-4">
-          <div className="max-w-7xl mx-auto w-full flex flex-col sm:flex-row justify-between items-center text-[11px] font-bold uppercase tracking-wider gap-1">
-            <span className="text-slate-400 flex items-center gap-1.5"><UserCircle size={14} className="text-slate-600"/> {empName}</span>
-            <span className="text-[#dc3545] flex items-center gap-1.5"><MapPin size={14}/> {branchName}</span>
-          </div>
+      {/* WMS YENİ HEADER: Dark-Industrial Bilgi Matrisi */}
+      <div className="bg-[#0f172b] border-b-4 border-[#dc3545] shadow-xl shrink-0 z-50 print:hidden relative overflow-hidden">
+        {/* Dekoratif Arka Plan Izgarası */}
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:24px_24px] pointer-events-none"></div>
+
+        <div className="flex flex-col sm:flex-row max-w-7xl mx-auto w-full relative z-10">
+           
+           {/* SOL KISIM: Marka ve Geri Butonu */}
+           <div className="flex items-center gap-4 p-4 border-b sm:border-b-0 sm:border-r border-slate-800/80 sm:w-[30%] bg-slate-950/20">
+             <button onClick={handleBack} className="text-slate-400 hover:text-white p-2.5 bg-slate-800/60 hover:bg-[#dc3545] transition-all rounded-sm shrink-0 border border-slate-700/50">
+               <ChevronLeft size={20} strokeWidth={2.5} />
+             </button>
+             <div className="flex flex-col justify-center">
+               <div className="flex items-center gap-2">
+                 <TerminalSquare size={16} className="text-[#dc3545] shrink-0" strokeWidth={2.5} />
+                 <span className="text-white text-[16px] font-black uppercase tracking-[0.15em] leading-none">LogiStock</span>
+               </div>
+               <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1">WMS Sayım Motoru</span>
+             </div>
+           </div>
+
+           {/* SAĞ KISIM: Operatör ve Şube Bilgi Matrisi */}
+           <div className="flex flex-1 items-center p-3 sm:p-0">
+             <div className="flex w-full items-stretch justify-center gap-1 sm:gap-2">
+                <div className="flex-1 flex flex-col justify-center items-center sm:items-start py-2 sm:px-6 border-r border-slate-800/80">
+                   <div className="flex items-center gap-1.5 mb-0.5">
+                     <UserCircle size={12} className="text-slate-400" />
+                     <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">AKTİF OPERATÖR</span>
+                   </div>
+                   <span className="text-[13px] font-black text-white uppercase tracking-wider truncate max-w-[120px] sm:max-w-full">
+                     {empName}
+                   </span>
+                </div>
+
+                <div className="flex-1 flex flex-col justify-center items-center sm:items-start py-2 sm:px-6 border-r border-slate-800/80">
+                   <div className="flex items-center gap-1.5 mb-0.5">
+                     <MapPin size={12} className="text-[#dc3545]" />
+                     <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">OTURUM LOKASYONU</span>
+                   </div>
+                   <span className="text-[13px] font-black text-[#dc3545] uppercase tracking-wider truncate max-w-[120px] sm:max-w-full">
+                     {branchName}
+                   </span>
+                </div>
+
+                <div className="flex-1 flex flex-col justify-center items-center sm:items-start py-2 sm:px-6">
+                   <div className="flex items-center gap-1.5 mb-0.5">
+                     <Database size={12} className="text-emerald-500" />
+                     <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">SİSTEM DURUMU</span>
+                   </div>
+                   <div className="flex items-center gap-2">
+                     <div className="w-2 h-2 bg-emerald-500 animate-pulse shadow-[0_0_8px_#10b981]"></div>
+                     <span className="text-[13px] font-black text-emerald-400 uppercase tracking-wider">AKTİF</span>
+                   </div>
+                </div>
+             </div>
+           </div>
+
         </div>
       </div>
 
       {/* SAYIM BAŞLATMA EKRANI */}
       {!activeTransfer && (
         <div className="flex-1 flex items-center justify-center p-4 print:hidden">
-          <div className="bg-white p-8 border border-slate-300 shadow-xl max-w-md w-full flex flex-col gap-6">
+          <div className="bg-white p-8 border border-slate-300 shadow-xl max-w-md w-full flex flex-col gap-6 relative overflow-hidden">
+            {/* Kart üst şerit */}
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-slate-900 to-[#dc3545]"></div>
+
             <div className="flex flex-col items-center text-center gap-2 mb-2">
-              <div className="bg-slate-50 border border-slate-200 p-4 rounded-full text-slate-800"><QrCode size={40} /></div>
-              <h2 className="text-[18px] font-black uppercase text-slate-800 tracking-widest">Sayıma Başla</h2>
-              <p className="text-[12px] font-bold text-slate-500">LGS veya MNS kodunu girin.</p>
+              <div className="bg-slate-50 border border-slate-200 p-4 rounded-sm text-slate-800"><QrCode size={40} /></div>
+              <h2 className="text-[18px] font-black uppercase text-slate-800 tracking-widest mt-2">Sayıma Başla</h2>
+              <p className="text-[12px] font-bold text-slate-500 leading-relaxed">
+                Sevkiyat veya Mal Kabul işlemi için <strong className="text-slate-800">LGS</strong> kodunu, serbest sayım için <strong className="text-slate-800">MNS</strong> kodunu giriniz.
+              </p>
             </div>
             <form onSubmit={startTransferScan} className="flex flex-col gap-4">
               <input 
@@ -464,9 +533,9 @@ export default function TransferScanPage() {
                 value={transferCodeInput}
                 onChange={e => setTransferCodeInput(e.target.value)}
                 disabled={isFetching}
-                className="w-full text-center font-black text-[24px] uppercase p-4 border-2 border-slate-300 focus:outline-none focus:border-[#dc3545] tracking-widest bg-white text-slate-900 disabled:opacity-50"
+                className="w-full text-center font-black text-[24px] uppercase p-4 border-2 border-slate-300 focus:outline-none focus:border-[#dc3545] tracking-widest bg-slate-50 text-slate-900 disabled:opacity-50 transition-colors"
               />
-              <button type="submit" disabled={isFetching} className="w-full bg-[#dc3545] text-white p-4 font-black uppercase tracking-widest hover:bg-red-700 transition-colors active:scale-95 shadow-md flex justify-center items-center h-14">
+              <button type="submit" disabled={isFetching} className="w-full bg-[#0F172A] border-2 border-[#0F172A] text-white p-4 font-black uppercase tracking-[0.2em] hover:bg-[#dc3545] hover:border-[#dc3545] transition-colors active:scale-95 shadow-md flex justify-center items-center h-14">
                 {isFetching ? <div className="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : 'EVRAĞI ÇEK'}
               </button>
             </form>
@@ -490,28 +559,31 @@ export default function TransferScanPage() {
           )}
 
           {/* KOKPİT BİLGİ PANELİ */}
-          <div className="bg-[#0f172b] p-4 text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 z-10 shrink-0 border-b border-slate-800">
+          <div className="bg-white p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 z-10 shrink-0 border-b-2 border-slate-200 shadow-sm">
             <div className="flex items-center gap-3">
-              <div className={`p-2 sm:p-3 border-2 shadow-sm ${mode === 'outbound' ? 'bg-orange-500 border-orange-400 text-white' : 'bg-blue-500 border-blue-400 text-white'}`}>
+              <div className={`p-2 sm:p-3 border-2 shadow-sm rounded-sm ${mode === 'outbound' ? 'bg-orange-50 border-orange-400 text-orange-600' : 'bg-blue-50 border-blue-400 text-blue-600'}`}>
                 {mode === 'outbound' ? <ArrowRight size={20} className="sm:w-6 sm:h-6" /> : <Package size={20} className="sm:w-6 sm:h-6" />}
               </div>
               <div className="flex flex-col">
-                <span className="text-[11px] sm:text-[12px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2 mb-0.5">
+                <span className="text-[11px] sm:text-[12px] font-black text-[#dc3545] uppercase tracking-widest flex items-center gap-2 mb-0.5">
                   <Hash size={12}/> {activeTransfer.transfer_code}
                 </span>
-                <span className="text-[14px] sm:text-[16px] font-black tracking-widest uppercase flex items-center gap-2 flex-wrap">
-                  <span className="text-slate-300">{activeTransfer.fromName}</span>
-                  <ArrowRight size={14} className="text-[#dc3545] shrink-0"/>
-                  <span className="text-white">{activeTransfer.toName}</span>
+                <span className="text-[14px] sm:text-[16px] font-black tracking-widest uppercase flex items-center gap-2 flex-wrap text-slate-800">
+                  <span>{activeTransfer.fromName}</span>
+                  <ArrowRight size={14} className="text-slate-400 shrink-0"/>
+                  <span>{activeTransfer.toName}</span>
                 </span>
               </div>
             </div>
             
-            <div className="flex flex-col text-left sm:text-right w-full sm:w-auto border-t sm:border-t-0 border-slate-700 pt-3 sm:pt-0">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Evrak İlerlemesi</span>
+            <div className="flex flex-col text-left sm:text-right w-full sm:w-auto border-t sm:border-t-0 border-slate-200 pt-3 sm:pt-0">
+              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1 flex items-center sm:justify-end gap-1.5">
+                <div className={`w-2 h-2 rounded-none ${mode === 'outbound' ? 'bg-orange-500' : 'bg-blue-500'}`}></div>
+                {isMNS ? "MNS Serbest Sayım" : (mode === 'outbound' ? 'Sevkiyat (Çıkış)' : 'Mal Kabul (Giriş)')}
+              </span>
               <div className="flex items-end gap-2 sm:justify-end">
-                <span className={`text-[24px] font-black leading-none ${progressPercent >= 100 ? 'text-emerald-400' : 'text-white'}`}>{totalScanned}</span>
-                <span className="text-slate-500 text-[14px] font-bold">/ {totalReq} ADET</span>
+                <span className={`text-[24px] font-black leading-none ${progressPercent >= 100 && !isFlexibleOutbound ? 'text-emerald-600' : 'text-slate-900'}`}>{totalScanned}</span>
+                <span className="text-slate-500 text-[14px] font-bold">/ {isFlexibleOutbound ? 'Limitsiz' : `${totalReq} ADET`}</span>
               </div>
             </div>
           </div>
@@ -566,7 +638,7 @@ export default function TransferScanPage() {
                       placeholder="BARKOD OKUTUN"
                       className={`w-full text-center font-black text-[24px] uppercase p-4 border-2 focus:outline-none tracking-widest transition-colors shadow-inner
                         ${scanMode === 'add' 
-                          ? 'bg-white text-slate-900 border-slate-300 focus:border-emerald-500 placeholder:text-slate-300' 
+                          ? 'bg-slate-50 text-slate-900 border-slate-300 focus:border-emerald-500 placeholder:text-slate-300' 
                           : 'bg-red-50 text-[#dc3545] border-red-200 focus:border-[#dc3545] placeholder:text-red-200'}`}
                     />
                     <button type="submit" className="hidden" /> 
@@ -588,7 +660,7 @@ export default function TransferScanPage() {
                         onClick={() => { setSelectedQty(qty); setTimeout(() => scanInputRef.current?.focus(), 100); }}
                         className={`flex-1 min-w-[44px] py-3 text-[14px] font-black transition-all border-2 rounded-sm ${
                           selectedQty === qty 
-                            ? (scanMode === 'add' ? 'bg-emerald-600 border-emerald-600 text-white shadow-md' : 'bg-[#dc3545] border-[#dc3545] text-white shadow-md')
+                            ? (scanMode === 'add' ? 'bg-[#0F172A] border-[#0F172A] text-white shadow-md' : 'bg-[#dc3545] border-[#dc3545] text-white shadow-md')
                             : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                         }`}
                       >
@@ -612,7 +684,7 @@ export default function TransferScanPage() {
 
               {/* ANLIK OKUNAN ÜRÜN BİLGİSİ */}
               <div className="bg-white border border-slate-200 shadow-md p-5 flex flex-col items-center text-center gap-4 relative overflow-hidden">
-                <div className={`absolute top-0 w-full h-1.5 ${lastScanned?.type === 'remove' ? 'bg-[#dc3545]' : 'bg-[#0f172b]'}`} />
+                <div className={`absolute top-0 w-full h-1.5 ${lastScanned?.type === 'remove' ? 'bg-[#dc3545]' : 'bg-emerald-500'}`} />
                 
                 {lastScanned ? (
                   <>
@@ -635,12 +707,14 @@ export default function TransferScanPage() {
                         </span>
                         <div className="flex items-baseline gap-1 shrink-0">
                           <span className="text-[20px] sm:text-[24px] font-black text-slate-900 leading-none">{lastScanned.currentTotal}</span>
-                          <span className="text-[11px] sm:text-[12px] font-bold text-slate-400">/ {lastScanned.reqTotal}</span>
+                          <span className="text-[11px] sm:text-[12px] font-bold text-slate-400">/ {isFlexibleOutbound ? 'Limitsiz' : lastScanned.reqTotal}</span>
                         </div>
                       </div>
-                      <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
-                        <div className="bg-[#0f172b] h-2 transition-all duration-500" style={{ width: `${Math.min((lastScanned.currentTotal / (lastScanned.reqTotal || 1)) * 100, 100)}%` }} />
-                      </div>
+                      {!isFlexibleOutbound && (
+                        <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden">
+                          <div className="bg-[#0f172b] h-2 transition-all duration-500" style={{ width: `${Math.min((lastScanned.currentTotal / (lastScanned.reqTotal || 1)) * 100, 100)}%` }} />
+                        </div>
+                      )}
                     </div>
                   </>
                 ) : (
@@ -655,7 +729,7 @@ export default function TransferScanPage() {
             {/* SAĞ KOLON: ÜRÜN LİSTESİ */}
             <div className="flex-1 bg-white border border-slate-200 shadow-md flex flex-col overflow-hidden min-h-[400px]">
               <div className="bg-[#0f172b] px-4 py-3 flex justify-between items-center text-white shrink-0">
-                <span className="text-[11px] font-black uppercase tracking-widest">Canlı Liste</span>
+                <span className="text-[11px] font-black uppercase tracking-widest">Canlı Sayım Listesi</span>
               </div>
               
               <div className="flex-1 overflow-y-auto overflow-x-auto">
@@ -664,15 +738,17 @@ export default function TransferScanPage() {
                     <tr>
                       <th className="p-3 w-32 border-r border-slate-200">Barkod</th>
                       <th className="p-3 border-r border-slate-200">Ürün Adı</th>
-                      <th className="p-3 w-16 text-center border-r border-slate-200">İstenen</th>
+                      <th className="p-3 w-16 text-center border-r border-slate-200">{isFlexibleOutbound ? 'Durum' : (mode === 'outbound' ? 'İstenen' : 'Gönderilen')}</th>
                       <th className="p-3 w-16 text-center text-[#dc3545] bg-red-50">Okunan</th>
                     </tr>
                   </thead>
                   <tbody className="text-[12px] font-bold text-slate-800 divide-y divide-slate-100">
                     {transferItems.map((item) => {
                       const current = mode === 'outbound' ? item.sent_qty : item.received_qty;
-                      const isComplete = current >= item.requested_qty;
-                      const isPartial = current > 0 && current < item.requested_qty;
+                      const limit = isFlexibleOutbound ? current : (mode === 'outbound' ? item.requested_qty : item.sent_qty);
+                      
+                      const isComplete = current >= limit;
+                      const isPartial = current > 0 && current < limit;
                       
                       return (
                         <tr key={item.id} className={`${isComplete ? 'bg-emerald-50/40' : isPartial ? 'bg-orange-50/40' : 'bg-white'} hover:bg-slate-50 transition-colors`}>
@@ -685,7 +761,7 @@ export default function TransferScanPage() {
                             <span className="line-clamp-2 text-[11px] leading-tight">{item.products.name}</span>
                           </td>
                           <td className="p-3 text-center border-r border-slate-100 bg-slate-50">
-                            <span className="text-[14px] font-black">{item.requested_qty}</span>
+                            <span className="text-[14px] font-black">{isFlexibleOutbound ? 'MNS' : limit}</span>
                           </td>
                           <td className="p-3 text-center">
                             <span className={`text-[15px] font-black ${isComplete ? 'text-emerald-600' : isPartial ? 'text-orange-600' : 'text-slate-400'}`}>
@@ -728,7 +804,7 @@ export default function TransferScanPage() {
           <div className="text-center border-b-4 border-black pb-2 mb-2 shrink-0">
             <h1 className="text-[24px] font-black uppercase m-0 leading-none tracking-widest">LOGISTOCK | WMS</h1>
             <p className="text-[14px] font-black mt-1 uppercase tracking-widest bg-black text-white py-1 inline-block px-4">
-              {mode === 'outbound' ? 'SAYIM RAPORU - SEVKİYAT' : 'SAYIM RAPORU - MAL KABUL'}
+              {isMNS ? 'SERBEST SAYIM (MNS) RAPORU' : (mode === 'outbound' ? 'SAYIM RAPORU - SEVKİYAT' : 'SAYIM RAPORU - MAL KABUL')}
             </p>
           </div>
           
@@ -745,7 +821,7 @@ export default function TransferScanPage() {
           <div className="border-2 border-black p-2 mb-2 flex justify-between items-center text-center shrink-0">
             <div className="flex flex-col">
               <span className="text-[10px] text-gray-600 font-bold uppercase">Beklenen</span>
-              <span className="text-[16px] font-black">{totalReq}</span>
+              <span className="text-[16px] font-black">{isFlexibleOutbound ? 'Limitsiz' : totalReq}</span>
             </div>
             <div className="flex flex-col border-l border-r border-gray-400 px-4">
               <span className="text-[10px] text-gray-600 font-bold uppercase">Okunan</span>
@@ -753,7 +829,7 @@ export default function TransferScanPage() {
             </div>
             <div className="flex flex-col">
               <span className="text-[10px] text-gray-600 font-bold uppercase">Eksik</span>
-              <span className="text-[16px] font-black">{totalMissing}</span>
+              <span className="text-[16px] font-black">{isFlexibleOutbound ? '0' : totalMissing}</span>
             </div>
           </div>
 
@@ -769,12 +845,13 @@ export default function TransferScanPage() {
               <tbody>
                 {transferItems.filter(i => (mode === 'outbound' ? i.sent_qty : i.received_qty) > 0 || i.requested_qty > 0).map((item, idx) => {
                   const scanned = mode === 'outbound' ? item.sent_qty : item.received_qty;
+                  const limit = isFlexibleOutbound ? scanned : (mode === 'outbound' ? item.requested_qty : item.sent_qty);
                   return (
                     <tr key={idx} className="border-b border-gray-300">
                       <td className="py-1.5 whitespace-nowrap">{item.products.barcode}</td>
                       <td className="py-1.5 truncate max-w-[40mm]">{item.products.name}</td>
                       <td className="py-1.5 text-center font-black text-[12px] whitespace-nowrap">
-                        {item.requested_qty} / {scanned}
+                        {limit} / {scanned}
                       </td>
                     </tr>
                   )

@@ -13,7 +13,6 @@ import {
   MapPin,
   ShieldAlert,
   Users,
-  ShoppingCart,
   Settings,
   Clock,
   Search,
@@ -23,9 +22,9 @@ import {
   ToyBrick,
   ScanLine,
   Package,
-  Lock,
   MessageCircleQuestionMark,
   UserCog,
+  Lock,
 } from "lucide-react";
 
 type SearchItem = {
@@ -43,7 +42,6 @@ export const Navbar = () => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // KİLİT SORUNUNU ÇÖZEN DİNAMİK YETKİ STATE'İ
   const [dbPermissions, setDbPermissions] = useState<string[]>([]);
   const [dbRoleName, setDbRoleName] = useState("");
 
@@ -58,7 +56,6 @@ export const Navbar = () => {
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
   }, []);
 
-  // VERİTABANINDAN GERÇEK ZAMANLI YETKİ ÇEKİCİ
   useEffect(() => {
     const fetchRealPermissions = async () => {
       if (
@@ -112,21 +109,16 @@ export const Navbar = () => {
   const checkAccess = (moduleCode?: string, allowedRoles?: string[]) => {
     if (!userProfile) return false;
 
-    // Master Yetkiler
-    if (
-      userProfile.role === "Developer" ||
-      userProfile.role === "Admin" ||
-      userProfile.isGlobalAdmin
-    ) {
-      return true;
-    }
+    // Mutlak Otorite (Developer) her yere girebilir
+    if (userProfile.role === "Developer" || userProfile.isGlobalAdmin) return true;
+    if (userProfile.role === "Admin") return true;
 
-    // A. DB'den Çekilen Kesin İzinler
+    // Dinamik (Veritabanı) Yetkileri
     if (moduleCode && dbPermissions.length > 0) {
       if (dbPermissions.includes(moduleCode)) return true;
     }
 
-    // B. Hardcoded İzinler
+    // Hardcoded (Yedek) Rol Yetkileri
     if (allowedRoles) {
       if (allowedRoles.includes(userProfile.role)) return true;
       if (dbRoleName && allowedRoles.includes(dbRoleName)) return true;
@@ -135,44 +127,26 @@ export const Navbar = () => {
     return false;
   };
 
-  // 2. ANA MENÜ VE ROL İZİNLERİ
+  // ANA MENÜ VE ROL İZİNLERİ (Sistem Modülleri ile Tam Senkronize)
   const rawNavLinks = [
     {
       name: "Ürün & Stok",
       path: "/management/products",
       icon: <Package size={18} />,
       moduleCode: "products",
-      allowedRoles: [
-        "Developer",
-        "Admin",
-        "Depo Müdürü",
-        "Ürün Müdürü",
-        "Ürün Müdür Yardımcısı",
-        "Ekip Lideri",
-      ],
+      allowedRoles: ["Developer", "Admin", "Depo Müdürü", "Ürün Müdürü", "Ekip Lideri"],
       subItems: [
         {
           name: "Ürün Listesi & Katalog",
           path: "/management/products",
-          moduleCode: "products",
-          allowedRoles: [
-            "Developer",
-            "Admin",
-            "Ürün Müdürü",
-            "Ürün Müdür Yardımcısı",
-          ],
+          moduleCode: "products_catalog",
+          allowedRoles: ["Developer", "Admin", "Ürün Müdürü"],
         },
         {
           name: "Stok Görüntüleme",
           path: "/management/inventory/view",
-          moduleCode: "products",
-          allowedRoles: [
-            "Developer",
-            "Admin",
-            "Depo Müdürü",
-            "Ekip Lideri",
-            "Ürün Müdürü",
-          ],
+          moduleCode: "inventory_view",
+          allowedRoles: ["Developer", "Admin", "Depo Müdürü", "Ekip Lideri", "Ürün Müdürü"],
         },
         {
           name: "Raf Düzenleme",
@@ -183,7 +157,7 @@ export const Navbar = () => {
         {
           name: "Koli Yönetimi",
           path: "/management/inventory/boxes",
-          moduleCode: "products",
+          moduleCode: "inventory_boxes",
           allowedRoles: ["Developer", "Admin", "Depo Müdürü", "Ekip Lideri"],
         },
       ],
@@ -193,135 +167,93 @@ export const Navbar = () => {
       path: "/management/hr",
       icon: <Users size={18} />,
       moduleCode: "hr",
-      allowedRoles: [
-        "Developer",
-        "Admin",
-        "İK Bölge Müdürü",
-        "Mağaza Müdürü",
-        "Depo Müdürü",
-      ],
+      allowedRoles: ["Developer", "Admin", "İK Bölge Müdürü", "Mağaza Müdürü", "Depo Müdürü"],
       subItems: [
         {
           name: "Canlı Takip",
           path: "/management/hr",
-          moduleCode: "hr",
-          allowedRoles: [
-            "Developer",
-            "Admin",
-            "İK Bölge Müdürü",
-            "Mağaza Müdürü",
-            "Depo Müdürü",
-          ],
+          moduleCode: "hr_tracking",
+          allowedRoles: ["Developer", "Admin", "İK Bölge Müdürü", "Mağaza Müdürü", "Depo Müdürü"],
         },
         {
           name: "Onay Merkezi",
           path: "/management/hr/approvals",
-          moduleCode: "hr",
-          allowedRoles: [
-            "Developer",
-            "Admin",
-            "İK Bölge Müdürü",
-            "Mağaza Müdürü",
-            "Depo Müdürü",
-          ],
+          moduleCode: "hr_approvals",
+          allowedRoles: ["Developer", "Admin", "İK Bölge Müdürü", "Mağaza Müdürü", "Depo Müdürü"],
         },
         {
           name: "İzin Yönetimi",
           path: "/management/hr/leaves",
-          moduleCode: "hr",
-          allowedRoles: [
-            "Developer",
-            "Admin",
-            "İK Bölge Müdürü",
-            "Mağaza Müdürü",
-            "Depo Müdürü",
-          ],
+          moduleCode: "hr_leaves",
+          allowedRoles: ["Developer", "Admin", "İK Bölge Müdürü", "Mağaza Müdürü", "Depo Müdürü"],
         },
         {
           name: "Personel Listesi",
           path: "/management/hr/personnel",
-          moduleCode: "hr",
+          moduleCode: "hr_personnel",
           allowedRoles: ["Developer", "Admin", "İK Bölge Müdürü"],
         },
         {
           name: "Manuel Log Düzenleme",
           path: "/management/hr/logs",
-          moduleCode: "hr",
+          moduleCode: "hr_logs",
           allowedRoles: ["Developer", "Admin", "İK Bölge Müdürü"],
         },
         {
           name: "Puantaj & Raporlar",
           path: "/management/hr/reports",
-          moduleCode: "hr",
-          allowedRoles: [
-            "Developer",
-            "Admin",
-            "İK Bölge Müdürü",
-            "Mağaza Müdürü",
-            "Depo Müdürü",
-          ],
-        },
-                {
-          name: "Yıllık İzin Yönetimi",
-          path: "/management/hr/leave-management",
-          moduleCode: "hr",
-          allowedRoles: [
-            "Developer",
-            "Admin",
-            "İK Bölge Müdürü",
-            "Mağaza Müdürü",
-            "Depo Müdürü",
-          ],
+          moduleCode: "hr_reports",
+          allowedRoles: ["Developer", "Admin", "İK Bölge Müdürü", "Mağaza Müdürü", "Depo Müdürü"],
         },
       ],
     },
     {
-      name: "Sarf Sipariş",
-      path: "/management/b2b",
-      icon: <ShoppingCart size={18} />,
-      moduleCode: "b2b",
-      allowedRoles: [
-        "Developer",
-        "Admin",
-        "Mağaza Müdürü",
-        "Mağaza Personeli",
-        "Depo Personeli",
+      name: "İK Özel",
+      path: "/management/hr/leave-management",
+      icon: <UserCog size={18} />,
+      moduleCode: "hr_special",
+      allowedRoles: ["Developer", "Admin", "İK Bölge Müdürü"],
+      subItems: [
+        {
+          name: "Yıllık İzin Yönetimi",
+          path: "/management/hr/leave-management",
+          moduleCode: "hr_leave_management",
+          allowedRoles: ["Developer", "Admin", "İK Bölge Müdürü"],
+        },
       ],
     },
     {
       name: "Eksik Parça Yönetimi",
       path: "/management/cargo",
       icon: <ToyBrick size={18} />,
-      moduleCode: "b2b",
-      allowedRoles: [
-        "Developer",
-        "Admin",
-        "Mağaza Müdürü",
-        "Mağaza Personeli",
-        "Depo Personeli",
-      ],
+      moduleCode: "cargo",
+      allowedRoles: ["Developer", "Admin", "Mağaza Müdürü", "Depo Personeli"],
     },
   ];
 
+  // Arama motorunu, YALNIZCA KULLANICININ YETKİSİ OLAN sayfalarla doldurur.
   const searchableLinks: SearchItem[] = rawNavLinks.flatMap((link) => {
-    const items: SearchItem[] = [
-      {
+    const items: SearchItem[] = [];
+    if (checkAccess(link.moduleCode, link.allowedRoles)) {
+      items.push({
         name: link.name,
         path: link.path,
         parent: null,
         moduleCode: link.moduleCode,
         allowedRoles: link.allowedRoles,
-      },
-    ];
+      });
+    }
     if (link.subItems) {
       link.subItems.forEach((sub) => {
-        items.push({
-          name: sub.name,
-          path: sub.path,
-          parent: link.name,
-          moduleCode: sub.moduleCode,
-          allowedRoles: sub.allowedRoles,
-        });
+        if (checkAccess(sub.moduleCode, sub.allowedRoles)) {
+          items.push({
+            name: sub.name,
+            path: sub.path,
+            parent: link.name,
+            moduleCode: sub.moduleCode,
+            allowedRoles: sub.allowedRoles,
+          });
+        }
       });
     }
     return items;
@@ -333,8 +265,7 @@ export const Navbar = () => {
       : searchableLinks.filter(
           (item) =>
             item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            (item.parent &&
-              item.parent.toLowerCase().includes(searchQuery.toLowerCase())),
+            (item.parent && item.parent.toLowerCase().includes(searchQuery.toLowerCase())),
         );
 
   const locationName = isLoading
@@ -343,16 +274,12 @@ export const Navbar = () => {
       ? "Merkez Ofis"
       : userProfile?.branchName;
 
-  // ÇÖZÜM: Parametre tipini "string | undefined | null" olarak esnettik ve güvenli hale getirdik.
   const getInitials = (name?: string | null) => {
     if (!name) return "WM";
-    return name
-      .split(" ")
-      .map((n) => n[0])
-      .join("")
-      .substring(0, 2)
-      .toUpperCase();
+    return name.split(" ").map((n) => n[0]).join("").substring(0, 2).toUpperCase();
   };
+
+  const canSeeSettings = checkAccess("settings") || checkAccess("role_settings");
 
   return (
     <div className="sticky top-0 z-50 flex flex-col w-full shadow-md font-['Quicksand']">
@@ -375,14 +302,11 @@ export const Navbar = () => {
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Modül veya sayfa ara..."
+                  placeholder="Erişilebilir Modül Ara..."
                   className="bg-transparent border-none outline-none text-white w-full placeholder:text-slate-500 text-xs"
                 />
                 {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery("")}
-                    className="text-slate-400 hover:text-white transition-colors"
-                  >
+                  <button onClick={() => setSearchQuery("")} className="text-slate-400 hover:text-white transition-colors">
                     <X size={14} />
                   </button>
                 )}
@@ -392,43 +316,29 @@ export const Navbar = () => {
                 <div className="absolute top-full left-0 mt-1.5 w-full bg-white rounded-md shadow-xl border border-slate-200 overflow-hidden z-[60]">
                   {searchResults.length > 0 ? (
                     <div className="max-h-64 overflow-y-auto py-1">
-                      {searchResults.map((res, idx) => {
-                        const isResAuthorized = checkAccess(
-                          res.moduleCode,
-                          res.allowedRoles,
-                        );
-                        return (
-                          <button
-                            key={idx}
-                            onClick={() => {
-                              router.push(
-                                isResAuthorized
-                                  ? res.path
-                                  : "/management/unauthorized",
-                              );
-                              setSearchQuery("");
-                            }}
-                            className={`w-full text-left px-3 py-2 text-xs flex justify-between items-center transition-colors border-b border-slate-50 last:border-0
-                              ${isResAuthorized ? "text-slate-700 hover:bg-red-50 hover:text-[#dc3545]" : "text-slate-400 bg-slate-50 opacity-70"}`}
-                          >
-                            <div>
-                              <div className="font-bold">{res.name}</div>
-                              {res.parent && (
-                                <div className="text-[10px] mt-0.5 font-medium">
-                                  {res.parent} &gt; {res.name}
-                                </div>
-                              )}
-                            </div>
-                            {!isResAuthorized && (
-                              <Lock size={12} className="text-slate-300" />
+                      {searchResults.map((res, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => {
+                            router.push(res.path);
+                            setSearchQuery("");
+                          }}
+                          className="w-full text-left px-3 py-2.5 text-xs flex justify-between items-center transition-colors border-b border-slate-50 last:border-0 text-slate-700 hover:bg-red-50 hover:text-[#dc3545]"
+                        >
+                          <div>
+                            <div className="font-bold">{res.name}</div>
+                            {res.parent && (
+                              <div className="text-[10px] mt-0.5 font-medium text-slate-400">
+                                {res.parent} &gt; {res.name}
+                              </div>
                             )}
-                          </button>
-                        );
-                      })}
+                          </div>
+                        </button>
+                      ))}
                     </div>
                   ) : (
                     <div className="px-3 py-4 text-center text-xs text-slate-500 font-bold">
-                      "{searchQuery}" için sonuç bulunamadı.
+                      Yetkiniz dahilinde sonuç bulunamadı.
                     </div>
                   )}
                 </div>
@@ -441,40 +351,21 @@ export const Navbar = () => {
             <div className="hidden lg:flex items-center gap-2 text-slate-400 justify-center text-xs font-semibold shrink-0">
               <Clock size={14} />
               <span className="tracking-wide">
-                {new Date().toLocaleDateString("tr-TR", {
-                  weekday: "long",
-                  year: "numeric",
-                  month: "long",
-                  day: "numeric",
-                })}
+                {new Date().toLocaleDateString("tr-TR", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
               </span>
             </div>
 
             <div className="w-px h-6 bg-slate-700 hidden lg:block mx-1"></div>
 
             <div className="flex items-center gap-3">
-              <Link
-                href="/management/help"
-                className="flex items-center gap-2 hover:bg-slate-800/80 px-2.5 py-1.5 rounded-lg transition-colors group"
-                title="Sistem Desteği"
-              >
+              <Link href="/management/help" className="flex items-center gap-2 hover:bg-slate-800/80 px-2.5 py-1.5 rounded-lg transition-colors group" title="Sistem Desteği">
                 <div className="relative">
-                  <MessageCircleQuestionMark
-                    size={18}
-                    className="text-slate-400 group-hover:text-white transition-colors"
-                  />
+                  <MessageCircleQuestionMark size={18} className="text-slate-400 group-hover:text-white transition-colors" />
                   <span className="absolute top-0 right-0 w-2 h-2 bg-[#dc3545] rounded-full border-[1.5px] border-[#0f172b]"></span>
                 </div>
-                <span className="text-xs font-bold text-slate-400 group-hover:text-white uppercase tracking-wider hidden sm:inline-block">
-                  Destek
-                </span>
+                <span className="text-xs font-bold text-slate-400 group-hover:text-white uppercase tracking-wider hidden sm:inline-block">Destek</span>
               </Link>
-
-              <button
-                onClick={toggleFullScreen}
-                className="text-slate-400 hover:text-white transition-colors p-1.5 hover:bg-slate-800/80 rounded-lg"
-                title="Tam Ekran Modu"
-              >
+              <button onClick={toggleFullScreen} className="text-slate-400 hover:text-white transition-colors p-1.5 hover:bg-slate-800/80 rounded-lg" title="Tam Ekran Modu">
                 {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
               </button>
             </div>
@@ -487,78 +378,42 @@ export const Navbar = () => {
                   {isLoading ? "..." : getInitials(userProfile?.fullName)}
                 </div>
                 <div className="hidden sm:flex flex-col items-start leading-none ml-1">
-                  <span className="text-white text-[13px] font-bold">
-                    {isLoading ? "..." : userProfile?.fullName}
-                  </span>
-                  <span className="text-[10px] text-[#dc3545] font-extrabold uppercase tracking-widest mt-1">
-                    {isLoading ? "..." : userProfile?.role}
-                  </span>
+                  <span className="text-white text-[13px] font-bold">{isLoading ? "..." : userProfile?.fullName}</span>
+                  <span className="text-[10px] text-[#dc3545] font-extrabold uppercase tracking-widest mt-1">{isLoading ? "..." : userProfile?.role}</span>
                 </div>
-                <ChevronDown
-                  size={14}
-                  className="text-slate-400 group-hover:text-white transition-colors ml-1"
-                />
+                <ChevronDown size={14} className="text-slate-400 group-hover:text-white transition-colors ml-1" />
               </div>
 
+              {/* PROFİL DROPDOWN */}
               <div className="absolute top-full right-0 pt-2 w-56 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
                 <div className="bg-white rounded-lg shadow-xl border border-slate-200 overflow-hidden transform origin-top-right scale-95 group-hover:scale-100 transition-transform">
                   <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center gap-3">
-                    <div
-                      className={`p-2 rounded-md ${userProfile?.isGlobalAdmin ? "bg-emerald-100 text-emerald-600" : "bg-red-100 text-[#dc3545]"}`}
-                    >
-                      {userProfile?.isGlobalAdmin ? (
-                        <ShieldAlert size={16} />
-                      ) : (
-                        <MapPin size={16} />
-                      )}
+                    <div className={`p-2 rounded-md ${userProfile?.isGlobalAdmin ? "bg-emerald-100 text-emerald-600" : "bg-red-100 text-[#dc3545]"}`}>
+                      {userProfile?.isGlobalAdmin ? <ShieldAlert size={16} /> : <MapPin size={16} />}
                     </div>
                     <div className="flex flex-col overflow-hidden">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-0.5">
-                        Konum
-                      </span>
-                      <span className="text-sm font-black text-slate-800 truncate">
-                        {locationName}
-                      </span>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-0.5">Konum</span>
+                      <span className="text-sm font-black text-slate-800 truncate">{locationName}</span>
                     </div>
                   </div>
+                  
                   <div className="py-1">
-                    {(userProfile?.role === "Developer" ||
-                      userProfile?.role === "Admin" ||
-                      userProfile?.isGlobalAdmin) && (
+                    {/* Yalnızca Setting Yetkisi Olanlar Yönetim Araçlarını Görür */}
+                    {canSeeSettings && (
                       <>
-                        <button
-                          onClick={() =>
-                            router.push("/management/role-settings")
-                          }
-                          className="flex items-center w-full px-4 py-3 text-sm text-slate-700 hover:bg-red-50 hover:text-[#dc3545] transition-colors font-bold"
-                        >
-                          <UserCog size={16} className="mr-3 text-slate-400" />{" "}
-                          Erişim Ayarları
+                        <button onClick={() => router.push("/management/role-settings")} className="flex items-center w-full px-4 py-3 text-sm text-slate-700 hover:bg-red-50 hover:text-[#dc3545] transition-colors font-bold">
+                          <UserCog size={16} className="mr-3 text-slate-400" /> Erişim Ayarları
                         </button>
-                        <button
-                          onClick={() =>
-                            router.push("/management/password-settings")
-                          }
-                          className="flex items-center w-full px-4 py-3 text-sm text-slate-700 hover:bg-red-50 hover:text-[#dc3545] transition-colors font-bold"
-                        >
-                          <Lock size={16} className="mr-3 text-slate-400" />{" "}
-                          Çalışan Yönetimi
+                        <button onClick={() => router.push("/management/password-settings")} className="flex items-center w-full px-4 py-3 text-sm text-slate-700 hover:bg-red-50 hover:text-[#dc3545] transition-colors font-bold">
+                          <Lock size={16} className="mr-3 text-slate-400" /> Çalışan Yönetimi
                         </button>
-                        <button
-                          onClick={() => router.push("/management/settings")}
-                          className="flex items-center w-full px-4 py-3 text-sm text-slate-700 hover:bg-red-50 hover:text-[#dc3545] transition-colors font-bold border-b border-slate-100"
-                        >
-                          <Settings size={16} className="mr-3 text-slate-400" />{" "}
-                          Sistem Ayarları
+                        <button onClick={() => router.push("/management/settings")} className="flex items-center w-full px-4 py-3 text-sm text-slate-700 hover:bg-red-50 hover:text-[#dc3545] transition-colors font-bold border-b border-slate-100">
+                          <Settings size={16} className="mr-3 text-slate-400" /> Sistem Ayarları
                         </button>
                       </>
                     )}
-                    <button
-                      onClick={handleLogout}
-                      className="flex items-center w-full px-4 py-3 text-sm text-red-600 hover:bg-red-50 font-black transition-colors"
-                    >
-                      <LogOut size={16} className="mr-3 text-red-400" /> Güvenli
-                      Çıkış
+                    <button onClick={handleLogout} className="flex items-center w-full px-4 py-3 text-sm text-red-600 hover:bg-red-50 font-black transition-colors">
+                      <LogOut size={16} className="mr-3 text-red-400" /> Güvenli Çıkış
                     </button>
                   </div>
                 </div>
@@ -572,109 +427,60 @@ export const Navbar = () => {
       <nav className="bg-white/95 backdrop-blur-md h-20 border-b border-slate-200 relative z-40">
         <div className="container mx-auto 2xl:max-w-[1400px] h-full flex items-center justify-between px-4 sm:px-6">
           <div className="flex items-center gap-6 lg:gap-8 h-full">
-            <Link
-              href="/"
-              className="flex-shrink-0 flex items-center justify-center cursor-pointer gap-2"
-            >
+            <Link href="/" className="flex-shrink-0 flex items-center justify-center cursor-pointer gap-2">
               <Logo variant="primary" className="text-3xl" />
-              <span className="text-[#0f172b] font-black text-[15px] tracking-tight uppercase opacity-90 self-end mb-[2px]">
-                WMS
-              </span>
+              <span className="text-[#0f172b] font-black text-[15px] tracking-tight uppercase opacity-90 self-end mb-[2px]">WMS</span>
             </Link>
 
             <div className="hidden lg:flex h-full gap-2">
               {userProfile &&
                 rawNavLinks.map((link) => {
-                  const isAuthorized = checkAccess(
-                    link.moduleCode,
-                    link.allowedRoles,
-                  );
-                  const isActive =
-                    link.path === "/management"
-                      ? pathname === "/management"
-                      : pathname.startsWith(link.path) ||
-                        link.subItems?.some((sub) =>
-                          pathname.startsWith(sub.path),
-                        );
+                  const isAuthorized = checkAccess(link.moduleCode, link.allowedRoles);
+                  
+                  // Yetkisi yoksa modülü tamamen DOM'dan uçur
+                  if (!isAuthorized) return null;
+
+                  const isActive = link.path === "/management"
+                    ? pathname === "/management"
+                    : pathname.startsWith(link.path) || link.subItems?.some((sub) => pathname.startsWith(sub.path));
+
+                  // Sadece Yetkisi Olan Alt Sekmeleri Filtrele
+                  const authSubItems = link.subItems?.filter(sub => checkAccess(sub.moduleCode, sub.allowedRoles));
+                  const hasSubItems = authSubItems && authSubItems.length > 0;
 
                   return (
-                    <div
-                      key={link.name}
-                      className="relative group h-full flex items-center"
-                    >
+                    <div key={link.name} className="relative group h-full flex items-center">
                       <Link
-                        href={
-                          isAuthorized ? link.path : "/management/unauthorized"
-                        }
-                        className={`flex items-center gap-2 px-4 py-2.5 rounded-md text-[14px] font-bold transition-all relative
-                        ${
-                          !isAuthorized
-                            ? "text-slate-400 opacity-60 hover:bg-slate-50 cursor-not-allowed"
-                            : isActive
-                              ? "bg-red-50 text-[#dc3545]"
-                              : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                        }
-                      `}
+                        href={link.path}
+                        className={`flex items-center gap-2 px-4 py-2.5 rounded-md text-[14px] font-bold transition-all relative ${isActive ? "bg-red-50 text-[#dc3545]" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}
                       >
-                        <span
-                          className={`${!isAuthorized ? "text-slate-300" : isActive ? "text-[#dc3545]" : "text-slate-400 group-hover:text-slate-600"} transition-colors`}
-                        >
+                        <span className={`${isActive ? "text-[#dc3545]" : "text-slate-400 group-hover:text-slate-600"} transition-colors`}>
                           {link.icon}
                         </span>
                         {link.name}
-
-                        {!isAuthorized ? (
-                          <Lock size={14} className="ml-1 text-slate-300" />
-                        ) : link.subItems ? (
-                          <ChevronDown
-                            size={14}
-                            className={`ml-1 transition-transform group-hover:rotate-180 ${isActive ? "text-[#dc3545]" : "text-slate-400"}`}
-                          />
-                        ) : null}
+                        {hasSubItems && <ChevronDown size={14} className={`ml-1 transition-transform group-hover:rotate-180 ${isActive ? "text-[#dc3545]" : "text-slate-400"}`} />}
                       </Link>
 
-                      {isAuthorized && link.subItems && (
+                      {hasSubItems && (
                         <div className="absolute top-full left-0 pt-0 w-64 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
                           <div className="bg-white rounded-b-lg shadow-lg border border-slate-200 border-t-0 overflow-hidden">
                             <div className="py-2">
-                              {link.subItems.map((subItem) => {
-                                const isSubAuthorized = checkAccess(
-                                  subItem.moduleCode,
-                                  subItem.allowedRoles,
-                                );
-                                return (
-                                  <Link
-                                    key={subItem.name}
-                                    href={
-                                      isSubAuthorized
-                                        ? subItem.path
-                                        : "/management/unauthorized"
-                                    }
-                                    className={`flex items-center justify-between px-5 py-3 text-sm transition-colors font-semibold
-                                    ${
-                                      !isSubAuthorized
-                                        ? "text-slate-400 opacity-60 bg-slate-50/50 hover:bg-slate-100 cursor-not-allowed"
-                                        : "text-slate-600 hover:bg-red-50 hover:text-[#dc3545] hover:font-bold"
-                                    }
-                                  `}
-                                  >
-                                    {subItem.name}
-                                    {!isSubAuthorized && (
-                                      <Lock
-                                        size={12}
-                                        className="text-slate-300"
-                                      />
-                                    )}
-                                  </Link>
-                                );
-                              })}
+                              {authSubItems.map((subItem) => (
+                                <Link
+                                  key={subItem.name}
+                                  href={subItem.path}
+                                  className="flex items-center justify-between px-5 py-3 text-sm transition-colors font-semibold text-slate-600 hover:bg-red-50 hover:text-[#dc3545] hover:font-bold"
+                                >
+                                  {subItem.name}
+                                </Link>
+                              ))}
                             </div>
                           </div>
                         </div>
                       )}
 
                       {/* Kırmızı Aktif Çizgisi */}
-                      {isActive && isAuthorized && (
+                      {isActive && (
                         <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-12 h-1 bg-[#dc3545] rounded-t-full shadow-[0_0_8px_rgba(220,53,69,0.5)]"></span>
                       )}
                     </div>
@@ -683,10 +489,7 @@ export const Navbar = () => {
             </div>
           </div>
 
-          <button
-            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="lg:hidden p-2 text-slate-600 hover:bg-slate-100 hover:text-[#dc3545] rounded-lg transition-colors"
-          >
+          <button onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} className="lg:hidden p-2 text-slate-600 hover:bg-slate-100 hover:text-[#dc3545] rounded-lg transition-colors">
             {isMobileMenuOpen ? <X size={28} /> : <Menu size={28} />}
           </button>
         </div>
@@ -694,85 +497,57 @@ export const Navbar = () => {
 
       {/* MOBİL & TABLET MENÜ ÇEKMECESİ */}
       {isMobileMenuOpen && (
-        <div className="lg:hidden bg-white border-b border-slate-200 shadow-2xl absolute top-[136px] left-0 w-full z-40 max-h-[calc(100vh-136px)] overflow-y-auto">
+        <div className="lg:hidden bg-white border-b border-slate-200 shadow-2xl absolute top-[136px] left-0 w-full z-40 max-h-[calc(100dvh-136px)] overflow-y-auto">
           <div className="p-4 space-y-2">
             <div className="flex items-center gap-3 p-4 bg-slate-50 rounded-xl mb-4 border border-slate-100">
               <div className="w-12 h-12 rounded bg-indigo-600 flex items-center justify-center text-white text-sm font-black shadow-inner">
                 {isLoading ? "..." : getInitials(userProfile?.fullName)}
               </div>
               <div>
-                <p className="text-sm font-bold text-slate-800">
-                  {isLoading ? "..." : userProfile?.fullName}
-                </p>
-                <p className="text-xs text-slate-500 font-semibold">
-                  {locationName}
-                </p>
+                <p className="text-sm font-bold text-slate-800">{isLoading ? "..." : userProfile?.fullName}</p>
+                <p className="text-xs text-slate-500 font-semibold">{locationName}</p>
               </div>
             </div>
 
             {userProfile &&
               rawNavLinks.map((link) => {
-                const isAuthorized = checkAccess(
-                  link.moduleCode,
-                  link.allowedRoles,
-                );
-                const isActive =
-                  link.path === "/management"
-                    ? pathname === "/management"
-                    : pathname.startsWith(link.path) ||
-                      link.subItems?.some((sub) =>
-                        pathname.startsWith(sub.path),
-                      );
+                const isAuthorized = checkAccess(link.moduleCode, link.allowedRoles);
+                if (!isAuthorized) return null; // Mobilde de gizlenir
+
+                const isActive = link.path === "/management"
+                  ? pathname === "/management"
+                  : pathname.startsWith(link.path) || link.subItems?.some((sub) => pathname.startsWith(sub.path));
+
+                const authSubItems = link.subItems?.filter(sub => checkAccess(sub.moduleCode, sub.allowedRoles));
+                const hasSubItems = authSubItems && authSubItems.length > 0;
 
                 return (
-                  <div key={link.name}>
+                  <div key={link.name} className="flex flex-col">
                     <Link
-                      href={
-                        isAuthorized ? link.path : "/management/unauthorized"
-                      }
-                      onClick={() =>
-                        !link.subItems && setIsMobileMenuOpen(false)
-                      }
-                      className={`flex items-center gap-3 px-4 py-3.5 rounded-xl text-sm font-bold transition-colors relative
-                      ${!isAuthorized ? "text-slate-400 opacity-60 bg-slate-50/50 border border-transparent" : isActive ? "bg-red-50 text-[#dc3545] border border-red-100" : "text-slate-600 hover:bg-slate-50 border border-transparent"}
-                    `}
+                      href={link.path}
+                      onClick={() => !hasSubItems && setIsMobileMenuOpen(false)}
+                      className={`flex items-center gap-3 px-4 py-4 min-h-[44px] rounded-xl text-sm font-bold transition-colors relative ${isActive ? "bg-red-50 text-[#dc3545] border border-red-100" : "text-slate-600 hover:bg-slate-50 border border-transparent"}`}
                     >
-                      <span
-                        className={`${!isAuthorized ? "text-slate-300" : isActive ? "text-[#dc3545]" : "text-slate-400"} transition-colors`}
-                      >
-                        {link.icon}
-                      </span>
+                      <span className={`${isActive ? "text-[#dc3545]" : "text-slate-400"} transition-colors`}>{link.icon}</span>
                       {link.name}
-                      {!isAuthorized && (
-                        <Lock size={16} className="ml-auto text-slate-300" />
-                      )}
+                      {hasSubItems && <ChevronDown size={16} className={`ml-auto transition-transform ${isActive ? "text-[#dc3545] rotate-180" : "text-slate-400"}`} />}
                     </Link>
 
-                    {link.subItems && isActive && isAuthorized && (
-                      <div className="pl-11 pr-4 py-2 space-y-1 bg-slate-50/50 rounded-b-xl border-x border-b border-slate-100 -mt-2 pt-4">
-                        {link.subItems.map((sub) => {
-                          const isSubAuthorized = checkAccess(
-                            sub.moduleCode,
-                            sub.allowedRoles,
-                          );
-                          return (
-                            <Link
-                              key={sub.name}
-                              href={
-                                isSubAuthorized
-                                  ? sub.path
-                                  : "/management/unauthorized"
-                              }
-                              onClick={() => setIsMobileMenuOpen(false)}
-                              className={`flex items-center justify-between py-2.5 text-sm font-semibold ${!isSubAuthorized ? "text-slate-400 opacity-60" : pathname === sub.path ? "text-[#dc3545] font-bold" : "text-slate-600 hover:text-slate-900"}`}
-                            >
-                              <span>- {sub.name}</span>
-                              {!isSubAuthorized && (
-                                <Lock size={14} className="text-slate-300" />
-                              )}
-                            </Link>
-                          );
-                        })}
+                    {hasSubItems && isActive && (
+                      <div className="px-4 py-2 mt-1 space-y-1 bg-slate-50/70 rounded-xl border border-slate-100">
+                        {authSubItems.map((sub) => (
+                          <Link
+                            key={sub.name}
+                            href={sub.path}
+                            onClick={() => setIsMobileMenuOpen(false)}
+                            className={`flex items-center justify-between py-3 min-h-[44px] px-2 text-sm font-semibold rounded-md ${pathname === sub.path ? "text-[#dc3545] font-bold bg-red-50" : "text-slate-600 hover:text-slate-900 active:bg-slate-100"}`}
+                          >
+                            <span className="flex items-center gap-2">
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
+                              {sub.name}
+                            </span>
+                          </Link>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -780,35 +555,25 @@ export const Navbar = () => {
               })}
 
             <div className="pt-4 mt-4 border-t border-slate-100 space-y-3">
-              {(userProfile?.role === "Developer" ||
-                userProfile?.role === "Admin" ||
-                userProfile?.isGlobalAdmin) && (
-                <Button
-                  onClick={() => {
-                    setIsMobileMenuOpen(false);
-                    router.push("/management/role-settings");
-                  }}
-                  className="w-full justify-center py-6 text-sm font-bold bg-slate-800 hover:bg-slate-900 text-white rounded-xl"
-                >
-                  <UserCog size={18} className="mr-2" /> Çalışan Yönetimi
-                </Button>
-              )}
-              {(userProfile?.role === "Developer" ||
-                userProfile?.role === "Admin" ||
-                userProfile?.isGlobalAdmin) && (
-                <Button
-                  onClick={() => {
-                    setIsMobileMenuOpen(false);
-                    router.push("/management/password-settings");
-                  }}
-                  className="w-full justify-center py-6 text-sm font-bold bg-slate-800 hover:bg-slate-900 text-white rounded-xl"
-                >
-                  <UserCog size={18} className="mr-2" /> Şifre Yönetimi
-                </Button>
+              {canSeeSettings && (
+                <>
+                  <Button
+                    onClick={() => { setIsMobileMenuOpen(false); router.push("/management/role-settings"); }}
+                    className="w-full justify-center min-h-[44px] py-4 text-sm font-bold bg-slate-800 hover:bg-slate-900 text-white rounded-xl"
+                  >
+                    <UserCog size={18} className="mr-2" /> Erişim Ayarları
+                  </Button>
+                  <Button
+                    onClick={() => { setIsMobileMenuOpen(false); router.push("/management/password-settings"); }}
+                    className="w-full justify-center min-h-[44px] py-4 text-sm font-bold bg-slate-800 hover:bg-slate-900 text-white rounded-xl"
+                  >
+                    <Lock size={18} className="mr-2" /> Şifre Yönetimi
+                  </Button>
+                </>
               )}
               <button
                 onClick={handleLogout}
-                className="flex items-center justify-center w-full px-4 py-4 text-sm text-red-600 bg-red-50 hover:bg-red-100 rounded-xl font-bold transition-colors"
+                className="flex items-center justify-center w-full min-h-[44px] py-4 text-sm text-red-600 bg-red-50 hover:bg-red-100 rounded-xl font-bold transition-colors"
               >
                 <LogOut size={18} className="mr-2" /> Sistemden Çıkış Yap
               </button>
