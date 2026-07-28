@@ -40,7 +40,7 @@ export const Footer = () => {
   }, []);
 
   return (
-    <footer className="bg-[#0f172b] border-t border-slate-800 mt-auto w-full flex-shrink-0 relative z-40 select-none">
+    <footer className="bg-[#0f172b] border-t border-slate-800 mt-auto w-full flex-shrink-0 relative z-1 select-none">
       
       {/* Üst Kısım: Sistem Özeti ve Menüler */}
       <div className="container mx-auto 2xl:max-w-[1400px] px-4 sm:px-6 py-8 lg:py-10">

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Search, Loader2, Barcode, Box, Layers, Activity, FileSpreadsheet, Filter, ChevronLeft, ChevronRight, AlertTriangle } from 'lucide-react';
+import { Search, Loader2, Barcode, Box, Layers, Activity, FileSpreadsheet, Filter, ChevronLeft, ChevronRight, AlertTriangle,Database } from 'lucide-react';
 import StockHistoryModal from './StockHistoryModal';
 import { getAggregatedInventoryServer } from '@/app/actions/inventory'; 
 import * as XLSX from 'xlsx';
@@ -145,82 +145,140 @@ export default function InventoryViewPanel({ branchId, isGlobal }: { branchId: s
   return (
     <div className="w-full flex flex-col gap-5 animate-in fade-in duration-300">
       
-      {/* 1. ÜST MODÜL: WMS RAPORLAMA VE EXCEL MERKEZİ */}
-      <div className="bg-[#0f172b] border-l-[4px] border-[#dc3545] px-5 py-4 shadow-md flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 rounded-sm relative overflow-hidden">
-        <div className="absolute right-0 top-0 w-64 h-full bg-gradient-to-l from-[#dc3545]/10 to-transparent pointer-events-none"></div>
-
-        <div className="flex flex-col gap-1 relative z-10 w-full lg:w-auto">
-          <h3 className="text-[14px] font-black text-white uppercase tracking-[0.2em] flex items-center gap-2.5">
-            <div className="p-1 bg-[#dc3545]/20 rounded-sm border border-[#dc3545]/40">
-              <FileSpreadsheet size={16} className="text-[#dc3545]" /> 
+{/* ========================================================= */}
+      {/* 1. BİRLEŞİK HERO & KONTROL MERKEZİ (DARK-INDUSTRIAL) */}
+      {/* ========================================================= */}
+      <div className="w-full flex flex-col bg-slate-900 border border-slate-700 rounded-sm shadow-xl overflow-hidden mb-2 relative">
+        
+        {/* --- ÜST KISIM: GÖRSELLİ HERO ALANI --- */}
+        <div className="relative w-full min-h-[200px] p-6 md:p-8 flex flex-col lg:flex-row justify-between gap-8">
+          {/* Arka Plan Görseli ve Karartma */}
+          <img 
+            src="https://img.magnific.com/free-photo/spacious-warehouse-with-rows-shelves-forklift_84443-74085.jpg?t=st=1779108507~exp=1779112107~hmac=834c43fbd471b0766ff07fba31ef7c5cc6527409831e16ab7112e2dc4f5c9ac6&w=1480"
+            alt="Inventory Management"
+            className="absolute inset-0 w-full h-full object-cover opacity-[0.25] mix-blend-luminosity"
+          />
+          <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-900/90 to-transparent"></div>
+          <div className="absolute right-0 top-0 w-96 h-96 bg-purple-600/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none"></div>
+          
+          {/* Sol Alan: Başlık ve Sistem Bilgi Kartı */}
+          <div className="relative z-10 flex flex-col gap-5 w-full lg:max-w-2xl justify-center">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-[#dc3545] border border-red-400/50 rounded-sm shadow-[0_0_20px_rgba(220,53,69,0.3)]">
+                <Layers className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tight">Canlı Stok ve Raf İzleme</h1>
+                <p className="text-[#dc3545] text-[10px] sm:text-xs font-bold uppercase tracking-widest mt-0.5">Real-Time Envanter Sorgu Merkezi</p>
+              </div>
             </div>
-            WMS Çıktı Merkezi
-          </h3>
-          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-            Aşağıdaki filtreye uyan <strong className="text-white">{filteredResults.length}</strong> kaydı Excel formatında raporlayın.
-          </p>
-        </div>
 
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto relative z-10">
-          <div className="flex items-center gap-2 px-3 h-10 border border-slate-700 bg-slate-900/80 rounded-sm w-full sm:w-64 focus-within:border-purple-500 focus-within:ring-1 focus-within:ring-purple-500/30 transition-all">
-             <Filter size={14} className="text-purple-400 shrink-0" />
-             <select 
-               value={reportFilter}
-               onChange={(e) => setReportFilter(e.target.value as any)}
-               className="bg-transparent text-[10px] font-black text-slate-200 uppercase tracking-widest outline-none cursor-pointer w-full appearance-none"
-             >
-               <option value="ALL">Tüm Stokları Listele</option>
-               <option value="ACTIVE_SHELF">Sağlam / Aktif Raflar</option>
-               <option value="DAMAGED">Hasarlı Raftakiler (Tümü)</option>
-               <option value="COMMERCIAL">Sadece Ticari Ürünler</option>
-               <option value="CONSUMABLE">Sadece Sarf Malzemeler</option>
-               <option value="NO_STOCK">Stoku Sıfırlananlar</option>
-             </select>
+            {/* Endüstriyel Info Kartı */}
+            <div className="bg-slate-800/80 backdrop-blur-md border border-slate-700 border-l-4 border-l-[#dc3545] p-4 rounded-sm flex gap-3 items-start shadow-inner">
+              <Activity className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+              <div className="flex flex-col gap-1">
+                <h4 className="text-slate-200 text-[10px] font-black uppercase tracking-widest">Arama ve Log Bilgilendirmesi</h4>
+                <p className="text-slate-400 text-[11px] font-semibold leading-relaxed">
+                  Bu panel, bulunduğunuz şubedeki (veya global yetkideki) ürün stoklarını canlı listeler. Barkod/SKU ile arama yapabilir, stoku "0" olanları görebilir ve <strong className="text-slate-200">Mevcut Stok</strong> rakamlarına tıklayarak detaylı <strong className="text-slate-200">Raf Geçmiş Loglarını</strong> izleyebilirsiniz.
+                </p>
+              </div>
+            </div>
           </div>
 
-          <button 
-            onClick={handleExportExcel}
-            disabled={filteredResults.length === 0}
-            className="w-full sm:w-auto h-10 flex items-center justify-center gap-2 px-5 bg-gradient-to-r from-purple-700 to-[#dc3545] hover:from-purple-600 hover:to-red-500 disabled:from-slate-700 disabled:to-slate-800 disabled:text-slate-500 text-white font-black text-[10px] uppercase tracking-widest rounded-sm transition-all shadow-[0_0_10px_rgba(220,53,69,0.2)] shrink-0 active:scale-95"
-          >
-            <FileSpreadsheet size={14} /> EXCEL İNDİR
-          </button>
+          {/* Sağ Alan: Statü Paneli */}
+          <div className="relative z-10 w-full lg:w-72 flex flex-col justify-center">
+            <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700 p-5 rounded-sm shadow-2xl">
+              <div className="flex items-center justify-between mb-4 border-b border-slate-700 pb-3">
+                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Envanter Veri Motoru</label>
+                <span className="flex items-center gap-1.5 text-[9px] font-black text-green-400 uppercase tracking-widest">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                  </span>
+                  Aktif
+                </span>
+              </div>
+              <div className="w-full flex items-center justify-center gap-2 h-10 px-4 bg-slate-950 border border-slate-800 text-slate-300 rounded-sm text-[10px] font-black uppercase tracking-widest shadow-inner">
+                <Database size={14} className="text-emerald-500" />
+                Yetki: {isGlobal ? 'Global / Merkez' : 'Şube İçi İzole'}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
 
-      {/* 2. ARAMA MOTORU */}
-      <div className="bg-white border border-slate-300 shadow-sm p-2 flex flex-col sm:flex-row gap-2 rounded-sm">
-        <form onSubmit={handleSearch} className="flex-1 flex flex-col sm:flex-row items-stretch sm:items-center relative gap-2">
-           <div className="flex-1 relative w-full">
-             <div className="absolute left-3 top-1/2 -translate-y-1/2 text-purple-600">
-                <Barcode size={18} />
+        {/* --- ORTA KISIM: WMS ÇIKTI VE FİLTRELEME (DARK BAR) --- */}
+        <div className="relative z-20 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 px-6 py-4 bg-[#0a101d]/80 border-t border-b border-slate-800 backdrop-blur-sm">
+          <div className="flex items-center gap-3">
+             <div className="p-1.5 bg-[#dc3545]/20 rounded-sm border border-[#dc3545]/30">
+               <FileSpreadsheet size={14} className="text-[#dc3545]" /> 
              </div>
-             <input 
-               ref={inputRef}
-               type="text" 
-               value={searchTerm}
-               onChange={(e) => setSearchTerm(e.target.value)}
-               placeholder="KATALOGDA SPESİFİK BİR BARKOD VEYA SKU ARAYIN..."
-               className="w-full h-10 pl-10 pr-3 bg-slate-50 border border-transparent focus:border-purple-600 focus:bg-white text-[12px] font-black uppercase tracking-widest text-[#0f172b] outline-none transition-all placeholder:text-slate-400 rounded-sm"
-             />
-           </div>
-           
-           <div className="flex items-center gap-2 w-full sm:w-auto">
-             {searchTerm && (
-               <button type="button" onClick={handleClearSearch} className="h-10 px-5 text-[10px] bg-slate-100 border border-slate-200 font-black text-slate-500 uppercase hover:text-[#dc3545] hover:border-red-200 hover:bg-red-50 transition-colors w-full sm:w-auto rounded-sm">
-                 TEMİZLE
-               </button>
-             )}
+             <div className="flex flex-col">
+               <h3 className="text-[12px] font-black text-white uppercase tracking-[0.2em]">WMS Çıktı Merkezi</h3>
+               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Filtreye uyan <strong className="text-white">{filteredResults.length}</strong> kaydı Excel'e aktar</p>
+             </div>
+          </div>
 
-             <button 
-               type="submit" 
-               disabled={isSearching || !searchTerm.trim()}
-               className="h-10 w-full sm:w-auto bg-[#0f172b] hover:bg-[#dc3545] disabled:bg-slate-300 px-6 text-white font-black uppercase tracking-[0.2em] text-[10px] flex items-center justify-center transition-all active:scale-95 shadow-sm rounded-sm shrink-0"
-             >
-               {isSearching ? <Loader2 size={16} className="animate-spin" /> : <><Search size={14} className="mr-1.5"/> BUL</>}
-             </button>
-           </div>
-        </form>
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
+            <div className="flex items-center gap-2 px-3 h-9 border border-slate-700 bg-slate-800 rounded-sm w-full sm:w-56 focus-within:border-purple-500 focus-within:ring-1 focus-within:ring-purple-500/30 transition-all">
+               <Filter size={14} className="text-purple-400 shrink-0" />
+               <select 
+                 value={reportFilter}
+                 onChange={(e) => setReportFilter(e.target.value as any)}
+                 className="bg-transparent text-[10px] font-black text-slate-200 uppercase tracking-widest outline-none cursor-pointer w-full appearance-none"
+               >
+                 <option value="ALL">Tüm Stokları Listele</option>
+                 <option value="ACTIVE_SHELF">Sağlam / Aktif Raflar</option>
+                 <option value="DAMAGED">Hasarlı Raftakiler (Tümü)</option>
+                 <option value="COMMERCIAL">Sadece Ticari Ürünler</option>
+                 <option value="CONSUMABLE">Sadece Sarf Malzemeler</option>
+                 <option value="NO_STOCK">Stoku Sıfırlananlar</option>
+               </select>
+            </div>
+
+            <button 
+              onClick={handleExportExcel}
+              disabled={filteredResults.length === 0}
+              className="w-full sm:w-auto h-9 flex items-center justify-center gap-2 px-5 bg-gradient-to-r from-purple-700 to-[#dc3545] hover:from-purple-600 hover:to-red-500 disabled:from-slate-700 disabled:to-slate-800 disabled:text-slate-500 text-white font-black text-[10px] uppercase tracking-widest rounded-sm transition-all shadow-[0_0_10px_rgba(220,53,69,0.2)] shrink-0 active:scale-95"
+            >
+              <FileSpreadsheet size={14} /> EXCEL İNDİR
+            </button>
+          </div>
+        </div>
+
+        {/* --- ALT KISIM: ARAMA MOTORU (YÜKSEK KONTRAST) --- */}
+        <div className="p-4 bg-slate-50">
+          <form onSubmit={handleSearch} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+             <div className="flex-1 relative w-full">
+               <div className="absolute left-3 top-1/2 -translate-y-1/2 text-purple-600">
+                  <Barcode size={18} />
+               </div>
+               <input 
+                 ref={inputRef}
+                 type="text" 
+                 value={searchTerm}
+                 onChange={(e) => setSearchTerm(e.target.value)}
+                 placeholder="Katalogda Spesifik Bir Barkod veya SKU Arayın..."
+                 className="w-full h-11 pl-10 pr-3 bg-white border border-slate-300 focus:border-purple-600 focus:ring-1 focus:ring-purple-600 text-[12px] font-black uppercase tracking-widest text-[#0f172b] outline-none transition-all placeholder:text-slate-400 rounded-sm shadow-sm"
+               />
+             </div>
+             
+             <div className="flex items-center gap-2 w-full sm:w-auto">
+               {searchTerm && (
+                 <button type="button" onClick={handleClearSearch} className="h-11 px-5 text-[10px] bg-white border border-slate-300 font-black text-slate-500 uppercase hover:text-[#dc3545] hover:border-red-200 hover:bg-red-50 transition-colors w-full sm:w-auto rounded-sm shadow-sm">
+                   TEMİZLE
+                 </button>
+               )}
+
+               <button 
+                 type="submit" 
+                 disabled={isSearching || !searchTerm.trim()}
+                 className="h-11 w-full sm:w-auto bg-[#0f172b] hover:bg-[#dc3545] disabled:bg-slate-300 px-8 text-white font-black uppercase tracking-[0.2em] text-[10px] flex items-center justify-center transition-all active:scale-95 shadow-sm rounded-sm shrink-0"
+               >
+                 {isSearching ? <Loader2 size={16} className="animate-spin" /> : <><Search size={14} className="mr-1.5"/> BUL</>}
+               </button>
+             </div>
+          </form>
+        </div>
       </div>
 
       {/* 3. ANA STOK TABLOSU */}

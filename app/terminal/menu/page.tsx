@@ -156,27 +156,27 @@ export default function TerminalMenuPage() {
         },
       ],
     },
-    {
-      title: "Sipariş & Rota Toplama",
-      borderColor: "border-emerald-500",
-      textColor: "text-emerald-600",
-      items: [
-        {
-          label: "Rota Bazlı Toplama",
-          icon: Route,
-          link: "/terminal/picking/route",
-          badge: "PICK",
-          badgeBg: "bg-emerald-600",
-        },
-        {
-          label: "Sipariş Kontrol & Paketleme",
-          icon: ListChecks,
-          link: "/terminal/picking/order",
-          badge: "PACK",
-          badgeBg: "bg-emerald-600",
-        },
-      ],
-    },
+    // {
+    //   title: "Sipariş & Rota Toplama",
+    //   borderColor: "border-emerald-500",
+    //   textColor: "text-emerald-600",
+    //   items: [
+    //     {
+    //       label: "Rota Bazlı Toplama",
+    //       icon: Route,
+    //       link: "/terminal/picking/route",
+    //       badge: "PICK",
+    //       badgeBg: "bg-emerald-600",
+    //     },
+    //     {
+    //       label: "Sipariş Kontrol & Paketleme",
+    //       icon: ListChecks,
+    //       link: "/terminal/picking/order",
+    //       badge: "PACK",
+    //       badgeBg: "bg-emerald-600",
+    //     },
+    //   ],
+    // },
   ];
 
   return (
