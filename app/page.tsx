@@ -67,8 +67,11 @@ export default function ManagementDashboard() {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      const isGlobal = userProfile?.isGlobalAdmin || userProfile?.role === "Developer" || userProfile?.role === "Admin";
-      const branchId = (userProfile as any)?.branch_id || userProfile?.branchId || userProfile?.branchName || null;
+      // ÇÖZÜM: TypeScript Build hatasını aşmak için güvenli tip dönüşümü (Type Casting)
+      const safeProfile = userProfile as Record<string, any> | null;
+      
+      const isGlobal = safeProfile?.isGlobalAdmin || safeProfile?.role === "Developer" || safeProfile?.role === "Admin";
+      const branchId = safeProfile?.branch_id || safeProfile?.branchId || safeProfile?.branchName || null;
 
       const today = new Date();
       const lastWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -219,7 +222,6 @@ export default function ManagementDashboard() {
     );
   }
 
-  // DİKKAT: Navbar ve Footer EKLENDİ, Main tagine max-w-[1400px] mx-auto DÖNDÜ!
   return (
     <div className="min-h-screen flex flex-col bg-slate-100 font-['Quicksand'] text-slate-800 selection:bg-purple-500 selection:text-white overflow-x-hidden">
       
@@ -236,7 +238,7 @@ export default function ManagementDashboard() {
 
           <div className="relative z-10 flex flex-col gap-1 w-full lg:w-auto text-center lg:text-left">
             <div className="flex items-center justify-center lg:justify-start gap-2 mb-1">
-              <span className="w-2 h-2 rounded-sm bg-emerald-500 animate-pulse shadow-[0_0_8px_#10b981]"></span>
+              <span className="w-2 h-2 rounded-sm bg-emerald-50 animate-pulse shadow-[0_0_8px_#10b981]"></span>
               <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">
                 {(userProfile?.isGlobalAdmin || userProfile?.role === "Developer") ? "GLOBAL ERİŞİM" : "ŞUBE BAĞLANTISI AKTİF"}
               </span>
