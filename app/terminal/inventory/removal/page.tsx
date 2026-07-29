@@ -6,8 +6,8 @@ import { supabase } from "@/lib/supabase";
 import { processPickingServer } from "@/app/actions/inventory"; 
 import { 
   ChevronLeft, UserCircle, MapPin, Hash, AlertTriangle, 
-  Package, ScanLine, Smartphone, Edit3, ArrowRight,
-  BoxSelect, Server, MinusCircle, ClipboardList, Info, Keyboard, ListTodo
+  PackageMinus, ScanLine, Smartphone, Edit3, ArrowRight,
+  BoxSelect, Server, ClipboardList, Info, Keyboard, ListTodo
 } from "lucide-react";
 import { Html5Qrcode } from "html5-qrcode";
 
@@ -48,7 +48,7 @@ const playScanSound = (type: 'success' | 'error') => {
       oscillator.start(audioCtx.currentTime);
       oscillator.stop(audioCtx.currentTime + 0.3);
     }
-  } catch(e) { console.warn("Tarayıcı ses desteği kapalı"); }
+  } catch(e) { console.warn("Tarayıcı ses desteği kapalı veya kısıtlı"); }
 };
 
 export default function PickingPage() {
@@ -61,11 +61,6 @@ export default function PickingPage() {
 
   const [branchId, setBranchId] = useState<string | null>(null);
   
-  // HIZLANDIRMA: Sayfa açıldığında tüm rafları önbelleğe al
-  const [allShelves, setAllShelves] = useState<Shelf[]>([]);
-  // HIZLANDIRMA: Raf kilitlendiğinde içindeki ürünleri önbelleğe al
-  const [shelfStocks, setShelfStocks] = useState<any[]>([]);
-
   const [shelfInput, setShelfInput] = useState("");
   const [activeShelf, setActiveShelf] = useState<Shelf | null>(null);
 
@@ -93,12 +88,14 @@ export default function PickingPage() {
   const requestedByRef = useRef<HTMLInputElement>(null);
   const otherDescRef = useRef<HTMLInputElement>(null);
   const lastCameraScanTime = useRef<number>(0);
+  const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
+
   const qtyButtons = [1, 2, 3, 4, 5, 10];
 
   const opState = useRef({ selectedQty });
   useEffect(() => { opState.current = { selectedQty }; }, [selectedQty]);
 
-  // RADAR FOCUS MOTORU (Modal veya klavye açıksa durur)
+  // AUTO-FOCUS RADAR MOTORU (Klavye veya Modal açıksa odağı çalmaz)
   useEffect(() => {
     const interval = setInterval(() => {
       if (!isProcessing && !pendingRemoval && !isManualInputFocused) {
@@ -112,15 +109,10 @@ export default function PickingPage() {
     return () => clearInterval(interval);
   }, [activeShelf, activeTab, isProcessing, pendingRemoval, isManualInputFocused]);
 
-  // INIT VERİ ÇEKİMİ (Rafları Önbellekle)
   useEffect(() => {
     const initData = async () => {
       const { data: empData } = await supabase.from("employees").select("branch_id").eq("id", empId).single();
-      if (empData?.branch_id) {
-        setBranchId(empData.branch_id);
-        const { data: shelvesData } = await supabase.from("shelves").select("id, name, status").eq("branch_id", empData.branch_id);
-        if (shelvesData) setAllShelves(shelvesData);
-      }
+      if (empData?.branch_id) setBranchId(empData.branch_id);
     };
     initData();
   }, [empId]);
@@ -132,46 +124,38 @@ export default function PickingPage() {
     setTimeout(() => { setFlashState('idle'); if (type === 'error') setErrorMsg(""); }, 2000);
   }, []);
 
-  // RAF KİLİTLEME (Anlık Yerel Kontrol)
+  // RAF KİLİTLEME
   const handleLockShelf = async (e?: React.FormEvent | React.KeyboardEvent) => {
     if (e) e.preventDefault();
     const cleanShelf = shelfInput.trim().toUpperCase();
     if (!cleanShelf || !branchId || isProcessing) return;
 
     setIsProcessing(true);
-    
-    // Ağ sorgusu yapmadan doğrudan RAM'den (allShelves) bul
-    const isNumeric = /^\d+$/.test(cleanShelf);
-    const targetShelf = allShelves.find(s => 
-      (isNumeric && s.id.toString() === cleanShelf) || 
-      s.name.toUpperCase() === cleanShelf
-    );
-
-    if (!targetShelf) {
-      triggerFeedback('error', `HATA: ${cleanShelf} rafı bu şubede bulunamadı!`);
-      setShelfInput("");
-      setIsProcessing(false);
-      return;
-    }
-
-    setActiveShelf(targetShelf);
-    setShelfInput("");
-    triggerFeedback('success');
-
-    // Raf kilitlendiği an içindeki stokları anında çek (Picking Hızlandırıcısı)
-    const { data: shelfInventory } = await supabase
-      .from("stocks")
-      .select(`quantity, products!inner(id, barcode, sku, name, image_url)`)
-      .eq("shelf_location", targetShelf.name)
-      .eq("branch_id", branchId)
-      .gt("quantity", 0);
+    try {
+      const isNumeric = /^\d+$/.test(cleanShelf);
+      let query = supabase.from("shelves").select("id, name, status").eq("branch_id", branchId);
       
-    if (shelfInventory) setShelfStocks(shelfInventory);
-    setIsProcessing(false);
+      if (isNumeric) query = query.or(`id.eq.${cleanShelf},name.ilike.${cleanShelf}`);
+      else query = query.ilike("name", cleanShelf);
+
+      const { data: shelfData, error } = await query.maybeSingle();
+
+      if (error || !shelfData) {
+        triggerFeedback('error', `HATA: ${cleanShelf} rafı bulunamadı!`);
+        setShelfInput("");
+      } else {
+        setActiveShelf(shelfData);
+        setShelfInput("");
+        triggerFeedback('success');
+      }
+    } catch (err) { triggerFeedback('error', "Sistem Hatası!"); } 
+    finally { setIsProcessing(false); }
   };
 
+  // ÜRÜN BARKOD İŞLEME MOTORU
   const processBarcode = async (rawBarcode: string, isCamera: boolean = false) => {
     if (!rawBarcode || isProcessing || !activeShelf || !branchId) return;
+    
     if (isCamera) {
       const now = Date.now();
       if (now - lastCameraScanTime.current < 2000) return;
@@ -185,36 +169,36 @@ export default function PickingPage() {
       let inputQty = typeof currentQty === 'string' ? parseInt(currentQty) || 1 : currentQty;
       if (inputQty < 1) inputQty = 1;
 
-      // Koli (Box) Kontrolü
+      // 1. Koli (Box) Barkodu Kontrolü
       const { data: boxData } = await supabase.from("boxes").select("product_id, quantity").eq("box_barcode", targetBarcode).maybeSingle();
       if (boxData) {
         const { data: pData } = await supabase.from("products").select("barcode").eq("id", boxData.product_id).single();
         if (pData) { targetBarcode = pData.barcode; inputQty = boxData.quantity * inputQty; }
       }
 
-      // HIZLI İSTEMCİ KONTROLÜ (DB'ye gitmeden saniyesinde hata ver)
-      const stockItem = shelfStocks.find((s: any) => s.products.barcode === targetBarcode);
-      
-      if (!stockItem) {
-        triggerFeedback('error', "HATA: Bu ürün şu an bu rafta yok!");
-        setIsProcessing(false); setScanInput(""); return;
-      }
-      
-      if (stockItem.quantity < inputQty) {
-        triggerFeedback('error', `HATA: Rafta sadece ${stockItem.quantity} adet var!`);
+      // 2. Ürünü Doğrudan Ürünler Tablosundan Çek
+      const { data: productDetails, error: pErr } = await supabase.from("products")
+        .select("id, barcode, sku, name, image_url")
+        .eq("barcode", targetBarcode)
+        .maybeSingle();
+
+      if (pErr || !productDetails) {
+        triggerFeedback('error', "HATA: Ürün bulunamadı!");
         setIsProcessing(false); setScanInput(""); return;
       }
 
-      const productDetails = stockItem.products;
-
-      // Raf HASARLI ise Modal'ı tetikle, Değilse doğrudan Server'a gönder
+      // 3. Raf HASARLI ise Modal Tetikle, Değilse Doğrudan Sunucuya Gönder
       if (activeShelf.status?.toUpperCase() === 'HASARLI') {
         setPendingRemoval({ product: productDetails, qty: inputQty });
         setIsProcessing(false); 
       } else {
         await finalizeRemoval(productDetails, inputQty, null);
       }
-    } catch (error) { triggerFeedback('error', "İşlem Hatası!"); setIsProcessing(false); setScanInput(""); }
+    } catch (error) { 
+      triggerFeedback('error', "İşlem Hatası!"); 
+      setIsProcessing(false); 
+      setScanInput(""); 
+    }
   };
 
   const finalizeRemoval = async (productDetails: any, qty: number, reasonDetails: string | null) => {
@@ -235,13 +219,6 @@ export default function PickingPage() {
         triggerFeedback('error', `HATA: ${serverResponse.error}`);
         setIsProcessing(false); setScanInput(""); return;
       }
-
-      // BAŞARILI DURUMDA LOKAL STOĞU GÜNCELLE (Arka arkaya okutmaları hızlandırır)
-      setShelfStocks(prev => prev.map(s => 
-        s.products.barcode === productDetails.barcode 
-          ? { ...s, quantity: s.quantity - qty }
-          : s
-      ));
 
       const logEntry: SessionLogItem = {
         id: Math.random().toString(36).substring(7),
@@ -286,20 +263,72 @@ export default function PickingPage() {
     processBarcode(scanInput, false); 
   };
 
+  // KAMERA OKUYUCU MOTORU (Html5Qrcode Lifecyle Fix)
+  useEffect(() => {
+    let isMounted = true;
+
+    const stopCamera = async () => {
+      if (html5QrCodeRef.current) {
+        try {
+          if (html5QrCodeRef.current.isScanning) {
+            await html5QrCodeRef.current.stop();
+          }
+          await html5QrCodeRef.current.clear();
+        } catch (err) {
+          console.error("Kamera durdurma hatası:", err);
+        } finally {
+          html5QrCodeRef.current = null;
+        }
+      }
+    };
+
+    if (activeShelf && activeTab === 'camera') {
+      const timer = setTimeout(() => {
+        const readerElement = document.getElementById("reader");
+        if (readerElement && isMounted) {
+          const qrScanner = new Html5Qrcode("reader");
+          html5QrCodeRef.current = qrScanner;
+
+          qrScanner.start(
+            { facingMode: "environment" },
+            { fps: 10, qrbox: { width: 250, height: 150 } }, 
+            (decodedText) => {
+              if (isMounted) processBarcode(decodedText, true);
+            }, 
+            () => {}
+          ).catch((err) => console.error("Kamera başlatılamadı:", err));
+        }
+      }, 200);
+
+      return () => {
+        isMounted = false;
+        clearTimeout(timer);
+        stopCamera();
+      };
+    } else {
+      stopCamera();
+    }
+
+    return () => {
+      isMounted = false;
+      stopCamera();
+    };
+  }, [activeShelf, activeTab]);
+
   return (
     <div className="min-h-screen bg-slate-50 font-['Quicksand'] flex flex-col antialiased select-none">
       
-      {/* HEADER - MODERN AYDINLIK (Kırmızı Vurgu) */}
-      <div className="bg-white shadow-sm shrink-0 relative overflow-hidden z-20 border-b border-slate-200">
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-500 to-[#dc3545]"></div>
-        <div className="flex items-center justify-between p-3 sm:p-4 max-w-7xl mx-auto w-full relative z-10">
-          <button onClick={() => router.back()} className="text-slate-500 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 p-2 sm:p-3 transition-all rounded-sm shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center border border-slate-200">
+      {/* HEADER - SADECE BURASI DARK (Koyu Endüstriyel) */}
+      <div className="bg-[#0b101e] shadow-xl shrink-0 border-b-4 border-[#dc3545] relative overflow-hidden z-20">
+        <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-red-900/20 to-black/40 pointer-events-none"></div>
+        <div className="flex items-center justify-between p-3 sm:p-4 border-b border-slate-800/60 max-w-7xl mx-auto w-full relative z-10">
+          <button onClick={() => router.back()} className="text-slate-400 hover:text-white bg-slate-800/40 hover:bg-slate-800 p-2 sm:p-3 transition-all rounded-sm shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center">
             <ChevronLeft size={24} />
           </button>
           <div className="flex flex-col items-center gap-0.5">
             <div className="flex items-center gap-2">
-              <MinusCircle size={18} className="text-[#dc3545] hidden sm:block" />
-              <span className="text-slate-900 text-[15px] sm:text-[16px] font-black uppercase tracking-widest line-clamp-1">
+              <PackageMinus size={18} className="text-[#dc3545] hidden sm:block" />
+              <span className="text-white text-[15px] sm:text-[16px] font-black uppercase tracking-widest line-clamp-1 drop-shadow-md">
                 Raftan Kaldırma (Picking)
               </span>
             </div>
@@ -308,20 +337,20 @@ export default function PickingPage() {
             </span>
           </div>
           <div className="w-11 shrink-0 flex justify-end">
-             <div className="bg-red-50 text-red-700 w-10 h-10 rounded-full flex items-center justify-center font-black text-[12px] border border-red-200 shadow-sm">
+             <div className="bg-red-900/30 text-red-400 w-10 h-10 rounded-full flex items-center justify-center font-black text-[12px] border border-red-900/50 shadow-sm">
                 {empName.substring(0,2).toUpperCase()}
              </div>
           </div>
         </div>
       </div>
 
-      {/* 1. RAF BARKODU KİLİTLEME */}
+      {/* 1. RAF BARKODU KİLİTLEME (AYDINLIK TEMA) */}
       {!activeShelf && (
-        <div className="flex-1 flex items-center justify-center p-4 relative overflow-hidden">
-          <div className="absolute top-1/4 -right-20 w-64 h-64 bg-orange-200/30 rounded-full blur-[80px] pointer-events-none"></div>
-          <div className="absolute bottom-1/4 -left-20 w-64 h-64 bg-red-200/40 rounded-full blur-[80px] pointer-events-none"></div>
+        <div className="flex-1 flex items-center justify-center p-4 relative overflow-hidden bg-slate-50">
+          <div className="absolute top-1/4 -right-20 w-64 h-64 bg-red-200/40 rounded-full blur-[80px] pointer-events-none"></div>
+          <div className="absolute bottom-1/4 -left-20 w-64 h-64 bg-orange-200/30 rounded-full blur-[80px] pointer-events-none"></div>
           
-          <div className="bg-white p-6 sm:p-10 border border-slate-200 shadow-2xl max-w-lg w-full flex flex-col gap-6 rounded-sm relative z-10">
+          <div className="bg-white p-6 sm:p-10 border border-slate-200 shadow-xl max-w-lg w-full flex flex-col gap-6 rounded-sm relative z-10">
             
             <div className="flex flex-col items-center text-center gap-3 mb-2 border-b border-slate-100 pb-6">
               <div className="bg-red-50 border-2 border-red-100 p-4 rounded-full text-[#dc3545] shadow-sm"><BoxSelect size={40} /></div>
@@ -332,7 +361,6 @@ export default function PickingPage() {
             </div>
             
             <form onSubmit={handleLockShelf} className="flex flex-col gap-4">
-              {/* FIX: Android Enter Yakalayıcı onKeyDown */}
               <input 
                 ref={shelfInputRef}
                 type="text" 
@@ -340,7 +368,7 @@ export default function PickingPage() {
                 onChange={(e) => setShelfInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleLockShelf(e)}
                 placeholder="RAF BARKODU"
-                disabled={isProcessing || allShelves.length === 0}
+                disabled={isProcessing}
                 className="w-full min-h-[64px] bg-slate-50 border-2 border-slate-300 text-slate-900 text-center text-[22px] sm:text-[24px] tracking-widest uppercase font-black font-mono p-4 rounded-sm focus:outline-none focus:border-[#dc3545] focus:ring-4 focus:ring-red-500/10 transition-all shadow-inner disabled:opacity-50"
               />
               <button type="submit" disabled={isProcessing || !shelfInput} className="w-full min-h-[56px] bg-[#dc3545] text-white p-4 font-black uppercase tracking-widest hover:bg-red-700 disabled:bg-slate-200 disabled:text-slate-400 transition-all active:scale-95 shadow-md flex items-center justify-center gap-2 rounded-sm">
@@ -351,7 +379,7 @@ export default function PickingPage() {
         </div>
       )}
 
-      {/* 2. OPERASYON KOKPİTİ */}
+      {/* 2. OPERASYON KOKPİTİ (AYDINLIK TEMA) */}
       {activeShelf && (
         <div className="flex-1 flex flex-col relative h-full">
           <div className={`pointer-events-none fixed inset-0 z-40 transition-colors duration-300 ${flashState === 'success' ? 'bg-green-500/10' : flashState === 'error' ? 'bg-[#dc3545]/20' : 'bg-transparent'}`} />
@@ -362,7 +390,7 @@ export default function PickingPage() {
             </div>
           )}
 
-          {/* HASARLI RAF MODALI (Focus sorunsuz çalışır) */}
+          {/* HASARLI RAF MODALI */}
           {pendingRemoval && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in">
               <div className="bg-white rounded-sm shadow-2xl w-full max-w-md flex flex-col overflow-hidden border-t-4 border-[#dc3545]">
@@ -444,15 +472,15 @@ export default function PickingPage() {
                 <span className="text-[14px] sm:text-[18px] font-black tracking-widest uppercase text-slate-800 truncate flex items-center gap-2">
                   {activeShelf.name} 
                   {activeShelf.status?.toUpperCase() === 'HASARLI' ? (
-                    <span className="bg-amber-100 text-amber-700 text-[10px] px-1.5 py-0.5 rounded-sm border border-amber-200">HASARLI RAF</span>
+                    <span className="bg-amber-100 text-amber-700 text-[10px] px-1.5 py-0.5 rounded-sm border border-amber-200 ml-2">HASARLI RAF</span>
                   ) : (
-                    <span className="text-[#dc3545] text-[12px] bg-red-50 px-1.5 py-0.5 rounded-sm font-mono border border-red-100">(ID:{activeShelf.id})</span>
+                    <span className="text-[#dc3545] text-[12px] bg-red-50 px-1.5 py-0.5 rounded-sm font-mono border border-red-100 ml-2">(ID:{activeShelf.id})</span>
                   )}
                 </span>
               </div>
             </div>
             
-            <button onClick={() => {setActiveShelf(null); setShelfStocks([]);}} className="shrink-0 bg-white hover:bg-slate-50 border-2 border-slate-200 text-slate-700 px-3 sm:px-4 py-2 sm:py-3 min-h-[44px] font-black text-[10px] sm:text-[11px] uppercase tracking-widest transition-colors shadow-sm rounded-sm flex items-center justify-center">
+            <button onClick={() => setActiveShelf(null)} className="shrink-0 bg-white hover:bg-slate-50 border-2 border-slate-200 text-slate-700 px-3 sm:px-4 py-2 sm:py-3 min-h-[44px] font-black text-[10px] sm:text-[11px] uppercase tracking-widest transition-colors shadow-sm rounded-sm flex items-center justify-center">
               DEĞİŞTİR
             </button>
           </div>
@@ -462,8 +490,8 @@ export default function PickingPage() {
             {/* SOL: OKUMA MOTORU */}
             <div className="w-full lg:w-[420px] flex flex-col gap-2 sm:gap-4 shrink-0">
               <div className="flex bg-white border border-slate-200 p-1 rounded-sm shadow-sm">
-                <button onClick={() => setActiveTab('terminal')} className={`flex-1 min-h-[44px] flex items-center justify-center gap-2 py-2 text-[11px] sm:text-[12px] font-black uppercase tracking-widest transition-all rounded-sm ${activeTab === 'terminal' ? 'bg-red-50 text-red-700 border-2 border-red-200 shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}><ScanLine size={16} /> Terminal</button>
-                <button onClick={() => setActiveTab('camera')} className={`flex-1 min-h-[44px] flex items-center justify-center gap-2 py-2 text-[11px] sm:text-[12px] font-black uppercase tracking-widest transition-all rounded-sm ${activeTab === 'camera' ? 'bg-red-50 text-red-700 border-2 border-red-200 shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}><Smartphone size={16} /> Kamera</button>
+                <button onClick={() => setActiveTab('terminal')} className={`flex-1 min-h-[44px] flex items-center justify-center gap-2 py-2 text-[11px] sm:text-[12px] font-black uppercase tracking-widest transition-all rounded-sm ${activeTab === 'terminal' ? 'bg-[#0f172b] text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}><ScanLine size={16} /> Terminal</button>
+                <button onClick={() => setActiveTab('camera')} className={`flex-1 min-h-[44px] flex items-center justify-center gap-2 py-2 text-[11px] sm:text-[12px] font-black uppercase tracking-widest transition-all rounded-sm ${activeTab === 'camera' ? 'bg-[#0f172b] text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}><Smartphone size={16} /> Kamera</button>
               </div>
 
               <div className="bg-white p-3 sm:p-4 shadow-sm border border-slate-200 flex flex-col gap-3 rounded-sm relative">
@@ -474,7 +502,7 @@ export default function PickingPage() {
                     <img src={lastScanned.product.image_url} alt="Urun" className="w-full h-full object-contain mix-blend-multiply animate-in fade-in zoom-in duration-300" />
                   ) : (
                     <div className="flex flex-col items-center text-slate-300 gap-2">
-                      <Package size={48} className="opacity-50 sm:w-16 sm:h-16" />
+                      <PackageMinus size={48} className="opacity-50 sm:w-16 sm:h-16" />
                       <span className="text-[10px] font-black uppercase tracking-widest">Düşülecek Barkod Bekleniyor</span>
                     </div>
                   )}
@@ -485,10 +513,9 @@ export default function PickingPage() {
                   )}
                 </div>
 
-                {/* Barkod Okuma Formu */}
+                {/* Barkod Okuma Formu / Kamera Alanı */}
                 {activeTab === 'terminal' ? (
                   <form onSubmit={handleTerminalScan} className="flex flex-col gap-2">
-                    {/* FIX: Terminal Enter onKeyDown eklendi */}
                     <input 
                       ref={scanInputRef} 
                       type="text" 
@@ -505,7 +532,7 @@ export default function PickingPage() {
                   <div id="reader" className="w-full bg-slate-950 border-2 border-slate-800 overflow-hidden min-h-[200px] sm:min-h-[250px] rounded-sm" />
                 )}
 
-                {/* ADET ÇARPANI VE MANUEL GİRİŞ (Focus Korumalı) */}
+                {/* ADET ÇARPANI VE MANUEL GİRİŞ */}
                 <div className="flex flex-col gap-2 border-t border-slate-100 pt-3 mt-1">
                   <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5"><Edit3 size={12} className="text-[#dc3545]"/> Düşülecek Adet Seçimi</span>
                   <div className="grid grid-cols-3 sm:flex sm:flex-wrap gap-1.5 sm:gap-2">
@@ -514,7 +541,6 @@ export default function PickingPage() {
                     ))}
                   </div>
                   
-                  {/* FIX: Klavye Numpad'i doğru açar ve radar kapatılır */}
                   <div className={`flex items-center gap-2 border-2 p-1.5 rounded-sm transition-colors w-full min-h-[48px] ${isManualInputFocused ? 'border-[#dc3545] bg-red-50/50 ring-4 ring-red-500/10' : 'border-slate-200 bg-slate-50'}`}>
                     <span className="text-slate-500 text-[11px] font-black uppercase tracking-widest whitespace-nowrap pl-2 shrink-0 flex items-center gap-1">
                       <Keyboard size={14}/> Manuel:
@@ -540,7 +566,7 @@ export default function PickingPage() {
               </div>
             </div>
 
-            {/* SAĞ: OTURUM LOGLARI */}
+            {/* SAĞ: OTURUM LOGLARI (AYDINLIK TEMA) */}
             <div className="flex-1 bg-white border border-slate-200 shadow-sm flex flex-col overflow-hidden rounded-sm mt-2 lg:mt-0 h-48 lg:h-auto min-h-[250px]">
               <div className="bg-slate-50 px-3 sm:px-4 py-3 flex justify-between items-center border-b border-slate-200 shrink-0">
                 <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-widest flex items-center gap-2 text-slate-700"><ListTodo size={16} className="text-[#dc3545]"/> Çıkarılan Ürünler</span>
@@ -562,7 +588,7 @@ export default function PickingPage() {
                       <tr key={log.id} className="hover:bg-slate-50 transition-colors bg-transparent animate-in fade-in duration-300">
                         <td className="p-2 sm:p-3 border-r border-slate-100 text-slate-400 font-black">{log.time}</td>
                         <td className="p-2 sm:p-3 border-r border-slate-100 overflow-hidden">
-                           <span className="tracking-widest uppercase truncate block text-red-700 font-mono bg-red-50 px-1 py-0.5 rounded-sm border border-red-100">{log.product.barcode}</span>
+                           <span className="tracking-widest uppercase truncate block text-[#0f172b] font-mono bg-slate-100 px-1 py-0.5 rounded-sm border border-slate-200">{log.product.barcode}</span>
                         </td>
                         <td className="p-2 sm:p-3 border-r border-slate-100">
                           <span className="line-clamp-1 leading-tight text-slate-700">{log.product.name}</span>
