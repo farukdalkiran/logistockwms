@@ -514,7 +514,6 @@ export default function ManagementDashboard() {
 
         </div>
       </main>
-
       <Footer />
     </div>
   );
