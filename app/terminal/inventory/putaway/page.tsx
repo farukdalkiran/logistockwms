@@ -31,7 +31,6 @@ const playScanSound = (type: 'success' | 'error') => {
     gainNode.connect(audioCtx.destination);
     
     if (type === 'success') {
-      // Başarılı: İnce ve kısa bir bip
       oscillator.type = 'sine';
       oscillator.frequency.setValueAtTime(800, audioCtx.currentTime);
       oscillator.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.1);
@@ -40,7 +39,6 @@ const playScanSound = (type: 'success' | 'error') => {
       oscillator.start(audioCtx.currentTime);
       oscillator.stop(audioCtx.currentTime + 0.1);
     } else {
-      // Hata: Kalın ve uzun uyarı sesi (Buzzer)
       oscillator.type = 'sawtooth';
       oscillator.frequency.setValueAtTime(200, audioCtx.currentTime);
       oscillator.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.3);
@@ -49,7 +47,7 @@ const playScanSound = (type: 'success' | 'error') => {
       oscillator.start(audioCtx.currentTime);
       oscillator.stop(audioCtx.currentTime + 0.3);
     }
-  } catch(e) { console.warn("Tarayıcı ses desteği kapalı"); }
+  } catch(e) { console.warn("Tarayıcı ses desteği kapalı veya kısıtlı"); }
 };
 
 export default function PutawayPage() {
@@ -75,18 +73,19 @@ export default function PutawayPage() {
   const [flashState, setFlashState] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState("");
   
-  // FIX: Android Terminal Klavye Auto-Focus Kapatıcısı
   const [isManualInputFocused, setIsManualInputFocused] = useState(false);
   
   const scanInputRef = useRef<HTMLInputElement>(null);
   const shelfInputRef = useRef<HTMLInputElement>(null);
   const lastCameraScanTime = useRef<number>(0);
+  const html5QrCodeRef = useRef<Html5Qrcode | null>(null); // Kamera Lifecycle Ref
+  
   const qtyButtons = [1, 2, 3, 4, 5, 10];
 
   const opState = useRef({ selectedQty });
   useEffect(() => { opState.current = { selectedQty }; }, [selectedQty]);
 
-  // FIX: Radar motoru klavye açılınca duraklar, kapanınca taramaya devam eder
+  // RADAR MOTORU (Klavye açıksa duraklar)
   useEffect(() => {
     const interval = setInterval(() => {
       if (!isProcessing && !isManualInputFocused) {
@@ -109,7 +108,7 @@ export default function PutawayPage() {
   }, [empId]);
 
   const triggerFeedback = useCallback((type: 'success' | 'error', msg: string = "") => {
-    playScanSound(type); // Ses motoru tetiklenir
+    playScanSound(type); 
     setFlashState(type); 
     if (type === 'error') setErrorMsg(msg);
     setTimeout(() => { setFlashState('idle'); if (type === 'error') setErrorMsg(""); }, 2000);
@@ -195,14 +194,13 @@ export default function PutawayPage() {
       setSessionLogs(prev => [logEntry, ...prev]);
       
       triggerFeedback('success');
-      setSelectedQty(1); // Okuma sonrası adeti 1'e resetle
+      setSelectedQty(1);
 
     } catch (error) { 
       triggerFeedback('error', "Kayıt Hatası!"); 
     } finally { 
       setIsProcessing(false); 
       setScanInput(""); 
-      // İşlem bitince odağı tekrar ana inputa al (eğer klavyede değilsek)
       if(!isManualInputFocused) setTimeout(() => scanInputRef.current?.focus(), 50); 
     }
   };
@@ -212,34 +210,72 @@ export default function PutawayPage() {
     processBarcode(scanInput, false); 
   };
 
+  // KAMERA OKUYUCU MOTORU (Lifecycle Fix)
   useEffect(() => {
-    let html5QrCode: Html5Qrcode | null = null;
+    let isMounted = true;
+
+    const stopCamera = async () => {
+      if (html5QrCodeRef.current) {
+        try {
+          if (html5QrCodeRef.current.isScanning) {
+            await html5QrCodeRef.current.stop();
+          }
+          await html5QrCodeRef.current.clear();
+        } catch (err) {
+          console.error("Kamera durdurma hatası:", err);
+        } finally {
+          html5QrCodeRef.current = null;
+        }
+      }
+    };
+
     if (activeShelf && activeTab === 'camera') {
-      html5QrCode = new Html5Qrcode("reader");
-      html5QrCode.start(
-        { facingMode: "environment" },
-        { fps: 4, qrbox: { width: 250, height: 150 } }, 
-        (decodedText) => processBarcode(decodedText, true), 
-        () => {}
-      ).catch(console.error);
+      const timer = setTimeout(() => {
+        const readerElement = document.getElementById("reader");
+        if (readerElement && isMounted) {
+          const qrScanner = new Html5Qrcode("reader");
+          html5QrCodeRef.current = qrScanner;
+
+          qrScanner.start(
+            { facingMode: "environment" },
+            { fps: 10, qrbox: { width: 250, height: 150 } }, 
+            (decodedText) => {
+              if (isMounted) processBarcode(decodedText, true);
+            }, 
+            () => {}
+          ).catch((err) => console.error("Kamera başlatılamadı:", err));
+        }
+      }, 200);
+
+      return () => {
+        isMounted = false;
+        clearTimeout(timer);
+        stopCamera();
+      };
+    } else {
+      stopCamera();
     }
-    return () => { if (html5QrCode && html5QrCode.isScanning) html5QrCode.stop().then(() => html5QrCode?.clear()).catch(console.error); };
+
+    return () => {
+      isMounted = false;
+      stopCamera();
+    };
   }, [activeShelf, activeTab]);
 
   return (
     <div className="min-h-screen bg-slate-50 font-['Quicksand'] flex flex-col antialiased select-none">
       
-      {/* ŞIK ENDÜSTRİYEL HEADING (Kırmızı & Mor Vurgulu, Aydınlık Tema Uyumlu) */}
-      <div className="bg-white shadow-sm shrink-0 relative overflow-hidden z-20 border-b border-slate-200">
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-600 to-[#dc3545]"></div>
-        <div className="flex items-center justify-between p-3 sm:p-4 max-w-7xl mx-auto w-full relative z-10">
-          <button onClick={() => router.back()} className="text-slate-500 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 p-2 sm:p-3 transition-all rounded-sm shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center border border-slate-200">
+      {/* ŞIK ENDÜSTRİYEL HEADING (Koyu Komuta Merkezi Teması) */}
+      <div className="bg-[#0b101e] shadow-xl shrink-0 border-b-4 border-[#dc3545] relative overflow-hidden z-20">
+        <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-r from-purple-900/20 to-black/40 pointer-events-none"></div>
+        <div className="flex items-center justify-between p-3 sm:p-4 border-b border-slate-800/60 max-w-7xl mx-auto w-full relative z-10">
+          <button onClick={() => router.back()} className="text-slate-400 hover:text-white bg-slate-800/40 hover:bg-slate-800 p-2 sm:p-3 transition-all rounded-sm shrink-0 min-h-[44px] min-w-[44px] flex items-center justify-center">
             <ChevronLeft size={24} />
           </button>
           <div className="flex flex-col items-center gap-0.5">
             <div className="flex items-center gap-2">
-              <PlusCircle size={16} className="text-purple-600 hidden sm:block" />
-              <span className="text-slate-900 text-[16px] sm:text-[18px] font-black uppercase tracking-widest">
+              <PlusCircle size={18} className="text-[#dc3545] hidden sm:block" />
+              <span className="text-white text-[15px] sm:text-[16px] font-black uppercase tracking-widest line-clamp-1 drop-shadow-md">
                 Hızlı Raflama
               </span>
             </div>
@@ -248,14 +284,14 @@ export default function PutawayPage() {
             </span>
           </div>
           <div className="w-11 shrink-0 flex justify-end">
-             <div className="bg-purple-100 text-purple-700 w-10 h-10 rounded-full flex items-center justify-center font-black text-[12px] border-2 border-purple-200 shadow-sm">
+             <div className="bg-purple-900/30 text-purple-400 w-10 h-10 rounded-full flex items-center justify-center font-black text-[12px] border border-purple-900/50 shadow-sm">
                 {empName.substring(0,2).toUpperCase()}
              </div>
           </div>
         </div>
       </div>
 
-      {/* 1. RAF BARKODU KİLİTLEME (AYDINLIK & ŞIK TEMA) */}
+      {/* 1. RAF BARKODU KİLİTLEME (AYDINLIK TEMA) */}
       {!activeShelf && (
         <div className="flex-1 flex items-center justify-center p-4 relative overflow-hidden">
           <div className="absolute top-1/4 -right-20 w-64 h-64 bg-purple-200/40 rounded-full blur-[80px] pointer-events-none"></div>
@@ -274,7 +310,6 @@ export default function PutawayPage() {
             </div>
             
             <form onSubmit={handleLockShelf} className="flex flex-col gap-4">
-              {/* FIX: Android Enter Yakalayıcı */}
               <input 
                 ref={shelfInputRef}
                 type="text" 
@@ -296,7 +331,6 @@ export default function PutawayPage() {
       {/* 2. OPERASYON KOKPİTİ */}
       {activeShelf && (
         <div className="flex-1 flex flex-col relative h-full">
-          {/* Flaş Efektleri */}
           <div className={`pointer-events-none fixed inset-0 z-40 transition-colors duration-300 ${flashState === 'success' ? 'bg-green-500/10' : flashState === 'error' ? 'bg-[#dc3545]/20' : 'bg-transparent'}`} />
 
           {errorMsg && (
@@ -332,10 +366,9 @@ export default function PutawayPage() {
             {/* SOL: OKUMA MOTORU */}
             <div className="w-full lg:w-[420px] flex flex-col gap-2 sm:gap-4 shrink-0">
               
-              {/* Tab Geçişleri */}
               <div className="flex bg-white border border-slate-200 p-1 rounded-sm shadow-sm">
-                <button onClick={() => setActiveTab('terminal')} className={`flex-1 min-h-[44px] flex items-center justify-center gap-2 py-2 text-[11px] sm:text-[12px] font-black uppercase tracking-widest transition-all rounded-sm ${activeTab === 'terminal' ? 'bg-purple-50 text-purple-700 border-2 border-purple-200 shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}><ScanLine size={16} /> Terminal</button>
-                <button onClick={() => setActiveTab('camera')} className={`flex-1 min-h-[44px] flex items-center justify-center gap-2 py-2 text-[11px] sm:text-[12px] font-black uppercase tracking-widest transition-all rounded-sm ${activeTab === 'camera' ? 'bg-purple-50 text-purple-700 border-2 border-purple-200 shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}><Smartphone size={16} /> Kamera</button>
+                <button onClick={() => setActiveTab('terminal')} className={`flex-1 min-h-[44px] flex items-center justify-center gap-2 py-2 text-[11px] sm:text-[12px] font-black uppercase tracking-widest transition-all rounded-sm ${activeTab === 'terminal' ? 'bg-[#0f172b] text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}><ScanLine size={16} /> Terminal</button>
+                <button onClick={() => setActiveTab('camera')} className={`flex-1 min-h-[44px] flex items-center justify-center gap-2 py-2 text-[11px] sm:text-[12px] font-black uppercase tracking-widest transition-all rounded-sm ${activeTab === 'camera' ? 'bg-[#0f172b] text-white shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}><Smartphone size={16} /> Kamera</button>
               </div>
 
               <div className="bg-white p-3 sm:p-4 shadow-sm border border-slate-200 flex flex-col gap-3 rounded-sm relative">
@@ -360,7 +393,6 @@ export default function PutawayPage() {
                 {/* Barkod Okuma Formu */}
                 {activeTab === 'terminal' ? (
                   <form onSubmit={handleTerminalScan} className="flex flex-col gap-2">
-                    {/* FIX: Terminal Enter OnKeyDown */}
                     <input 
                       ref={scanInputRef} 
                       type="text" 
@@ -387,7 +419,6 @@ export default function PutawayPage() {
                     ))}
                   </div>
                   
-                  {/* FIX: Klavye Auto-Focus Yönetimi ve Numpad Desteği */}
                   <div className={`flex items-center gap-2 border-2 p-1.5 rounded-sm transition-colors w-full min-h-[48px] ${isManualInputFocused ? 'border-purple-500 bg-purple-50/50 ring-4 ring-purple-500/10' : 'border-slate-200 bg-slate-50'}`}>
                     <span className="text-slate-500 text-[11px] font-black uppercase tracking-widest whitespace-nowrap pl-2 shrink-0 flex items-center gap-1">
                       <Keyboard size={14}/> Manuel:
@@ -400,7 +431,6 @@ export default function PutawayPage() {
                       onFocus={() => setIsManualInputFocused(true)}
                       onBlur={() => {
                          setIsManualInputFocused(false);
-                         // Klavye kapanınca tekrar radarı okuyucuya çek
                          setTimeout(() => scanInputRef.current?.focus(), 100);
                       }}
                       onChange={e => {
