@@ -121,12 +121,11 @@ export default function CargoInboundPage() {
     return () => clearTimeout(timeout);
   };
 
-  // MİMARİ: Açık Oturumları Yükle (TS Build Fix)
+  // MİMARİ: Açık Oturumları Yükle
   const loadActiveSessions = async () => {
     if (!empBranchId) return;
     const res = await getActiveCargoSessions(empBranchId);
     if (res.success && res.data) {
-      // TypeScript kalkanını Type Assertion ile aşıyoruz
       setActiveSessions((res.data as ActiveSession[]) || []);
     } else {
       setErrorMsg(res.error || "Oturumlar getirilemedi.");
@@ -166,7 +165,7 @@ export default function CargoInboundPage() {
     playSound("success");
   };
 
-  // ANA MOTOR: Barkod Okutma (Server Action Loglama)
+  // ANA MOTOR: Barkod Okutma (Server Action Loglama & TS Strict Fix)
   const handleScan = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && barcode.trim() !== "") {
       const scannedCode = barcode.trim().toUpperCase();
@@ -204,12 +203,18 @@ export default function CargoInboundPage() {
         }
       }
 
+      // VERCEL TS STRICT FIX: currentSessionId'nin kesinlikle string olduğunu garantile (Type Guard)
+      if (!currentSessionId) {
+        setErrorMsg("SİSTEM HATASI: Oturum Kimliği Doğrulanamadı!");
+        return;
+      }
+
       const nowTime = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
       setScannedItems(prev => [{ tracking: scannedCode, time: nowTime }, ...prev]);
       playSound("success");
       triggerFlash("success");
 
-      // Arka plan kayıt
+      // Arka plan kayıt (currentSessionId artık TS için güvenli bir string)
       const logRes = await logCargoBarcodeServer(currentSessionId, scannedCode);
       if (!logRes.success) {
         setErrorMsg(`UYARI: ${scannedCode} ağ kopması nedeniyle kaydedilemedi!`);
