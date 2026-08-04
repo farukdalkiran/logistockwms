@@ -29,17 +29,18 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  
   // 2. SUPABASE SUNUCU BAĞLANTISI VE OTURUM KONTROLÜ
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   // 3. AÇIK TİP TANIMLI (EXPLICIT TYPING) VARSAYILAN ŞUBE VE YETKİ VERİSİ
-  let sessionData: WmsSessionData = { 
-    userId: null, 
-    managerBranchId: null, 
-    isGlobal: false, 
-    role: "GUEST" 
+  let sessionData: WmsSessionData = {
+    userId: null,
+    managerBranchId: null,
+    isGlobal: false,
+    role: "GUEST",
   };
 
   // 4. EĞER GİRİŞ YAPILMIŞSA: VERİTABANINDAN YÖNETİCİ ŞUBESİNİ ÇEK
@@ -53,13 +54,19 @@ export default async function RootLayout({
     sessionData = {
       userId: user.id, // Artık TypeScript hata fırlatmaz, string değer güvenle atanır.
       managerBranchId: profile?.branch_id || "GLOBAL",
-      isGlobal: profile?.role === "Developer" || profile?.role === "Admin" || profile?.branch_id === null,
+      isGlobal:
+        profile?.role === "Developer" ||
+        profile?.role === "Admin" ||
+        profile?.branch_id === null,
       role: profile?.role || "USER",
     };
   }
 
   return (
     <html lang="tr">
+      <head>
+        <link rel="icon" href="/favicon.png" type="image/svg+xml" />
+      </head>
       <body className={inter.className}>
         <AuthProvider>
           {/* TÜM UYGULAMAYI SARAN WMS ŞUBE KİLİDİ */}
