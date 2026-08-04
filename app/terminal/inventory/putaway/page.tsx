@@ -108,17 +108,20 @@ export default function PutawayPage() {
     return () => clearInterval(interval);
   }, [activeShelf, activeTab, isProcessing, isManualMode]);
 
-  // ÇÖZÜM 1: INIT VERİ ÇEKİMİ (Kalkan Delici Server Action ile)
+// ÇÖZÜM 1: INIT VERİ ÇEKİMİ (Kalkan Delici Server Action ile)
   useEffect(() => {
     const initData = async () => {
       if (!empId) return;
       const session = await initTerminalSessionServer(empId);
       
       if (session.success) {
-        setBranchId(session.branchId);
-        setAllShelves(session.shelves); // RLS'i delip rafları anında alır
+        // Tip güvenliği için branchId'yi string olarak garantiliyoruz
+        setBranchId(session.branchId as string); 
+        
+        // Vercel Build Hatası Çözümü: undefined ihtimaline karşı fallback array ve Type Casting
+        setAllShelves((session.shelves as Shelf[]) || []); 
       } else {
-        triggerFeedback('error', "Terminal Hatası: " + session.error);
+        triggerFeedback('error', "Terminal Hatası: " + (session.error || "Bilinmeyen Hata"));
       }
     };
     initData();
