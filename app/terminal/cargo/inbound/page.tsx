@@ -2,14 +2,25 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
 import { 
   TerminalSquare, MapPin, ShieldCheck, ArrowLeft, 
-  Barcode, Camera, CheckCircle, Package, AlertCircle, Save 
+  Barcode, CheckCircle, Package, AlertCircle, Save, AlertTriangle, RotateCcw, Play
 } from "lucide-react";
 
-// Merkezi konfigürasyon dosyamızı çağırıyoruz
+// Server Actions
+import { 
+  getEmployeeBranchServer, getActiveCargoSessions, getSessionLogsServer, 
+  createCargoSessionServer, logCargoBarcodeServer, completeCargoSessionServer 
+} from "@/app/actions/cargo";
+
+// Merkezi konfigürasyon
 import { CARRIERS, validateCargoBarcode } from "@/lib/cargoConfig";
+
+interface ActiveSession {
+  id: string;
+  carrier_name: string;
+  started_at: string; // FİXED: created_at yerine started_at
+}
 
 export default function CargoInboundPage() {
   const router = useRouter();
@@ -24,23 +35,38 @@ export default function CargoInboundPage() {
   // State Yönetimi
   const [empBranchId, setEmpBranchId] = useState<string | null>(null);
   const [clock, setClock] = useState("");
-  // DİKKAT: id artık opsiyonel. İlk okutmaya kadar id oluşmayacak!
+  
+  const [activeSessions, setActiveSessions] = useState<ActiveSession[]>([]);
   const [session, setSession] = useState<{ id?: string; carrier: string; status: string } | null>(null);
-  const [selectedCarrier, setSelectedCarrier] = useState<string | null>(null);
   const [barcode, setBarcode] = useState("");
   const [scannedItems, setScannedItems] = useState<{ tracking: string; time: string }[]>([]);
+  
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [flashStatus, setFlashStatus] = useState<"success" | "error" | null>(null);
+  
+  // Modal State
+  const [isCompleteModalOpen, setIsCompleteModalOpen] = useState(false);
 
-  // Sayfa yüklendiğinde personelin branch_id'sini güvenli şekilde önbelleğe al
+  // Başlangıç: Şube Çekimi (Server Action)
   useEffect(() => {
     const fetchBranch = async () => {
-      const { data } = await supabase.from("employees").select("branch_id").eq("id", empId).single();
-      if (data?.branch_id) setEmpBranchId(data.branch_id);
+      const res = await getEmployeeBranchServer(empId);
+      if (res.success && res.branchId) {
+        setEmpBranchId(res.branchId);
+      } else {
+        setErrorMsg("Şube yetkisi reddedildi!");
+      }
     };
     if (empId !== "Bilinmiyor") fetchBranch();
   }, [empId]);
+
+  // Açık Oturumları Çek
+  useEffect(() => {
+    if (empBranchId && !session) {
+      loadActiveSessions();
+    }
+  }, [empBranchId, session]);
 
   // Canlı Saat
   useEffect(() => {
@@ -52,14 +78,14 @@ export default function CargoInboundPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Otomatik Focus Motoru
+  // Terminal Auto-Focus
   useEffect(() => {
-    if (session && session.status === "ACTIVE" && barcodeInputRef.current) {
+    if (session && session.status === "ACTIVE" && !isCompleteModalOpen && barcodeInputRef.current) {
       barcodeInputRef.current.focus();
     }
-  }, [session, barcode, errorMsg, flashStatus]);
+  }, [session, barcode, errorMsg, flashStatus, isCompleteModalOpen]);
 
-  // Frekans Ses Motoru
+  // Ses Motoru
   const playSound = (type: "success" | "error") => {
     try {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -85,7 +111,7 @@ export default function CargoInboundPage() {
         osc.stop(ctx.currentTime + 0.3);
       }
     } catch (e) {
-      console.error("Ses motoru başlatılamadı:", e);
+      // Sessiz yut
     }
   };
 
@@ -95,24 +121,54 @@ export default function CargoInboundPage() {
     return () => clearTimeout(timeout);
   };
 
-  // YENİ MİMARİ: Oturumu SADECE Arayüzde (UI) Başlat!
-  const handleStartSession = (carrierName: string) => {
+  // MİMARİ: Açık Oturumları Yükle (Server Action)
+  const loadActiveSessions = async () => {
+    if (!empBranchId) return;
+    const res = await getActiveCargoSessions(empBranchId);
+    if (res.success) {
+      setActiveSessions(res.data);
+    } else {
+      setErrorMsg(res.error || "Oturumlar getirilemedi.");
+    }
+  };
+
+  // MİMARİ: Var Olan Bir Oturuma Devam Et (Resume)
+  const handleResumeSession = async (activeSession: ActiveSession) => {
+    setIsLoading(true);
+    setErrorMsg("");
+    
+    const res = await getSessionLogsServer(activeSession.id);
+    if (res.success) {
+      const mappedLogs = res.data.map((log: any) => ({
+        tracking: log.tracking_number,
+        time: new Date(log.created_at).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+      }));
+      setScannedItems(mappedLogs);
+      setSession({ id: activeSession.id, carrier: activeSession.carrier_name, status: "ACTIVE" });
+      playSound("success");
+    } else {
+      setErrorMsg("Oturum verileri geri yüklenemedi!");
+      playSound("error"); triggerFlash("error");
+    }
+    setIsLoading(false);
+  };
+
+  // MİMARİ: Sıfırdan Yeni Oturum Başlat (Lazy Insert)
+  const handleStartNewSession = (carrierName: string) => {
     if (!empBranchId) {
       setErrorMsg("Güvenlik Hatası: Şube yetkisi doğrulanamadı!");
       triggerFlash("error");
       return;
     }
-    
-    // Veritabanına istek ATMADAN UI state'ini açıyoruz.
+    setScannedItems([]);
     setSession({ carrier: carrierName, status: "ACTIVE" });
-    setSelectedCarrier(carrierName);
     playSound("success");
   };
 
-  // ANA MOTOR: Barkod Okutma (Lazy Insertion Entegrasyonu)
+  // ANA MOTOR: Barkod Okutma (Server Action Loglama)
   const handleScan = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && barcode.trim() !== "") {
-      const scannedCode = barcode.trim();
+      const scannedCode = barcode.trim().toUpperCase();
       setBarcode(""); 
 
       if (!session || session.status !== "ACTIVE") {
@@ -120,65 +176,41 @@ export default function CargoInboundPage() {
         playSound("error"); triggerFlash("error"); return;
       }
 
-      // Kargo Config Filtresi
       const validation = validateCargoBarcode(session.carrier, scannedCode);
       if (!validation.isValid) {
-        setErrorMsg(validation.errorMsg || "Geçersiz Kargo Barkodu!");
+        setErrorMsg(validation.errorMsg || "GEÇERSİZ BARKOD!");
         playSound("error"); triggerFlash("error"); return;
       }
 
-      // Mükerrer Kontrolü
       if (scannedItems.some(item => item.tracking === scannedCode)) {
-        setErrorMsg(`MÜKERRER: ${scannedCode} zaten okutuldu!`);
+        setErrorMsg(`MÜKERRER: ${scannedCode} ZATEN OKUTULDU!`);
         playSound("error"); triggerFlash("error"); return;
       }
 
       setErrorMsg(""); 
       let currentSessionId = session.id;
 
-      // ZİRVE NOKTASI: EĞER BU İLK BARKOD İSE, OTURUMU ŞİMDİ VERİTABANINA YAZ!
+      // Lazy Insertion: İlk barkodsa oturumu DB'ye kaydet
       if (!currentSessionId) {
-        try {
-          const { data: newSession, error: sessionErr } = await supabase
-            .from("cargo_sessions")
-            .insert([{
-              employee_id: empId,
-              branch_id: empBranchId,
-              carrier_name: session.carrier,
-              status: 'ACTIVE'
-            }])
-            .select("id")
-            .single();
-
-          if (sessionErr) throw sessionErr;
-          
-          currentSessionId = newSession.id;
-          // State'i güncelleyip ID'yi içeri gömüyoruz
+        if (!empBranchId) return;
+        const res = await createCargoSessionServer(empId, empBranchId, session.carrier);
+        if (res.success && res.id) {
+          currentSessionId = res.id;
           setSession(prev => prev ? { ...prev, id: currentSessionId } : null);
-        } catch (err) {
-          setErrorMsg("SİSTEM HATASI: Kargo oturumu veritabanında oluşturulamadı!");
-          playSound("error"); triggerFlash("error");
-          return; // Hata varsa aşağı geçme, UI'ı güncelleme
+        } else {
+          setErrorMsg("SİSTEM HATASI: Kargo oturumu oluşturulamadı!");
+          playSound("error"); triggerFlash("error"); return;
         }
       }
 
-      // İLK OKUTMA BAŞARILI OLUŞTUYSA VEYA ZATEN VARSA (Optimistic UI)
       const nowTime = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
       setScannedItems(prev => [{ tracking: scannedCode, time: nowTime }, ...prev]);
       playSound("success");
       triggerFlash("success");
 
-      // Arka planda barkodu veritabanına logla
-      try {
-        const { error: logErr } = await supabase.from("cargo_logs").insert([{
-          session_id: currentSessionId,
-          tracking_number: scannedCode
-        }]);
-
-        if (logErr) throw logErr;
-      } catch (err) {
-        // Ağ koptuysa kullanıcıyı uyar ve listeyi geri al (Rollback)
-        console.error("Kargo loglanamadı:", err);
+      // Arka plan kayıt
+      const logRes = await logCargoBarcodeServer(currentSessionId, scannedCode);
+      if (!logRes.success) {
         setErrorMsg(`UYARI: ${scannedCode} ağ kopması nedeniyle kaydedilemedi!`);
         playSound("error"); triggerFlash("error");
         setScannedItems(prev => prev.filter(i => i.tracking !== scannedCode));
@@ -186,163 +218,174 @@ export default function CargoInboundPage() {
     }
   };
 
-  // MÜHÜRLE VE ÇIK (Boş Oturum Koruması)
+  // MÜHÜRLE VE ÇIK (Server Action)
   const handleCompleteSession = async () => {
     if (!session) return;
     
-    // Eğer session.id yoksa (yani firma seçip HİÇBİR ŞEY okutmadan bitire bastıysa)
-    // Veritabanında oturum hiç oluşturulmadığı için sessizce ana menüye dön. Çöp veri yok!
     if (!session.id) {
-      router.back();
+      setSession(null);
+      setIsCompleteModalOpen(false);
       return;
     }
 
     setIsLoading(true);
-    try {
-      await supabase
-        .from("cargo_sessions")
-        .update({ 
-          status: 'COMPLETED', 
-          completed_at: new Date().toISOString(),
-          total_items: scannedItems.length
-        })
-        .eq("id", session.id);
-
-      setSession(prev => prev ? { ...prev, status: "COMPLETED" } : null);
+    const res = await completeCargoSessionServer(session.id, scannedItems.length);
+    
+    if (res.success) {
       playSound("success");
-      router.back();
-    } catch (err) {
-      console.error(err);
-      setErrorMsg("Oturum kalıcı olarak kapatılamadı. Ağınızı kontrol edin.");
+      setIsCompleteModalOpen(false);
+      setSession(null); 
+    } else {
+      setErrorMsg("Oturum kapatılamadı. Ağınızı kontrol edin.");
       triggerFlash("error");
-      setIsLoading(false);
+      setIsCompleteModalOpen(false);
+    }
+    setIsLoading(false);
+  };
+
+  // Güvenli Geri Dönüş
+  const handleBack = () => {
+    if (session) {
+      setSession(null); 
+    } else {
+      router.back(); 
     }
   };
 
-  const handleCameraScan = () => {
-    if (session && session.status !== "ACTIVE") return;
-    const fileInput = document.getElementById('camera-scan-input');
-    if (fileInput) fileInput.click();
-  };
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    alert("Kamera arabirimi bağlandı. Görsel barkod çözümleme (Decoder) altyapısı aktiftir.");
-  };
-
   return (
-    <div className={`min-h-screen font-['Quicksand'] select-none flex flex-col transition-colors duration-200
-      ${flashStatus === "success" ? "bg-emerald-500/30" : flashStatus === "error" ? "bg-red-500/30" : "bg-slate-100"}`}>
-      
-      {/* 1. DARK HEADING */}
-      <div className="bg-[#0f172b] shadow-md flex flex-col shrink-0">
-        <div className="bg-[#dc3545] py-2 px-4 flex justify-between items-center border-b border-[#a12330]">
-          <button onClick={() => router.back()} className="text-white flex items-center gap-1 active:scale-95 transition-transform">
-            <ArrowLeft size={16} strokeWidth={3} />
-            <span className="text-[10px] font-black uppercase tracking-widest">Geri Çık</span>
-          </button>
-          <div className="flex items-center gap-2">
-            <TerminalSquare size={14} className="text-white" />
-            <span className="text-white text-[10px] font-black uppercase tracking-[0.2em]">Kargo Mal Kabul</span>
-          </div>
-          <div className="w-12"></div>
-        </div>
-
-        <div className="p-4 grid grid-cols-2 gap-3 max-w-lg mx-auto w-full">
-          <div className="bg-slate-900 border border-slate-800 rounded-sm p-3 flex flex-col justify-between shadow-inner">
-            <span className="text-slate-400 text-[9px] font-bold uppercase tracking-widest mb-1 flex items-center gap-1">
-              <ShieldCheck size={10} className="text-emerald-500"/> Aktif Operatör
-            </span>
-            <span className="text-white font-black text-[13px] uppercase tracking-wide truncate mt-1">
-              {empName}
-            </span>
-          </div>
-          <div className="bg-slate-900 border border-slate-800 rounded-sm p-3 flex flex-col justify-between text-right shadow-inner">
-            <span className="text-slate-400 text-[9px] font-bold uppercase tracking-widest mb-1 flex justify-end items-center gap-1">
-              <MapPin size={10} className="text-[#dc3545]" /> Konum
-            </span>
-            <span className="text-white font-bold text-[11px] uppercase tracking-wide truncate mt-1">
-              {branchName}
-            </span>
-            <span className="text-white font-mono text-lg font-black tracking-tight mt-1">
-              {clock}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* 2. ANA KONTROLLER */}
-      <div className="p-4 flex-1 flex flex-col max-w-lg mx-auto w-full gap-4">
+    <>
+      <div className={`min-h-screen font-['Quicksand'] select-none flex flex-col transition-colors duration-200
+        ${flashStatus === "success" ? "bg-green-500/20" : flashStatus === "error" ? "bg-[#dc3545]/20" : "bg-slate-100"}`}>
         
-        {errorMsg && (
-          <div className="bg-red-900 border border-[#dc3545] text-white p-3.5 rounded-sm flex items-center gap-2.5 shadow-md animate-bounce">
-            <AlertCircle size={20} className="shrink-0 text-red-400" />
-            <span className="text-[12px] font-black uppercase tracking-wide">{errorMsg}</span>
+        {/* 1. DARK-INDUSTRIAL HEADING */}
+        <div className="bg-slate-900 shadow-md flex flex-col shrink-0 border-b-4 border-[#dc3545]">
+          <div className="bg-[#dc3545] py-3 px-4 flex justify-between items-center">
+            <button onClick={handleBack} className="text-white flex items-center gap-2 active:scale-95 transition-transform hover:text-slate-200">
+              <ArrowLeft size={18} strokeWidth={3} />
+              <span className="text-xs font-black uppercase tracking-widest">GERİ DÖN</span>
+            </button>
+            <div className="flex items-center gap-2 bg-black/20 px-3 py-1 border border-black/30 rounded-none">
+              <TerminalSquare size={16} className="text-white" />
+              <span className="text-white text-xs font-black uppercase tracking-[0.2em]">KARGO MAL KABUL</span>
+            </div>
+            <div className="w-20"></div>
           </div>
-        )}
 
-        {!session ? (
-          <div className="bg-white p-4 border border-slate-200 shadow-sm rounded-sm">
-            <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-widest border-l-4 border-[#dc3545] pl-2 mb-4">
-              1. Kargo Firması Seçin
-            </h3>
-            <div className="grid grid-cols-1 gap-3 ">
-              {CARRIERS.map((c) => {
-                const isSelected = selectedCarrier === c.name;
-                return (
-                  <button
-                    key={c.id}
-                    disabled={isLoading}
-                    onClick={() => handleStartSession(c.name)}
-                    className={`w-full relative overflow-hidden flex items-center justify-between p-4 border-l-4 rounded-sm transition-all shadow-md 
-                      ${isSelected ? `${c.activeBg} border-transparent text-white scale-[0.99]` : `bg-white hover:bg-slate-50 ${c.borderColor} ${c.bgTint}`}`}
-                  >
-                    <span className={`font-black text-[14px] uppercase tracking-wider flex items-center gap-2 z-10 
-                      ${isSelected ? "text-white" : c.textColor}`}>
-                      {c.name}
-                    </span>
-                    <div className="flex items-center gap-3 z-10">
-                      <div className="h-8 w-20 flex items-center justify-end bg-transparent">
+          <div className="p-4 grid grid-cols-2 gap-4 max-w-3xl mx-auto w-full">
+            <div className="bg-slate-800 border border-slate-700 p-3 flex flex-col justify-between rounded-none shadow-inner">
+              <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1 flex items-center gap-2">
+                <ShieldCheck size={14} className="text-green-500"/> AKTİF OPERATÖR
+              </span>
+              <span className="text-white font-black text-sm uppercase tracking-wide truncate mt-1">
+                {empName}
+              </span>
+            </div>
+            <div className="bg-slate-800 border border-slate-700 p-3 flex flex-col justify-between text-right rounded-none shadow-inner">
+              <span className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1 flex justify-end items-center gap-2">
+                <MapPin size={14} className="text-[#dc3545]" /> LOKASYON
+              </span>
+              <span className="text-white font-bold text-xs uppercase tracking-wide truncate mt-1">
+                {branchName}
+              </span>
+              <span className="text-[#dc3545] font-mono text-xl font-black tracking-tight mt-1">
+                {clock}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* 2. DİNAMİK ANA EKRAN */}
+        <div className="p-4 flex-1 flex flex-col max-w-3xl mx-auto w-full gap-5">
+          
+          {errorMsg && (
+            <div className="bg-[#dc3545] text-white p-4 flex items-center gap-3 shadow-[4px_4px_0px_rgba(0,0,0,0.2)] animate-in slide-in-from-top-2 rounded-none">
+              <AlertCircle size={24} className="shrink-0 text-white" />
+              <span className="text-sm font-black uppercase tracking-wider leading-snug">{errorMsg}</span>
+            </div>
+          )}
+
+          {!session ? (
+            // AŞAMA 1: OTURUM SEÇİM EKRANI
+            <div className="flex flex-col gap-6 w-full animate-in fade-in duration-300">
+              
+              {/* Açık Oturumlar Listesi */}
+              {activeSessions.length > 0 && (
+                <div className="bg-white p-5 border-2 border-slate-300 shadow-[4px_4px_0px_#e2e8f0] rounded-none">
+                  <h3 className="text-xs font-black text-slate-900 uppercase tracking-widest border-l-4 border-orange-500 pl-3 mb-4 flex items-center gap-2">
+                    <RotateCcw size={16} className="text-orange-500" /> AÇIK OTURUMLAR (KALDAN YERDEN DEVAM)
+                  </h3>
+                  <div className="grid grid-cols-1 gap-3">
+                    {activeSessions.map(active => (
+                      <button
+                        key={active.id}
+                        disabled={isLoading}
+                        onClick={() => handleResumeSession(active)}
+                        className="w-full bg-slate-50 hover:bg-slate-100 border-2 border-slate-300 text-slate-900 p-4 flex items-center justify-between transition-colors shadow-sm active:scale-[0.99] text-left rounded-none border-l-4 border-l-orange-500"
+                      >
+                        <div>
+                          <p className="font-black text-sm uppercase tracking-widest mb-1">{active.carrier_name}</p>
+                          <p className="text-[10px] font-bold text-slate-500 font-mono uppercase">
+                            Başlangıç: {new Date(active.started_at).toLocaleString("tr-TR")}
+                          </p>
+                        </div>
+                        <div className="bg-slate-900 text-white px-3 py-2 text-[10px] font-black uppercase tracking-widest flex items-center gap-2 rounded-none border border-slate-700">
+                          <Play size={12} strokeWidth={3} className="text-orange-500" /> SÜRDÜR
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Yeni Oturum Başlat */}
+              <div className="bg-white p-5 border-2 border-slate-300 shadow-[4px_4px_0px_#e2e8f0] rounded-none">
+                <h3 className="text-xs font-black text-slate-900 uppercase tracking-widest border-l-4 border-slate-900 pl-3 mb-4 flex items-center gap-2">
+                  <Package size={16} className="text-slate-900" /> YENİ MAL KABUL OTURUMU BAŞLAT
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {CARRIERS.map((c) => (
+                    <button
+                      key={c.id}
+                      disabled={isLoading}
+                      onClick={() => handleStartNewSession(c.name)}
+                      className="w-full bg-slate-50 hover:bg-slate-100 border-2 border-slate-300 p-4 flex flex-col items-center justify-center gap-3 transition-colors shadow-sm active:scale-[0.98] h-28 rounded-none border-l-8 border-l-[#dc3545]"
+                    >
+                      <div className="h-10 w-full flex items-center justify-center bg-transparent opacity-80 mix-blend-multiply">
                         <img 
                           src={c.logo} 
                           alt={`${c.name} Logo`} 
-                          className={`max-h-full max-w-full object-contain ${isSelected ? 'brightness-0 invert' : ''}`}
+                          className="max-h-full max-w-full object-contain"
                           crossOrigin="anonymous"
                         />
                       </div>
-                      {isSelected && <CheckCircle size={22} className="text-white drop-shadow" />}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ) : (
-          
-          <div className="flex flex-col gap-4 flex-1">
-            <div className="bg-white p-4 border border-slate-200 shadow-sm rounded-sm">
-              <div className="flex justify-between items-center mb-4">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-widest border-l-4 border-emerald-500 pl-2">
-                    2. Mal Kabul Okutma Paneli
-                  </h3>
-                  <div className="h-5 ml-2 bg-slate-100 p-1 rounded-sm flex items-center">
-                     <img 
-                       src={CARRIERS.find(c => c.name === session.carrier)?.logo} 
-                       alt={session.carrier} 
-                       className="h-full object-contain" 
-                     />
-                  </div>
+                      <span className="font-black text-xs text-slate-800 uppercase tracking-widest">
+                        {c.name}
+                      </span>
+                    </button>
+                  ))}
                 </div>
-                <span className={`font-black text-[10px] px-2 py-1 rounded-sm uppercase tracking-widest shadow-sm
-                  ${session.status === "ACTIVE" ? "bg-emerald-100 text-emerald-700 animate-pulse" : "bg-red-100 text-red-700"}`}>
-                  {session.status === "ACTIVE" ? "AÇIK" : "KİLİTLİ"}
-                </span>
               </div>
+
+            </div>
+          ) : (
+            // AŞAMA 2: TERMİNAL OKUTMA EKRANI
+            <div className="flex flex-col gap-4 flex-1 animate-in fade-in duration-300 h-full">
               
-              <div className="flex gap-2 relative">
-                <div className="relative flex-1">
-                  <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
-                    <Barcode size={20} className="text-slate-400" />
+              <div className="bg-white p-5 border-2 border-slate-300 shadow-[4px_4px_0px_#e2e8f0] rounded-none">
+                <div className="flex justify-between items-center mb-5">
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-xs font-black text-slate-900 uppercase tracking-widest border-l-4 border-green-500 pl-3">
+                      TERMİNAL: {session.carrier}
+                    </h3>
+                  </div>
+                  <span className="font-black text-[10px] px-3 py-1.5 uppercase tracking-widest border-2 bg-green-100 text-green-800 border-green-300 shadow-sm rounded-none">
+                    AÇIK OTURUM
+                  </span>
+                </div>
+                
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
+                    <Barcode size={24} className="text-slate-400" />
                   </div>
                   <input
                     ref={barcodeInputRef}
@@ -351,79 +394,96 @@ export default function CargoInboundPage() {
                     onChange={(e) => setBarcode(e.target.value)}
                     onKeyDown={handleScan}
                     disabled={session.status !== "ACTIVE"}
-                    placeholder={session.status === "ACTIVE" ? "Barkodu Okutun..." : "Oturum Kapatıldı"}
-                    className="w-full bg-slate-50 border-2 border-slate-300 text-slate-900 text-sm font-black rounded-sm focus:ring-0 focus:border-[#dc3545] block pl-10 p-3.5 transition-colors uppercase disabled:opacity-50 disabled:cursor-not-allowed"
+                    placeholder="BARKOD OKUTUN VEYA YAZIN..."
+                    className="w-full bg-slate-50 border-2 border-slate-300 text-slate-900 text-xl font-black font-mono rounded-none focus:ring-0 focus:border-[#dc3545] block pl-14 p-4 transition-colors uppercase disabled:opacity-50 disabled:bg-slate-200 shadow-[inset_2px_2px_4px_rgba(0,0,0,0.05)]"
                     autoComplete="off"
                   />
                 </div>
+              </div>
+
+              <div className="bg-white border-2 border-slate-300 shadow-[4px_4px_0px_#e2e8f0] rounded-none flex-1 flex flex-col overflow-hidden min-h-[350px]">
+                <div className="bg-slate-900 p-4 flex justify-between items-center shrink-0 border-b-4 border-[#dc3545]">
+                  <span className="text-[11px] font-black text-white uppercase tracking-widest flex items-center gap-2">
+                    <CheckCircle size={16} className="text-green-500"/> OKUTULAN HAVUZ
+                  </span>
+                  <span className="bg-[#dc3545] text-white text-[11px] font-black px-3 py-1 rounded-none">
+                    {scannedItems.length} ADET
+                  </span>
+                </div>
                 
-                <button 
-                  onClick={handleCameraScan}
-                  disabled={session.status !== "ACTIVE"}
-                  className="bg-slate-800 text-white p-3.5 rounded-sm flex items-center justify-center hover:bg-slate-700 active:bg-slate-900 transition-colors shadow-sm disabled:opacity-50"
-                  title="Telefon Kamerası ile Okut"
-                >
-                  <Camera size={20} strokeWidth={2.5} />
-                </button>
-
-                <input 
-                  type="file" 
-                  accept="image/*" 
-                  capture="environment" 
-                  id="camera-scan-input"
-                  className="hidden"
-                  onChange={handleFileChange}
-                />
-              </div>
-              
-              <p className="text-[10px] font-bold text-slate-400 text-center mt-3 uppercase tracking-wider">
-                Firma filtre kuralları aktiftir. Yanlış barkodlar bloke edilir.
-              </p>
-            </div>
-
-            <div className="bg-white p-1 border border-slate-200 shadow-sm rounded-sm flex-1 flex flex-col overflow-hidden">
-              <div className="bg-slate-100 border-b border-slate-200 p-3 flex justify-between items-center shrink-0">
-                <span className="text-[11px] font-black text-slate-800 uppercase tracking-widest flex items-center gap-1.5">
-                  <Package size={14} className="text-slate-500"/> Oturum Kargo Havuzu
-                </span>
-                <span className="bg-[#0f172b] text-white text-[11px] font-black px-2.5 py-1 rounded-sm shadow-inner">
-                  {scannedItems.length} Adet
-                </span>
-              </div>
-              
-              <div className="flex-1 overflow-y-auto p-2 space-y-2 bg-slate-50 custom-scrollbar">
-                {scannedItems.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-60 py-12">
-                    <Barcode size={40} strokeWidth={1} className="mb-2 text-slate-500" />
-                    <span className="text-[11px] font-bold uppercase tracking-widest">Kargo Girişi Bekleniyor</span>
-                  </div>
-                ) : (
-                  scannedItems.map((item, idx) => (
-                    <div key={idx} className="bg-white border border-slate-200 p-3 flex justify-between items-center rounded-sm shadow-sm border-l-4 border-emerald-500 animate-in fade-in slide-in-from-top-2">
-                      <span className="font-black text-slate-800 text-[13px] tracking-widest">
-                        {item.tracking}
-                      </span>
-                      <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-sm">
-                        {item.time}
-                      </span>
+                <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-slate-50 custom-scrollbar">
+                  {scannedItems.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-80 py-12 gap-3">
+                      <Barcode size={48} strokeWidth={1.5} className="text-slate-300" />
+                      <span className="text-xs font-black uppercase tracking-widest font-['Quicksand']">OKUTMA BEKLENİYOR</span>
                     </div>
-                  ))
-                )}
+                  ) : (
+                    scannedItems.map((item, idx) => (
+                      <div key={idx} className="bg-white border-2 border-slate-200 p-3 flex justify-between items-center rounded-none border-l-4 border-l-green-500 shadow-sm animate-in fade-in slide-in-from-top-2">
+                        <span className="font-black font-mono text-slate-800 text-sm tracking-wider">
+                          {item.tracking}
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-500 border border-slate-200 px-2 py-1 font-mono bg-slate-50">
+                          {item.time}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
-            </div>
 
-            {session.status === "ACTIVE" && (
               <button
                 disabled={isLoading}
-                onClick={handleCompleteSession}
-                className="w-full bg-[#dc3545] hover:bg-[#c82333] text-white font-black text-[13px] uppercase tracking-widest p-4 rounded-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] shadow-md disabled:opacity-70 mt-2 shrink-0 animate-in fade-in duration-300"
+                onClick={() => setIsCompleteModalOpen(true)}
+                className="w-full bg-[#dc3545] hover:bg-red-700 text-white font-black text-sm uppercase tracking-widest p-5 rounded-none flex items-center justify-center gap-3 transition-colors shadow-[4px_4px_0px_rgba(220,53,69,0.3)] disabled:opacity-50 disabled:shadow-none mt-2 shrink-0 border-2 border-red-800 active:translate-y-[2px]"
               >
-                <Save size={18} strokeWidth={2.5} /> Sayımı Bitir (Oturumu Kapat)
+                <Save size={20} strokeWidth={2.5} /> SAYIMI BİTİR VE MÜHÜRLE
               </button>
-            )}
-          </div>
-        )}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+
+      {/* KRİTİK ONAY MODALI (MÜHÜRLEME) */}
+      {isCompleteModalOpen && (
+        <div className="fixed inset-0 z-[999] bg-slate-900/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200 font-['Quicksand']">
+          <div className="bg-white max-w-md w-full border-4 border-[#dc3545] shadow-[12px_12px_0px_rgba(0,0,0,0.3)] rounded-none">
+            <div className="bg-[#dc3545] p-5 flex items-center gap-3">
+              <AlertTriangle size={28} className="text-white" />
+              <h2 className="text-white font-black text-xl uppercase tracking-widest">
+                İŞLEMİ MÜHÜRLE
+              </h2>
+            </div>
+            <div className="p-8">
+              <p className="text-slate-900 font-black text-lg mb-4 uppercase leading-snug">
+                DİKKAT: SAYIM KAPATILACAKTIR!
+              </p>
+              <p className="text-slate-600 font-bold text-sm mb-8 leading-relaxed">
+                Bu oturumu onayladığınız an veriler kilitlenerek arşive aktarılır. 
+                <span className="text-[#dc3545] font-black block mt-3 underline underline-offset-4">
+                  Bu işlem kesinlikle geri alınamaz ve bu oturuma sonradan kargo eklenemez.
+                </span>
+              </p>
+              <div className="flex flex-col gap-3">
+                <button 
+                  onClick={handleCompleteSession}
+                  disabled={isLoading}
+                  className="w-full bg-[#dc3545] hover:bg-red-700 text-white font-black h-14 uppercase tracking-widest border-2 border-red-800 transition-all shadow-[4px_4px_0px_rgba(0,0,0,0.15)] active:translate-y-[2px] active:shadow-none disabled:opacity-50 rounded-none"
+                >
+                  {isLoading ? "MÜHÜRLENİYOR..." : "EVET, SAYIMI MÜHÜRLE"}
+                </button>
+                <button 
+                  onClick={() => setIsCompleteModalOpen(false)}
+                  disabled={isLoading}
+                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-black h-14 uppercase tracking-widest border-2 border-slate-300 transition-colors rounded-none"
+                >
+                  İPTAL VE GERİ DÖN
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
