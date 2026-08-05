@@ -7,7 +7,6 @@ import { submitLeaveRequest, cancelLeaveRequestServer } from "@/app/actions/leav
 import { useRouter } from "next/navigation";
 import { useWms } from "@/components/providers/WmsSessionProvider";
 
-
 type EmployeeData = { id: string; full_name: string; branch_id: string; leave_balance: number; position_title: string; employment_date: string };
 type FeedbackData = { type: "success" | "error"; msg: string };
 
@@ -155,6 +154,7 @@ export default function LeaveRequestPanel() {
         throw new Error(result.message);
       }
 
+      // Sadece onaylanmış ve bakiyeden düşen izinlerde geri yükleme yap (UI Koruması backend ile örtüşüyor)
       if (cancelModal.status === 'APPROVED' && deductableLeaves.includes(cancelModal.leave_type)) {
          setEmployee({ ...employee, leave_balance: employee.leave_balance + cancelModal.requested_days });
       }
@@ -317,11 +317,13 @@ export default function LeaveRequestPanel() {
 
     // Toplam Kullanılan (Kazanılan - Mevcut Bakiye)
     const totalUsed = totalEarned - employee.leave_balance;
+    const usagePercentage = totalEarned > 0 ? Math.min(100, Math.round((totalUsed / totalEarned) * 100)) : 0;
 
     return {
       seniority: yearsDiff,
       totalEarned,
-      totalUsed
+      totalUsed,
+      usagePercentage
     };
   }, [employee]);
 
@@ -337,9 +339,7 @@ export default function LeaveRequestPanel() {
              </div>
              <div className="p-6">
                <p className="text-sm font-bold text-slate-600 mb-6 leading-relaxed">
-                  {cancelModal.status === 'APPROVED' 
-                     ? "ONAYLANMIŞ izninizi iptal etmek üzeresiniz. İşlem sistem tarafından loglanacak ve uygunsa bakiye iadeniz sağlanacaktır. Onaylıyor musunuz?"
-                     : "BEKLEYEN izin talebinizi iptal edip geri çekmek üzeresiniz. Onaylıyor musunuz?"}
+                  BEKLEYEN izin talebinizi iptal edip geri çekmek üzeresiniz. Onaylıyor musunuz?
                </p>
                <div className="flex gap-3">
                   <button onClick={() => setCancelModal(null)} disabled={loading} className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 py-3 rounded-none font-black text-xs uppercase tracking-widest transition-colors disabled:opacity-50 border border-slate-300">İPTAL / VAZGEÇ</button>
@@ -441,7 +441,7 @@ export default function LeaveRequestPanel() {
                      <div className="flex flex-col">
                        <span className="text-[10px] font-black text-slate-200 uppercase tracking-widest mb-1">İPTAL VE BAKİYE İADESİ</span>
                        <span className="text-[10px] font-bold text-slate-400 leading-relaxed">
-                         Onaylanmış veya bekleyen izinlerinizi iptal edebilirsiniz. İptal anında, bakiyeden düşülmüşse gün iade edilir ve hatalı loglar silinir.
+                         Sadece onaylanmamış/bekleyen izinlerinizi iptal edebilirsiniz. Onaylanan izinlerin iptali mümkün değildir.
                        </span>
                      </div>
                    </div>
@@ -539,71 +539,55 @@ export default function LeaveRequestPanel() {
             
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
                 
-                {/* WMS YENİ: GENİŞLETİLMİŞ İZİN BAKİYE KARTI */}
-                <div className="bg-[#0F172A] border-l-4 border-emerald-500 flex flex-col sm:flex-row relative overflow-hidden shadow-sm group">
-                  <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:16px_16px] pointer-events-none"></div>
-                  <Umbrella className="absolute -right-8 -bottom-8 w-40 h-40 text-emerald-500 opacity-5 group-hover:opacity-10 group-hover:scale-110 transition-all duration-700 ease-out" strokeWidth={1} />
-                
-                  {/* SOL: Ana Bakiye Rakamı */}
-                  <div className="flex-1 p-6 relative z-10 flex justify-between items-start border-b sm:border-b-0 sm:border-r border-slate-700">
-                    <div className="flex flex-col h-full justify-between">
-                      <div>
-                        <div className="flex items-center gap-2.5 mb-2">
-                          <div className="relative flex items-center justify-center">
-                            <div className="w-2 h-2 bg-emerald-500 rounded-none absolute animate-ping opacity-75"></div>
-                            <div className="w-1.5 h-1.5 bg-emerald-400 rounded-none relative z-10 shadow-[0_0_8px_rgba(52,211,153,0.8)]"></div>
-                          </div>
-                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] drop-shadow-sm">YILLIK İZİN BAKİYESİ</span>
-                        </div>
-                        <div className="flex items-baseline gap-2 mt-2">
-                          <span className={`text-7xl font-black font-mono tracking-tighter drop-shadow-md leading-none ${employee.leave_balance < 0 ? 'text-[#dc3545]' : 'text-white'}`}>
-                            {employee.leave_balance}
-                          </span>
-                          <span className="text-sm font-black text-emerald-500 uppercase tracking-[0.25em]">GÜN</span>
-                        </div>
+                {/* WMS YENİ: YENİLENMİŞ ENDÜSTRİYEL İZİN BAKİYE KARTI */}
+                <div className="bg-[#0F172A] border-l-4 border-emerald-500 rounded-none shadow-lg flex flex-col md:flex-row overflow-hidden relative">
+                   <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:16px_16px] pointer-events-none"></div>
+                   
+                   {/* SOL: Ana Bakiye */}
+                   <div className="p-6 md:p-8 flex flex-col justify-center items-start border-b md:border-b-0 md:border-r border-slate-700/50 w-full md:w-1/3 relative z-10 bg-slate-900/60">
+                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-[0.2em] mb-3 flex items-center gap-2">
+                       <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(52,211,153,0.8)] animate-pulse"></div> KULLANILABİLİR BAKİYE
+                     </span>
+                     <div className="flex items-baseline gap-2">
+                       <span className={`text-6xl md:text-7xl font-black font-mono tracking-tighter ${employee.leave_balance < 0 ? 'text-[#dc3545]' : 'text-white'}`}>
+                         {employee.leave_balance}
+                       </span>
+                       <span className="text-sm font-bold text-emerald-500 tracking-widest">GÜN</span>
+                     </div>
+                   </div>
+
+                   {/* SAĞ: Detaylı İstatistik Matrisi */}
+                   <div className="p-6 md:p-8 flex-1 grid grid-cols-2 gap-6 relative z-10 bg-[#0F172A]/80 backdrop-blur-sm">
+                      <div className="flex flex-col gap-1.5">
+                         <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">İŞE GİRİŞ TARİHİ</span>
+                         <span className="text-sm font-bold text-slate-200 font-mono tracking-wide">{employee.employment_date ? formatDate(employee.employment_date) : '-'}</span>
                       </div>
-
-                      <div className="mt-6 flex items-center gap-4">
-                        <div className="flex-1 flex gap-1 h-1.5">
-                          <div className="bg-emerald-500 h-full w-full max-w-[15%]"></div>
-                          <div className="bg-emerald-500 h-full w-full max-w-[25%]"></div>
-                          <div className="bg-emerald-500/60 h-full w-full max-w-[20%]"></div>
-                          <div className="bg-emerald-500/30 h-full w-full max-w-[10%]"></div>
-                          <div className="bg-slate-700/50 h-full w-full flex-1 border-t border-b border-slate-700"></div>
-                        </div>
-                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em] whitespace-nowrap">
-                          GÜNCEL NET VERİ
-                        </span>
+                      <div className="flex flex-col gap-1.5">
+                         <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">KIDEM YILI</span>
+                         <span className="text-sm font-bold text-slate-200 font-mono tracking-wide">{leaveStats.seniority} YIL</span>
                       </div>
-                    </div>
-                  </div>
-
-                  {/* SAĞ: İstatistik Detay Matriksi */}
-                  <div className="w-full sm:w-64 bg-slate-900/50 p-6 relative z-10 flex flex-col justify-center gap-4">
-                     <div className="flex flex-col border-b border-slate-800 pb-3">
-                        <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">İŞE GİRİŞ TARİHİ</span>
-                        <span className="text-sm font-black text-slate-300 font-mono tracking-wider">{employee.employment_date ? formatDate(employee.employment_date) : '-'}</span>
-                     </div>
-                     <div className="flex justify-between items-end border-b border-slate-800 pb-3">
-                        <div className="flex flex-col">
-                           <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">KIDEM YILI</span>
-                           <span className="text-sm font-black text-slate-300 font-mono tracking-wider">{leaveStats.seniority} YIL</span>
-                        </div>
-                        <div className="flex flex-col text-right">
-                           <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">KAZANILAN</span>
-                           <span className="text-sm font-black text-emerald-500 font-mono tracking-wider">+{leaveStats.totalEarned}</span>
-                        </div>
-                     </div>
-                     <div className="flex justify-between items-end">
-                        <div className="flex flex-col">
-                           <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">TOPLAM KULLANILAN</span>
-                        </div>
-                        <div className="flex flex-col text-right">
-                           <span className="text-xl font-black text-[#dc3545] font-mono tracking-wider leading-none">-{leaveStats.totalUsed}</span>
-                        </div>
-                     </div>
-                  </div>
-
+                      <div className="flex flex-col gap-1.5">
+                         <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">TOPLAM KAZANILAN</span>
+                         <span className="text-sm font-bold text-emerald-400 font-mono tracking-wide">+{leaveStats.totalEarned} GÜN</span>
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                         <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">TOPLAM KULLANILAN</span>
+                         <span className="text-sm font-bold text-[#dc3545] font-mono tracking-wide">-{leaveStats.totalUsed} GÜN</span>
+                      </div>
+                      
+                      <div className="col-span-2 mt-2 flex flex-col gap-2">
+                         <div className="flex justify-between text-[9px] font-bold text-slate-400 uppercase tracking-widest">
+                           <span>Kullanım Oranı</span>
+                           <span>%{leaveStats.usagePercentage}</span>
+                         </div>
+                         <div className="h-1.5 w-full bg-slate-800 rounded-none overflow-hidden">
+                           <div className="h-full bg-emerald-500 transition-all duration-1000" style={{ width: `${leaveStats.usagePercentage}%` }}></div>
+                         </div>
+                      </div>
+                   </div>
+                   
+                   {/* Background Deco */}
+                   <Umbrella className="absolute right-[-5%] bottom-[-15%] w-56 h-56 text-slate-800/40 rotate-12 pointer-events-none" />
                 </div>
               
               <div className="bg-white border-2 border-slate-200 p-6 flex flex-col justify-between shadow-sm min-h-[160px]">
@@ -627,8 +611,11 @@ export default function LeaveRequestPanel() {
               </div>
             </div>
 
-            <div className="flex flex-col xl:flex-row gap-6">
-               <div className="flex-1 bg-white border-2 border-slate-200 shadow-sm flex flex-col min-h-[350px]">
+            {/* TABLOLAR: TAM GENİŞLİK - ALT ALTA (WMS STANDART) */}
+            <div className="flex flex-col gap-8">
+               
+               {/* 1. İZİN TALEPLERİ GEÇMİŞİ */}
+               <div className="w-full bg-white border-2 border-slate-200 shadow-sm flex flex-col min-h-[350px]">
                  <div className="bg-[#0F172A] p-4 border-b-4 border-slate-800 flex items-center justify-between">
                    <div className="flex items-center gap-3">
                      <History className="w-4 h-4 text-[#dc3545]" />
@@ -636,62 +623,62 @@ export default function LeaveRequestPanel() {
                    </div>
                    <span className="text-[9px] font-black text-slate-400 tracking-widest uppercase bg-slate-800 px-2 py-0.5 border border-slate-700">SON 6 KAYIT</span>
                  </div>
-                 <div className="overflow-x-auto p-2">
+                 <div className="overflow-x-auto p-0">
                    <table className="w-full text-left border-collapse whitespace-nowrap">
                      <thead>
-                       <tr className="border-b-2 border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                         <th className="p-4">Oluşturulma</th>
-                         <th className="p-4">Tarih Aralığı</th>
-                         <th className="p-4">İzin Tipi</th>
-                         <th className="p-4 text-center">Süre</th>
-                         <th className="p-4 text-right">Durum</th>
-                         <th className="p-4 text-center">İşlem</th>
+                       <tr className="border-b-2 border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-50">
+                         <th className="py-2.5 px-4 text-center">Oluşturulma</th>
+                         <th className="py-2.5 px-4 text-center">Tarih Aralığı</th>
+                         <th className="py-2.5 px-4 text-center">İzin Tipi</th>
+                         <th className="py-2.5 px-4 text-center">Süre</th>
+                         <th className="py-2.5 px-4 text-left">Durum & Yönetici Notu</th>
+                         <th className="py-2.5 px-4 text-center">İşlem</th>
                        </tr>
                      </thead>
                      <tbody>
                         {leaveRequests.length === 0 ? (
                           <tr>
-                            <td colSpan={6} className="p-8 text-center text-xs font-black text-slate-400 uppercase tracking-widest bg-slate-50 border-b border-slate-200">
+                            <td colSpan={6} className="p-8 text-center text-xs font-black text-slate-400 uppercase tracking-widest bg-white border-b border-slate-200">
                               SİSTEMDE İZİN KAYDI BULUNMUYOR
                             </td>
                           </tr>
                         ) : (
                           leaveRequests.map((req) => (
-                            <tr key={req.id} className="border-b border-slate-200 hover:bg-slate-100 transition-colors">
-                              <td className="p-4 text-center align-middle font-mono text-xs font-bold text-slate-500">
+                            <tr key={req.id} className="border-b border-slate-200 hover:bg-slate-50 transition-colors">
+                              <td className="p-3 text-center align-middle font-mono text-xs font-bold text-slate-500">
                                 {formatDate(req.created_at)}
                               </td>
-                              <td className="p-4 text-center align-middle font-mono text-xs font-black text-slate-800">
+                              <td className="p-3 text-center align-middle font-mono text-xs font-black text-slate-800">
                                 <div className="flex items-center justify-center gap-2">
-                                  <span className="bg-white border border-slate-300 px-2 py-0.5 shadow-sm">{formatDate(req.start_date)}</span>
+                                  <span className="bg-white border border-slate-300 px-2 py-1 shadow-sm">{formatDate(req.start_date)}</span>
                                   <ArrowRight className="w-3 h-3 text-[#dc3545]" strokeWidth={3} />
-                                  <span className="bg-white border border-slate-300 px-2 py-0.5 shadow-sm">{formatDate(req.end_date)}</span>
+                                  <span className="bg-white border border-slate-300 px-2 py-1 shadow-sm">{formatDate(req.end_date)}</span>
                                 </div>
                               </td>
-                              <td className="p-4 text-center align-middle font-black text-[10px] text-slate-700 uppercase tracking-widest">
-                                <span className="bg-slate-200 border border-slate-300 px-2.5 py-1 shadow-inner">
+                              <td className="p-3 text-center align-middle font-black text-[10px] text-slate-700 uppercase tracking-widest">
+                                <span className="bg-slate-100 border border-slate-300 px-2.5 py-1 shadow-inner">
                                   {req.leave_type === 'DIGER' ? req.custom_leave_type : req.leave_type.replace('_', ' ')}
                                 </span>
                               </td>
-                              <td className="p-4 text-center align-middle font-mono text-sm font-black text-[#dc3545]">
+                              <td className="p-3 text-center align-middle font-mono text-sm font-black text-[#dc3545]">
                                 {req.requested_days} <span className="text-[9px] text-slate-500 ml-0.5">GÜN</span>
                               </td>
-                              <td className="p-4 text-center align-middle">
-                                <div className="flex flex-col items-center justify-center gap-1.5">
+                              <td className="p-3 align-middle whitespace-normal min-w-[200px]">
+                                <div className="flex flex-col items-start gap-1.5">
                                   {getStatusBadge(req.status)}
-                                  {req.status === 'REJECTED' && req.manager_note && (
-                                    <div className="flex items-center justify-center gap-1.5 mt-0.5 text-[9px] font-black text-[#dc3545] max-w-[200px] bg-red-50 px-2 py-1 border border-[#dc3545]/30 shadow-sm" title={req.manager_note}>
-                                      <MessageSquare className="w-3 h-3 shrink-0" strokeWidth={2.5} />
-                                      <span className="truncate">{req.manager_note.replace(/\[.*?\] - /, '')}</span>
+                                  {req.manager_note && (
+                                    <div className="w-full bg-white border-l-2 border-slate-400 p-2 text-[10px] font-bold text-slate-600 leading-relaxed shadow-sm mt-0.5 break-words">
+                                      <MessageSquare className="w-3 h-3 inline-block mr-1 text-slate-400 -mt-0.5" />
+                                      {req.manager_note.replace(/\[.*?\] - /, '')}
                                     </div>
                                   )}
                                 </div>
                               </td>
-                              <td className="p-4 text-center align-middle">
-                                {(req.status === 'PENDING' || req.status === 'APPROVED') ? (
+                              <td className="p-3 text-center align-middle">
+                                {req.status === 'PENDING' ? (
                                    <button 
                                      onClick={() => setCancelModal(req)} 
-                                     className="text-white bg-[#0F172A] hover:bg-[#dc3545] px-4 py-1.5 rounded-none transition-all duration-200 text-[10px] font-black tracking-widest uppercase flex items-center justify-center gap-1.5 mx-auto border-2 border-[#0F172A] hover:border-[#dc3545] active:scale-95 shadow-sm"
+                                     className="text-white bg-[#0F172A] hover:bg-[#dc3545] px-3 py-1.5 rounded-none transition-all duration-200 text-[10px] font-black tracking-widest uppercase flex items-center justify-center gap-1.5 mx-auto border-2 border-[#0F172A] hover:border-[#dc3545] active:scale-95 shadow-sm"
                                    >
                                      <XCircle className="w-3.5 h-3.5" strokeWidth={2.5} /> İPTAL
                                    </button>
@@ -707,11 +694,12 @@ export default function LeaveRequestPanel() {
                  </div>
                </div>
 
-               <div className="flex-1 bg-white border-2 border-slate-200 shadow-sm flex flex-col min-h-[350px]">
+               {/* 2. AYLIK MESAİ & İZİN LOG DÖKÜMÜ */}
+               <div className="w-full bg-white border-2 border-slate-200 shadow-sm flex flex-col min-h-[350px]">
                  <div className="bg-[#0F172A] p-4 border-b-4 border-[#dc3545] flex items-center justify-between">
                    <div className="flex items-center gap-3">
                      <ListChecks className="w-4 h-4 text-[#dc3545]" />
-                     <h3 className="text-[11px] font-black text-white uppercase tracking-widest hidden sm:block">AYLIK MESAİ & İZİN LOG DÖKÜMÜ</h3>
+                     <h3 className="text-[11px] font-black text-white uppercase tracking-widest">AYLIK MESAİ & İZİN LOG DÖKÜMÜ</h3>
                    </div>
                    <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 p-1">
                      <button onClick={() => handlePrevMonth()} className="p-1 hover:bg-slate-700 transition-colors text-slate-300">
@@ -725,13 +713,13 @@ export default function LeaveRequestPanel() {
                      </button>
                    </div>
                  </div>
-                 <div className="overflow-x-auto flex-1 p-2">
+                 <div className="overflow-x-auto flex-1 p-0">
                    <table className="w-full text-left border-collapse whitespace-nowrap">
                      <thead>
-                       <tr className="border-b-2 border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-widest">
-                         <th className="p-4">Tarih</th>
-                         <th className="p-4 text-center">Durum / Saat</th>
-                         <th className="p-4 text-center">Net Süre</th>
+                       <tr className="border-b-2 border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-50">
+                         <th className="py-2.5 px-4 text-center">Tarih</th>
+                         <th className="py-2.5 px-4 text-center">Durum / Giriş - Çıkış Saati</th>
+                         <th className="py-2.5 px-4 text-center">Net Süre</th>
                        </tr>
                      </thead>
                      <tbody>
@@ -745,24 +733,24 @@ export default function LeaveRequestPanel() {
 
                            return (
                              <tr key={log.id} className={`border-b border-slate-100 transition-colors ${isLeave ? 'bg-blue-50/20' : 'hover:bg-slate-50'}`}>
-                               <td className="p-4 font-mono text-xs font-bold text-slate-500">{formatDate(log.check_in_time)}</td>
-                               <td className="p-4 font-mono text-sm font-bold text-center">
+                               <td className="p-3 text-center font-mono text-xs font-bold text-slate-500">{formatDate(log.check_in_time)}</td>
+                               <td className="p-3 font-mono text-sm font-bold text-center">
                                  {isLeave ? (
-                                   <span className={`px-3 py-1 text-[10px] font-black uppercase tracking-widest border border-dashed ${
+                                   <span className={`px-3 py-1 text-[10px] font-black uppercase tracking-widest border border-dashed shadow-sm ${
                                      leaveText === 'SAGLIK RAPORU' ? 'bg-red-50 text-red-700 border-red-300' : 'bg-blue-50 text-blue-700 border-blue-300'
                                    }`}>
                                      {leaveText === 'SAGLIK RAPORU' ? 'SAĞLIK RAPORU' : `${leaveText}`}
                                    </span>
                                  ) : (
                                    <div className="flex items-center justify-center">
-                                     <span className="text-emerald-700">{formatTime(log.check_in_time)}</span>
+                                     <span className="text-emerald-700 font-black px-2">{formatTime(log.check_in_time)}</span>
                                      <ArrowRight className="inline w-4 h-4 text-slate-300 mx-3" />
-                                     {isOpen ? <span className="text-white text-[10px] px-2 py-0.5 bg-[#dc3545] font-black animate-pulse">EKSİK</span> : <span className="text-slate-700">{formatTime(log.check_out_time)}</span>}
+                                     {isOpen ? <span className="text-white text-[10px] px-2 py-0.5 bg-[#dc3545] font-black animate-pulse">EKSİK</span> : <span className="text-slate-700 font-black px-2">{formatTime(log.check_out_time)}</span>}
                                    </div>
                                  )}
                                </td>
-                               <td className="p-4 font-mono text-sm font-black text-slate-800 text-center">
-                                 <span className="bg-slate-100 border border-slate-200 px-2 py-0.5">{log.working_hours ? `${log.working_hours}s` : "-"}</span>
+                               <td className="p-3 font-mono text-sm font-black text-slate-800 text-center">
+                                 <span className="bg-slate-100 border border-slate-200 px-3 py-1 shadow-sm">{log.working_hours ? `${log.working_hours}s` : "-"}</span>
                                </td>
                              </tr>
                            );
@@ -807,83 +795,75 @@ export default function LeaveRequestPanel() {
                  </div>
               )}
 
-              {/* KATEGORİ SEÇİMİ (YENİ UI) */}
+              {/* KATEGORİ SEÇİMİ (YENİ GRID MİMARİSİ) */}
               <div className="flex flex-col gap-4">
                  <div className="flex items-center justify-between">
                     <label className="text-xs font-black text-[#0F172A] uppercase tracking-[0.15em] flex items-center gap-2">
                       <span className="w-2 h-2 bg-[#dc3545]"></span> 1. İZİN TİPİ SEÇİMİ
                     </label>
-                    {leaveType && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 border border-emerald-200">SEÇİM YAPILDI</span>}
+                    {leaveType && <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 border border-emerald-200 shadow-sm">SEÇİM YAPILDI</span>}
                  </div>
 
-                 {/* YILLIK İZİN (DEV BUTON - BAKİYEDEN DÜŞER) */}
-                 <button
-                    type="button"
-                    onClick={() => handleCategorySelect("YILLIK", "YILLIK_IZIN")}
-                    className={`relative w-full h-24 p-6 border-2 flex items-center gap-6 text-left transition-all overflow-hidden ${
-                       leaveCategory === "YILLIK" 
-                         ? "bg-[#0F172A] border-[#0F172A] shadow-lg" 
-                         : "bg-white border-slate-300 hover:border-emerald-500 hover:shadow-md"
-                    }`}
-                 >
-                    {leaveCategory === "YILLIK" && <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:16px_16px] pointer-events-none"></div>}
-                    <div className={`p-3 shrink-0 ${leaveCategory === "YILLIK" ? "bg-emerald-500 text-[#0F172A]" : "bg-emerald-100 text-emerald-700"}`}>
-                       <Umbrella className="w-8 h-8" />
-                    </div>
-                    <div className="flex flex-col relative z-10">
-                       <span className={`text-xl font-black uppercase tracking-widest ${leaveCategory === "YILLIK" ? "text-white" : "text-[#0F172A]"}`}>YILLIK ÜCRETLİ İZİN</span>
-                       <span className={`text-[10px] font-bold tracking-widest uppercase mt-1 ${leaveCategory === "YILLIK" ? "text-emerald-400" : "text-slate-500"}`}>
-                          Mevcut Bakiyenizden Düşer (Bakiye: {employee.leave_balance} Gün)
+                 <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                    
+                    <button type="button" onClick={() => handleCategorySelect("YILLIK", "YILLIK_IZIN")} className={`h-28 flex flex-col justify-center items-center gap-2 border-2 transition-all p-2 ${leaveCategory === "YILLIK" ? "bg-[#0F172A] border-[#0F172A] text-white shadow-md" : "bg-white border-slate-300 text-slate-600 hover:border-emerald-500 hover:bg-emerald-50"}`}>
+                       <Umbrella className={`w-7 h-7 ${leaveCategory === "YILLIK" ? "text-emerald-400" : "text-emerald-600"}`} />
+                       <span className="text-[10px] font-black uppercase tracking-widest text-center leading-tight">
+                         YILLIK İZİN<br/>
+                         <span className={`text-[8px] font-bold ${leaveCategory === "YILLIK" ? "text-emerald-400/80" : "text-slate-400"}`}>(Bakiyeden Düşer)</span>
                        </span>
-                    </div>
-                    {leaveCategory === "YILLIK" && <CheckCircle2 className="w-8 h-8 text-emerald-500 absolute right-6" />}
-                 </button>
+                    </button>
 
-                 {/* DİĞER İZİNLER GRID (BAKİYEDEN DÜŞMEZ) */}
-                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                    <button type="button" onClick={() => handleCategorySelect("SAGLIK", "SAGLIK_RAPORU")} className={`h-20 flex flex-col justify-center items-center gap-2 border-2 transition-all p-2 ${leaveCategory === "SAGLIK" ? "bg-red-50 border-red-500 text-red-700 shadow-sm" : "bg-white border-slate-300 text-slate-600 hover:border-red-300 hover:bg-red-50/50"}`}>
-                       <HeartPulse className={`w-6 h-6 ${leaveCategory === "SAGLIK" ? "text-red-600" : "text-slate-400"}`} />
-                       <span className="text-[10px] font-black uppercase tracking-widest text-center">SAĞLIK RAPORU</span>
+                    <button type="button" onClick={() => handleCategorySelect("SAGLIK", "SAGLIK_RAPORU")} className={`h-28 flex flex-col justify-center items-center gap-2 border-2 transition-all p-2 ${leaveCategory === "SAGLIK" ? "bg-[#0F172A] border-[#0F172A] text-white shadow-md" : "bg-white border-slate-300 text-slate-600 hover:border-red-400 hover:bg-red-50"}`}>
+                       <HeartPulse className={`w-7 h-7 ${leaveCategory === "SAGLIK" ? "text-red-400" : "text-slate-400"}`} />
+                       <span className="text-[10px] font-black uppercase tracking-widest text-center leading-tight">
+                         SAĞLIK RAPORU<br/>
+                         <span className={`text-[8px] font-bold ${leaveCategory === "SAGLIK" ? "text-red-400/80" : "text-slate-400"}`}>(Oto Onaylanır)</span>
+                       </span>
                     </button>
                     
-                    <button type="button" onClick={() => handleCategorySelect("MAZERET", "MAZERET")} className={`h-20 flex flex-col justify-center items-center gap-2 border-2 transition-all p-2 ${leaveCategory === "MAZERET" ? "bg-blue-50 border-blue-500 text-blue-700 shadow-sm" : "bg-white border-slate-300 text-slate-600 hover:border-blue-300 hover:bg-blue-50/50"}`}>
-                       <Scale className={`w-6 h-6 ${leaveCategory === "MAZERET" ? "text-blue-600" : "text-slate-400"}`} />
-                       <span className="text-[10px] font-black uppercase tracking-widest text-center leading-tight">RESMİ MAZERET<br/><span className="text-[8px] opacity-70">(Evlilik, Doğum, vb.)</span></span>
+                    <button type="button" onClick={() => handleCategorySelect("MAZERET", "MAZERET")} className={`h-28 flex flex-col justify-center items-center gap-2 border-2 transition-all p-2 ${leaveCategory === "MAZERET" ? "bg-[#0F172A] border-[#0F172A] text-white shadow-md" : "bg-white border-slate-300 text-slate-600 hover:border-blue-400 hover:bg-blue-50"}`}>
+                       <Scale className={`w-7 h-7 ${leaveCategory === "MAZERET" ? "text-blue-400" : "text-slate-400"}`} />
+                       <span className="text-[10px] font-black uppercase tracking-widest text-center leading-tight">
+                         RESMİ MAZERET<br/>
+                         <span className={`text-[8px] font-bold ${leaveCategory === "MAZERET" ? "text-blue-400/80" : "text-slate-400"}`}>(Evlilik, Doğum)</span>
+                       </span>
                     </button>
 
-                    <button type="button" onClick={() => handleCategorySelect("UCRETSIZ", "UCRETSİZ")} className={`h-20 flex flex-col justify-center items-center gap-2 border-2 transition-all p-2 ${leaveCategory === "UCRETSIZ" ? "bg-slate-800 border-slate-800 text-white shadow-sm" : "bg-white border-slate-300 text-slate-600 hover:border-slate-800 hover:bg-slate-100"}`}>
-                       <UserMinus className={`w-6 h-6 ${leaveCategory === "UCRETSIZ" ? "text-slate-300" : "text-slate-400"}`} />
+                    <button type="button" onClick={() => handleCategorySelect("UCRETSIZ", "UCRETSİZ")} className={`h-28 flex flex-col justify-center items-center gap-2 border-2 transition-all p-2 ${leaveCategory === "UCRETSIZ" ? "bg-[#0F172A] border-[#0F172A] text-white shadow-md" : "bg-white border-slate-300 text-slate-600 hover:border-slate-800 hover:bg-slate-100"}`}>
+                       <UserMinus className={`w-7 h-7 ${leaveCategory === "UCRETSIZ" ? "text-slate-300" : "text-slate-400"}`} />
                        <span className="text-[10px] font-black uppercase tracking-widest text-center">ÜCRETSİZ İZİN</span>
                     </button>
 
-                    <button type="button" onClick={() => handleCategorySelect("DIGER", "DIGER")} className={`h-20 flex flex-col justify-center items-center gap-2 border-2 transition-all p-2 ${leaveCategory === "DIGER" ? "bg-slate-200 border-slate-400 text-slate-800 shadow-sm" : "bg-white border-slate-300 text-slate-600 hover:border-slate-400"}`}>
-                       <Info className={`w-6 h-6 ${leaveCategory === "DIGER" ? "text-slate-600" : "text-slate-400"}`} />
+                    <button type="button" onClick={() => handleCategorySelect("DIGER", "DIGER")} className={`h-28 flex flex-col justify-center items-center gap-2 border-2 transition-all p-2 ${leaveCategory === "DIGER" ? "bg-[#0F172A] border-[#0F172A] text-white shadow-md" : "bg-white border-slate-300 text-slate-600 hover:border-slate-500 hover:bg-slate-50"}`}>
+                       <Info className={`w-7 h-7 ${leaveCategory === "DIGER" ? "text-slate-400" : "text-slate-400"}`} />
                        <span className="text-[10px] font-black uppercase tracking-widest text-center">DİĞER...</span>
                     </button>
+
                  </div>
 
                  {/* Alt Kategori Detayları */}
                  {leaveCategory === "MAZERET" && (
-                    <div className="flex gap-2 animate-in slide-in-from-top-1">
+                    <div className="flex gap-2 animate-in slide-in-from-top-1 mt-1">
                        {['EVLILIK', 'DOGUM', 'VEFAT', 'MAZERET'].map(sub => (
-                         <button key={sub} type="button" onClick={() => setLeaveType(sub)} className={`flex-1 h-10 border border-blue-200 text-[10px] font-black uppercase tracking-widest transition-colors ${leaveType === sub ? "bg-blue-600 text-white" : "bg-blue-50 text-blue-700 hover:bg-blue-100"}`}>
+                         <button key={sub} type="button" onClick={() => setLeaveType(sub)} className={`flex-1 h-12 border-2 text-[10px] font-black uppercase tracking-widest transition-colors ${leaveType === sub ? "bg-blue-600 border-blue-600 text-white shadow-sm" : "bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100"}`}>
                             {sub === 'MAZERET' ? 'GENEL MAZERET' : sub}
                          </button>
                        ))}
                     </div>
                  )}
                  {leaveCategory === "DIGER" && (
-                    <input type="text" required placeholder="Lütfen İzin Sebebini Kısaca Belirtin..." value={customType} onChange={(e) => setCustomType(e.target.value)} className="h-12 border-2 border-slate-400 rounded-none px-4 text-xs font-bold outline-none uppercase bg-white text-[#0F172A] animate-in slide-in-from-top-1" />
+                    <input type="text" required placeholder="Lütfen İzin Sebebini Kısaca Belirtin..." value={customType} onChange={(e) => setCustomType(e.target.value)} className="h-14 border-2 border-slate-400 rounded-none px-4 text-xs font-bold outline-none uppercase bg-white text-[#0F172A] animate-in slide-in-from-top-1 shadow-sm mt-1" />
                  )}
               </div>
 
               {/* SÜRE VE AÇIKLAMA */}
-              <div className="flex flex-col lg:flex-row gap-6 mt-2">
+              <div className="flex flex-col lg:flex-row gap-6 mt-4">
                  <div className="flex flex-col gap-2 w-full lg:w-1/3">
                    <label className="text-[10px] font-black text-[#0F172A] uppercase tracking-[0.15em] flex items-center gap-2">
                      <span className="w-2 h-2 bg-[#dc3545]"></span> 2. KAPSAM
                    </label>
-                   <div className="flex flex-col gap-2">
+                   <div className="flex flex-col gap-3">
                      <button type="button" onClick={() => setIsHalfDay(false)} className={`h-14 border-2 text-xs font-black uppercase tracking-widest transition-all ${!isHalfDay ? "bg-[#0F172A] border-[#0F172A] text-white shadow-sm" : "bg-white border-slate-300 text-slate-500 hover:border-[#0F172A]"}`}>TAM GÜN</button>
                      <button type="button" onClick={() => setIsHalfDay(true)} className={`h-14 border-2 text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${isHalfDay ? "bg-amber-500 border-amber-600 text-amber-950 shadow-sm" : "bg-white border-slate-300 text-slate-500 hover:border-amber-500"}`}>
                         <div className="w-3 h-3 rounded-full border-2 border-current relative overflow-hidden"><div className="absolute left-0 top-0 bottom-0 w-1/2 bg-current"></div></div>
@@ -896,7 +876,7 @@ export default function LeaveRequestPanel() {
                    <label className="text-[10px] font-black text-[#0F172A] uppercase tracking-[0.15em] flex items-center gap-2">
                      <span className="w-2 h-2 bg-slate-300"></span> 3. AÇIKLAMA (OPSİYONEL)
                    </label>
-                   <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Yöneticinize iletilmek üzere not ekleyebilirsiniz..." className="w-full border-2 border-slate-300 rounded-none p-4 text-sm font-bold text-slate-700 focus:border-[#0F172A] outline-none flex-1 min-h-[120px] resize-none bg-white"></textarea>
+                   <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Yöneticinize iletilmek üzere not ekleyebilirsiniz..." className="w-full border-2 border-slate-300 rounded-none p-4 text-sm font-bold text-slate-700 focus:border-[#0F172A] outline-none flex-1 min-h-[120px] resize-none bg-white shadow-sm"></textarea>
                  </div>
               </div>
 
@@ -931,7 +911,7 @@ export default function LeaveRequestPanel() {
                 </div>
 
                 {leaveCategory === "YILLIK" && selectedDates.length > 0 && employee.leave_balance - (isHalfDay ? selectedDates.length * 0.5 : selectedDates.length) < 0 && (
-                   <div className="mt-4 p-3 bg-red-50 border border-red-200 flex items-start gap-2">
+                   <div className="mt-4 p-3 bg-red-50 border border-red-200 flex items-start gap-2 shadow-sm">
                       <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
                       <p className="text-[10px] font-bold text-red-700 leading-relaxed uppercase">
                         Dikkat: Bu talep bakiyenizi eksiye ({(employee.leave_balance - (isHalfDay ? selectedDates.length * 0.5 : selectedDates.length))}) düşürecektir. -14 limitini aşmadığınız sürece talebi gönderebilirsiniz.
