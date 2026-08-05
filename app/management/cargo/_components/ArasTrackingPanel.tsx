@@ -314,7 +314,7 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
 
   return (
     <>
-      <div className="w-full max-w-6xl mx-auto flex flex-col gap-6 text-slate-800 pb-12">
+      <div className="w-full max-w-6xl mx-auto flex flex-col gap-6 text-slate-800 pb-12 font-['Quicksand']">
         
         {/* HERO HEADER */}
         <div className="w-full bg-white border-2 border-slate-300 border-l-8 border-l-[#dc3545] p-5 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 shadow-[4px_4px_0px_#e2e8f0]">
@@ -324,7 +324,7 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
               <img 
                 src="https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExdmx4cjJodGhpM2VlbzRlcmZreGQxbHc5cHNjNnlpbDJycXJ4MGg0aCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/26DOM7YFBRsv7hYze/giphy.gif" 
                 alt="Lego Header" 
-                className="w-full h-full object-cover grayscale opacity-80"
+                className="w-full h-full object-cover opacity-90"
               />
             </div>
 
@@ -473,7 +473,7 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
                   value={deliveryNo}
                   onChange={(e) => setDeliveryNo(e.target.value)}
                   disabled={loading || activeGroup !== null}
-                  className="flex-1 h-14 bg-white border-2 border-slate-300 px-5 text-xl font-black font-mono text-slate-900 focus:outline-none focus:border-[#dc3545] disabled:bg-slate-100 uppercase placeholder:text-slate-300 placeholder: "
+                  className="flex-1 h-14 bg-white border-2 border-slate-300 px-5 text-xl font-black font-mono text-slate-900 focus:outline-none focus:border-[#dc3545] disabled:bg-slate-100 uppercase placeholder:text-slate-300"
                   placeholder={selectedFileId ? "SADECE SEÇİLİ DOSYADA ARA..." : "BARKOD OKUT VEYA YAZ..."}
                   autoComplete="off"
                 />
@@ -552,10 +552,10 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">AÇIK ADRES & POSTA KODU</p>
                         <div className="flex items-stretch bg-white border-2 border-slate-200 flex-1">
                           <span className="flex-1 text-xs font-bold text-slate-700 uppercase leading-relaxed break-words px-3 py-2">
-                            {`${activeGroup.primary.street || ""} ${activeGroup.primary.street_2 || ""} - Posta Kodu: ${activeGroup.primary.postal_code || "YOK"}`.trim()}
+                            {`${activeGroup.primary.street || ""} ${activeGroup.primary.street_2 || ""} - Posta Kodu: ${activeGroup.primary.postal_code || "YOK"} --DN: ${activeGroup.primary.delivery_number}`.trim()}
                           </span>
                           <div className="flex items-start">
-                            <CopyIcon fieldId="fullAddress" textToCopy={`${activeGroup.primary.street || ""} ${activeGroup.primary.street_2 || ""} - Posta Kodu: ${activeGroup.primary.postal_code || "YOK"}`.trim()} />
+                            <CopyIcon fieldId="fullAddress" textToCopy={`${activeGroup.primary.street || ""} ${activeGroup.primary.street_2 || ""} - Posta Kodu: ${activeGroup.primary.postal_code || "YOK"} --DN: ${activeGroup.primary.delivery_number}`.trim()} />
                           </div>
                         </div>
                       </div>
@@ -578,7 +578,7 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
                       value={trackingNo}
                       onChange={(e) => setTrackingNo(e.target.value)}
                       disabled={loading}
-                      className={`flex-1 h-14 bg-white border-2 px-5 text-2xl font-black font-mono text-slate-900 focus:outline-none uppercase placeholder:text-slate-300 placeholder:text-lg placeholder:  ${activeGroup.isUpdateMode ? 'border-blue-400 focus:border-blue-600' : 'border-[#dc3545]'}`}
+                      className={`flex-1 h-14 bg-white border-2 px-5 text-2xl font-black font-mono text-slate-900 focus:outline-none uppercase placeholder:text-slate-300 placeholder:text-lg ${activeGroup.isUpdateMode ? 'border-blue-400 focus:border-blue-600' : 'border-[#dc3545]'}`}
                       placeholder={activeGroup.isUpdateMode ? "YENİ BARKOD..." : "KARGO BARKODU..."}
                       autoComplete="off"
                     />

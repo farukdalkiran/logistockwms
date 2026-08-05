@@ -52,9 +52,12 @@ export async function submitLeaveRequest(data: {
 
     const requestedDays = data.is_half_day ? (sortedDates.length * 0.5) : sortedDates.length;
 
-    if (employee.leave_balance < requestedDays && data.leave_type === 'YILLIK_IZIN') {
-       return { success: false, message: "YETERSİZ YILLIK İZİN BAKİYESİ" };
-    }
+// YENİ KOD (Olması Gereken -14 Lojiği):
+if (data.leave_type === 'YILLIK_IZIN') {
+   if (employee.leave_balance - requestedDays < -14) {
+      return { success: false, message: "Yıllık izin bakiyesi -14 gün sınırının altına düşemez." };
+   }
+}
 
     const adminTitles = ["YÖNETİCİ", "MÜDÜR", "ŞEF", "ADMIN", "DEVELOPER", "YONETICI", "MUDUR", "SEF", "TAKIM LİDERİ", "TAKIM LIDERI"];
     const empTitle = (employee.position_title || "").toUpperCase();

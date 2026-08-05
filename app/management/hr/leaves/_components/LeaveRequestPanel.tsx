@@ -154,7 +154,6 @@ export default function LeaveRequestPanel() {
         throw new Error(result.message);
       }
 
-      // Sadece onaylanmış ve bakiyeden düşen izinlerde geri yükleme yap (UI Koruması backend ile örtüşüyor)
       if (cancelModal.status === 'APPROVED' && deductableLeaves.includes(cancelModal.leave_type)) {
          setEmployee({ ...employee, leave_balance: employee.leave_balance + cancelModal.requested_days });
       }
@@ -234,6 +233,7 @@ export default function LeaveRequestPanel() {
 
     const requestedDays = isHalfDay ? selectedDates.length * 0.5 : selectedDates.length;
     
+    // UI Katmanında -14 Kontrolü (Backend'de de aynısı olmalı)
     if (deductableLeaves.includes(leaveType)) {
       const remainingBalanceAfterRequest = employee.leave_balance - requestedDays;
       if (remainingBalanceAfterRequest < -14) {
@@ -264,7 +264,7 @@ export default function LeaveRequestPanel() {
       setLeaveCategory(""); setLeaveType(""); setSelectedDates([]); setReason(""); setIsHalfDay(false); setCustomType("");
       router.refresh();
     } else {
-      alert(`HATA: ${result.message}`);
+      alert(`HATA: ${result.message}`); // Sunucudan dönen ret mesajı burada basılır
     }
     setLoading(false);
   };
@@ -297,34 +297,26 @@ export default function LeaveRequestPanel() {
   // --- WMS İSTATİSTİK HESAPLAMA MOTORU ---
   const leaveStats = useMemo(() => {
     if (!employee || !employee.employment_date) {
-       return { seniority: 0, totalEarned: 0, totalUsed: 0 };
+       return { seniority: 0, totalEarned: 0, totalUsed: 0, usagePercentage: 0 };
     }
 
     const empDate = new Date(employee.employment_date);
     const now = new Date();
     
-    // Kıdem hesaplama (Yıl)
     let yearsDiff = now.getFullYear() - empDate.getFullYear();
     if (now.getMonth() < empDate.getMonth() || (now.getMonth() === empDate.getMonth() && now.getDate() < empDate.getDate())) {
       yearsDiff--;
     }
     
-    // Toplam Hak Edilen İzin (1-5 yıl: 14, 6+ yıl: 20)
     let totalEarned = 0;
     for (let i = 1; i <= yearsDiff; i++) {
       totalEarned += (i >= 6 ? 20 : 14);
     }
 
-    // Toplam Kullanılan (Kazanılan - Mevcut Bakiye)
     const totalUsed = totalEarned - employee.leave_balance;
     const usagePercentage = totalEarned > 0 ? Math.min(100, Math.round((totalUsed / totalEarned) * 100)) : 0;
 
-    return {
-      seniority: yearsDiff,
-      totalEarned,
-      totalUsed,
-      usagePercentage
-    };
+    return { seniority: yearsDiff, totalEarned, totalUsed, usagePercentage };
   }, [employee]);
 
   return (

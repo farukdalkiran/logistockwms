@@ -132,9 +132,6 @@ export async function processApproval(params: ProcessApprovalParams): Promise<Ac
       if (isApprove) {
         // 1. Yıllık İzin Bakiye Kontrolü (Bakiye Yetersizse Reddet)
         if (req.leave_type === "YILLIK_IZIN") {
-          if (employee.leave_balance < req.requested_days) {
-            return { success: false, message: `İPTAL: Personelin yeterli yıllık izni yok. Bakiye: ${employee.leave_balance} Gün` };
-          }
           // Bakiyeden düş
           await supabaseAdmin.from("employees").update({
             leave_balance: employee.leave_balance - req.requested_days

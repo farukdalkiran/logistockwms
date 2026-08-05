@@ -8,14 +8,30 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-export async function uploadArasExcelToServer(parsedData: any[], employeeId: string) {
+export async function uploadArasExcelToServer(parsedData: any[], employeeId: string, fileName: string) {
   try {
     if (!parsedData || parsedData.length === 0) {
       return { success: false, error: "Yüklenen Excel dosyası boş." };
     }
 
-    // Sorunsuz çalışan orijinal map yapısı (Arama bug'ını önlemek için sadece string'lerde trim bırakıldı)
+    // 1. Önce aras_files tablosuna yeni klasörü (Batch Profilini) kaydet
+    const { data: fileRecord, error: fileError } = await supabaseAdmin
+      .from("aras_files")
+      .insert([{ filename: fileName.trim().toUpperCase() }])
+      .select("id")
+      .single();
+
+    // Hata maskelemeyi kaldırdık, gerçek hatayı UI'a iletiyoruz
+    if (fileError || !fileRecord) {
+      console.error("File Creation Error:", fileError);
+      return { success: false, error: `Veritabanı Hatası: ${fileError?.message || "Klasör tablosu bulunamadı."}` };
+    }
+
+    const newFileId = fileRecord.id;
+
+    // 2. Sorunsuz çalışan orijinal map yapısına file_id'yi enjekte et
     const formattedData = parsedData.map((row) => ({
+      file_id: newFileId, 
       shipment_number: row["Shipment number"]?.toString().trim() || null,
       customer_name: row["Customer name"]?.toString().trim() || null,
       email: row["Email"]?.toString().trim() || null,
@@ -32,7 +48,6 @@ export async function uploadArasExcelToServer(parsedData: any[], employeeId: str
       material: row["Material"]?.toString().trim() || null,
       description_text: row["Text"]?.toString().trim() || null,
       
-      // Standart ve stabil Number dönüşümü
       quantity: row["Quantity"] ? Number(row["Quantity"]) : null,
       uom: row["UoM"]?.toString().trim() || null,
       export_price: row["Export price"] ? Number(row["Export price"]) : null,
@@ -47,13 +62,16 @@ export async function uploadArasExcelToServer(parsedData: any[], employeeId: str
       uploaded_by: employeeId,
     }));
 
-    const { error } = await supabaseAdmin
+    // 3. Siparişleri veritabanına aktar
+    const { error: insertError } = await supabaseAdmin
       .from("erp_raw_shipments")
       .insert(formattedData);
 
-    if (error) {
-      console.error("Bulk Insert Error:", error);
-      return { success: false, error: `Veritabanına kayıt reddedildi: ${error.message}` };
+    if (insertError) {
+      console.error("Bulk Insert Error:", insertError);
+      // Hata olursa açılan boş profili/dosyayı temizle (Zorunlu Rollback)
+      await supabaseAdmin.from("aras_files").delete().eq("id", newFileId);
+      return { success: false, error: `Veritabanına kayıt reddedildi: ${insertError.message}` };
     }
 
     revalidatePath("/management/cargo");
