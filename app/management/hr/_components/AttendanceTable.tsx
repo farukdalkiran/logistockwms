@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   User,
@@ -153,6 +153,19 @@ export default function AttendanceTable({
     };
   }, [fetchRecords, branchId]);
 
+  // --- AKILLI SIRALAMA MOTORU (İZİNLERİ EN ALTA İT) ---
+  const sortedRecords = useMemo(() => {
+    if (!records || records.length === 0) return [];
+    
+    // Normal mesai hareketleri
+    const regular = records.filter(r => !(r.status && r.status.startsWith('LEAVE_')));
+    // İzin hareketleri
+    const leaves = records.filter(r => r.status && r.status.startsWith('LEAVE_'));
+    
+    // İzinleri her koşulda dizinin en sonuna ekle
+    return [...regular, ...leaves];
+  }, [records]);
+
   // --- YARDIMCI FONKSİYONLAR ---
   const formatTime = (timeStr: string | null) => {
     if (!timeStr) return "--:--";
@@ -212,7 +225,6 @@ export default function AttendanceTable({
     );
   };
 
-// 🎯 YENİ: ESTETİK, KOMPAKT VE MİNİMAL KART (BADGE) TASARIMI
   const getLateBadge = (lateCount: number) => {
     if (lateCount === 0) {
       return (
@@ -327,7 +339,7 @@ export default function AttendanceTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {loading && records.length === 0 ? (
+            {loading && sortedRecords.length === 0 ? (
               <tr>
                 <td colSpan={8} className="px-3 py-12 text-center bg-slate-50">
                   <div className="flex flex-col items-center justify-center gap-3">
@@ -336,8 +348,8 @@ export default function AttendanceTable({
                   </div>
                 </td>
               </tr>
-            ) : records && records.length > 0 ? (
-              records.map((record: any) => {
+            ) : sortedRecords && sortedRecords.length > 0 ? (
+              sortedRecords.map((record: any) => {
                 const isManager = checkIsManager(record.employees?.position_title);
                 const employeeId = record.employee_id;
                 const monthlyTotal = monthlyTotals[employeeId] || 0;

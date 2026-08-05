@@ -160,10 +160,10 @@ export async function processApproval(params: ProcessApprovalParams): Promise<Ac
         // 4. Puantaj (Attendance) Oluşturma Döngüsü
         for (const dStr of dates) {
           const dIn = new Date(dStr); 
-          dIn.setHours(8, 0, 0, 0); // Orijinal referansı bozmadan yeni instance oluşturuldu
+          dIn.setHours(5, 0, 0, 0); // Orijinal referansı bozmadan yeni instance oluşturuldu
           
           const dOut = new Date(dStr); 
-          dOut.setHours(req.is_half_day ? 12 : 16, 0, 0, 0);
+          dOut.setHours(req.is_half_day ? 9 : 13, 0, 0, 0);
 
           await supabaseAdmin.from("attendance").insert({
             employee_id: employee.id,
