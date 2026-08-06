@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { 
   TerminalSquare, MapPin, ShieldCheck, ArrowLeft, 
-  Barcode, CheckCircle, Package, AlertCircle, Save, AlertTriangle, RotateCcw, Play, Clock
+  Barcode, CheckCircle, Package, AlertCircle, Save, AlertTriangle, RotateCcw, Clock
 } from "lucide-react";
 
 // Server Actions
@@ -13,7 +13,6 @@ import {
   createCargoSessionServer, logCargoBarcodeServer, completeCargoSessionServer 
 } from "@/app/actions/cargo";
 
-// Merkezi konfigürasyon
 import { CARRIERS, validateCargoBarcode } from "@/lib/cargoConfig";
 
 interface ActiveSession {
@@ -26,6 +25,10 @@ export default function CargoInboundPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const barcodeInputRef = useRef<HTMLInputElement>(null);
+
+  // MİMARİ: Mükerrer Okuma Blokajı (Synchronous Lock)
+  // useRef, state gibi render beklemez. Milisaniyelik çift okumaları anında engeller.
+  const scannedSetRef = useRef<Set<string>>(new Set());
 
   // Terminal Props
   const empId = searchParams.get("empId") || "Bilinmiyor";
@@ -45,10 +48,8 @@ export default function CargoInboundPage() {
   const [errorMsg, setErrorMsg] = useState("");
   const [flashStatus, setFlashStatus] = useState<"success" | "error" | null>(null);
   
-  // Modal State
   const [isCompleteModalOpen, setIsCompleteModalOpen] = useState(false);
 
-  // Başlangıç: Şube Çekimi (Server Action)
   useEffect(() => {
     const fetchBranch = async () => {
       const res = await getEmployeeBranchServer(empId);
@@ -61,14 +62,10 @@ export default function CargoInboundPage() {
     if (empId !== "Bilinmiyor") fetchBranch();
   }, [empId]);
 
-  // Açık Oturumları Çek
   useEffect(() => {
-    if (empBranchId && !session) {
-      loadActiveSessions();
-    }
+    if (empBranchId && !session) loadActiveSessions();
   }, [empBranchId, session]);
 
-  // Canlı Saat
   useEffect(() => {
     const updateClock = () => {
       setClock(new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
@@ -78,14 +75,12 @@ export default function CargoInboundPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Terminal Auto-Focus
   useEffect(() => {
     if (session && session.status === "ACTIVE" && !isCompleteModalOpen && barcodeInputRef.current) {
       barcodeInputRef.current.focus();
     }
   }, [session, barcode, errorMsg, flashStatus, isCompleteModalOpen]);
 
-  // Ses Motoru
   const playSound = (type: "success" | "error") => {
     try {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -110,9 +105,7 @@ export default function CargoInboundPage() {
         osc.start();
         osc.stop(ctx.currentTime + 0.3);
       }
-    } catch (e) {
-      // Sessiz yut
-    }
+    } catch (e) {}
   };
 
   const triggerFlash = (status: "success" | "error") => {
@@ -121,7 +114,6 @@ export default function CargoInboundPage() {
     return () => clearTimeout(timeout);
   };
 
-  // MİMARİ: Açık Oturumları Yükle
   const loadActiveSessions = async () => {
     if (!empBranchId) return;
     const res = await getActiveCargoSessions(empBranchId);
@@ -132,7 +124,6 @@ export default function CargoInboundPage() {
     }
   };
 
-  // MİMARİ: Var Olan Bir Oturuma Devam Et (Resume)
   const handleResumeSession = async (activeSession: ActiveSession) => {
     setIsLoading(true);
     setErrorMsg("");
@@ -144,6 +135,10 @@ export default function CargoInboundPage() {
         time: "GEÇMİŞ" 
       }));
       setScannedItems(mappedLogs);
+      
+      // LOG KİLİDİNİ YÜKLE: Geçmiş kargoları hafızaya göm (Senkron Hız için)
+      scannedSetRef.current = new Set(res.data.map((log: any) => log.tracking_number));
+      
       setSession({ id: activeSession.id, carrier: activeSession.carrier_name, status: "ACTIVE" });
       playSound("success");
     } else {
@@ -153,7 +148,6 @@ export default function CargoInboundPage() {
     setIsLoading(false);
   };
 
-  // MİMARİ: Sıfırdan Yeni Oturum Başlat
   const handleStartNewSession = (carrierName: string) => {
     if (!empBranchId) {
       setErrorMsg("Güvenlik Hatası: Şube yetkisi doğrulanamadı!");
@@ -161,11 +155,12 @@ export default function CargoInboundPage() {
       return;
     }
     setScannedItems([]);
+    scannedSetRef.current.clear(); // Yeni oturum, temiz kilit hafızası
     setSession({ carrier: carrierName, status: "ACTIVE" });
     playSound("success");
   };
 
-  // ANA MOTOR: Barkod Okutma (Server Action Loglama & TS Strict Fix)
+  // ANA MOTOR: Barkod Okutma (Race Condition Korumalı)
   const handleScan = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && barcode.trim() !== "") {
       const scannedCode = barcode.trim().toUpperCase();
@@ -182,15 +177,18 @@ export default function CargoInboundPage() {
         playSound("error"); triggerFlash("error"); return;
       }
 
-      if (scannedItems.some(item => item.tracking === scannedCode)) {
+      // 1. ZIRH: Senkron Ref (Set) Kullanımı. Asenkron State gecikmesine izin vermez.
+      if (scannedSetRef.current.has(scannedCode)) {
         setErrorMsg(`MÜKERRER: ${scannedCode} ZATEN OKUTULDU!`);
         playSound("error"); triggerFlash("error"); return;
       }
 
+      // KİLİTLE: Diğer milisaniyelik çift okumaları anında engellemek için listeye ekle.
+      scannedSetRef.current.add(scannedCode);
+
       setErrorMsg(""); 
       let currentSessionId = session.id;
 
-      // Lazy Insertion: İlk barkodsa oturumu DB'ye kaydet
       if (!currentSessionId) {
         if (!empBranchId) return;
         const res = await createCargoSessionServer(empId, empBranchId, session.carrier);
@@ -199,13 +197,14 @@ export default function CargoInboundPage() {
           setSession(prev => prev ? { ...prev, id: currentSessionId } : null);
         } else {
           setErrorMsg("SİSTEM HATASI: Kargo oturumu oluşturulamadı!");
+          scannedSetRef.current.delete(scannedCode); // Başarısız olursa kilidi aç
           playSound("error"); triggerFlash("error"); return;
         }
       }
 
-      // VERCEL TS STRICT FIX: currentSessionId'nin kesinlikle string olduğunu garantile (Type Guard)
       if (!currentSessionId) {
         setErrorMsg("SİSTEM HATASI: Oturum Kimliği Doğrulanamadı!");
+        scannedSetRef.current.delete(scannedCode);
         return;
       }
 
@@ -214,17 +213,17 @@ export default function CargoInboundPage() {
       playSound("success");
       triggerFlash("success");
 
-      // Arka plan kayıt (currentSessionId artık TS için güvenli bir string)
+      // Arka plan kayıt
       const logRes = await logCargoBarcodeServer(currentSessionId, scannedCode);
       if (!logRes.success) {
-        setErrorMsg(`UYARI: ${scannedCode} ağ kopması nedeniyle kaydedilemedi!`);
+        setErrorMsg(`UYARI: ${scannedCode} ağ kopması nedeniyle veya SQL RLS nedeniyle kaydedilemedi!`);
         playSound("error"); triggerFlash("error");
+        scannedSetRef.current.delete(scannedCode); // Hata varsa blokajı kaldır ki tekrar denenebilsin
         setScannedItems(prev => prev.filter(i => i.tracking !== scannedCode));
       }
     }
   };
 
-  // MÜHÜRLE VE ÇIK (Server Action)
   const handleCompleteSession = async () => {
     if (!session) return;
     
@@ -235,7 +234,8 @@ export default function CargoInboundPage() {
     }
 
     setIsLoading(true);
-    const res = await completeCargoSessionServer(session.id, scannedItems.length);
+    // Güvenlik artırıldı: Sadece state'e güvenmek yerine Set büyüklüğünü gönderiyoruz (Gerçek Unique Adet)
+    const res = await completeCargoSessionServer(session.id, scannedSetRef.current.size);
     
     if (res.success) {
       playSound("success");
@@ -249,7 +249,6 @@ export default function CargoInboundPage() {
     setIsLoading(false);
   };
 
-  // Güvenli Geri Dönüş
   const handleBack = () => {
     if (session) {
       setSession(null); 
@@ -263,7 +262,6 @@ export default function CargoInboundPage() {
       <div className={`min-h-screen font-['Quicksand'] select-none flex flex-col transition-colors duration-200
         ${flashStatus === "success" ? "bg-green-500/20" : flashStatus === "error" ? "bg-[#dc3545]/20" : "bg-slate-100"}`}>
         
-        {/* 1. DARK-INDUSTRIAL HEADING */}
         <div className="bg-slate-900 shadow-md flex flex-col shrink-0 border-b-4 border-[#dc3545]">
           <div className="bg-[#dc3545] py-3 px-4 flex justify-between items-center">
             <button onClick={handleBack} className="text-white flex items-center gap-2 active:scale-95 transition-transform hover:text-slate-200">
@@ -300,7 +298,6 @@ export default function CargoInboundPage() {
           </div>
         </div>
 
-        {/* 2. DİNAMİK ANA EKRAN */}
         <div className="p-4 flex-1 flex flex-col max-w-3xl mx-auto w-full gap-5">
           
           {errorMsg && (
@@ -311,10 +308,8 @@ export default function CargoInboundPage() {
           )}
 
           {!session ? (
-            // AŞAMA 1: OTURUM SEÇİM EKRANI
             <div className="flex flex-col gap-8 w-full animate-in fade-in duration-300">
               
-              {/* Yarım Kalan Açık Oturumlar */}
               {activeSessions.length > 0 && (
                 <div className="bg-slate-900 shadow-[6px_6px_0px_#cbd5e1] rounded-none border-2 border-slate-800">
                   <div className="bg-[#dc3545] p-3.5 flex items-center gap-2 border-b-2 border-slate-800">
@@ -351,7 +346,6 @@ export default function CargoInboundPage() {
                 </div>
               )}
 
-              {/* Yeni Oturum Başlat */}
               <div className="bg-white border-2 border-slate-300 shadow-[6px_6px_0px_#e2e8f0] rounded-none">
                 <div className="bg-slate-100 border-b-2 border-slate-300 p-3.5 flex items-center gap-2">
                   <Package size={18} className="text-slate-800" />
@@ -385,7 +379,6 @@ export default function CargoInboundPage() {
 
             </div>
           ) : (
-            // AŞAMA 2: TERMİNAL OKUTMA EKRANI
             <div className="flex flex-col gap-5 flex-1 animate-in fade-in duration-300 h-full">
               
               <div className="bg-white p-5 border-2 border-slate-300 shadow-[6px_6px_0px_#e2e8f0] rounded-none">
@@ -461,7 +454,6 @@ export default function CargoInboundPage() {
         </div>
       </div>
 
-      {/* KRİTİK ONAY MODALI (MÜHÜRLEME) */}
       {isCompleteModalOpen && (
         <div className="fixed inset-0 z-[999] bg-slate-900/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in-95 duration-200 font-['Quicksand']">
           <div className="bg-white max-w-md w-full border-4 border-[#dc3545] shadow-[16px_16px_0px_rgba(0,0,0,0.3)] rounded-none">
