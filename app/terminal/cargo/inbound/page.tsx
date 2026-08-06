@@ -466,7 +466,7 @@ export default function CargoInboundPage() {
             <div className="p-8 flex flex-col gap-6">
               <div className="bg-red-50 border-2 border-red-200 p-4">
                 <p className="text-[#dc3545] font-black text-lg uppercase leading-snug text-center">
-                  SAYIM KAPATILACAKTIR!
+                  SAYIM KAPATILACAKTIR! 
                 </p>
               </div>
               <p className="text-slate-700 font-bold text-sm leading-relaxed text-center">
