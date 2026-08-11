@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { 
   TerminalSquare, MapPin, ShieldCheck, ArrowLeft, 
-  Barcode, CheckCircle, Package, AlertCircle, Save, AlertTriangle, RotateCcw, Clock
+  Barcode, CheckCircle, Package, AlertCircle, Save, AlertTriangle, RotateCcw, Clock, WifiOff, Loader2
 } from "lucide-react";
 
 // Server Actions
@@ -26,9 +26,12 @@ export default function CargoInboundPage() {
   const searchParams = useSearchParams();
   const barcodeInputRef = useRef<HTMLInputElement>(null);
 
-  // MİMARİ: Mükerrer Okuma Blokajı (Synchronous Lock)
-  // useRef, state gibi render beklemez. Milisaniyelik çift okumaları anında engeller.
+  // MİMARİ: Mükerrer Okuma Blokajı
   const scannedSetRef = useRef<Set<string>>(new Set());
+  
+  // YENİ ZIRH: İşlemdeki isteklerin sayısını tutar (Race condition engellemek için)
+  const pendingCountRef = useRef<number>(0);
+  const [pendingUI, setPendingUI] = useState<number>(0); 
 
   // Terminal Props
   const empId = searchParams.get("empId") || "Bilinmiyor";
@@ -46,7 +49,7 @@ export default function CargoInboundPage() {
   
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-  const [flashStatus, setFlashStatus] = useState<"success" | "error" | null>(null);
+  const [flashStatus, setFlashStatus] = useState<"success" | "error" | "warning" | null>(null);
   
   const [isCompleteModalOpen, setIsCompleteModalOpen] = useState(false);
 
@@ -81,7 +84,8 @@ export default function CargoInboundPage() {
     }
   }, [session, barcode, errorMsg, flashStatus, isCompleteModalOpen]);
 
-  const playSound = (type: "success" | "error") => {
+  // YENİ: Maksimum ses seviyesi ve detaylı hata tonları
+  const playSound = (type: "success" | "error" | "warning" | "offline") => {
     try {
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioContextClass) return;
@@ -92,25 +96,40 @@ export default function CargoInboundPage() {
       osc.connect(gain);
       gain.connect(ctx.destination);
 
+      // Sesi yükselttik (Önceki 0.1/0.2'ydi, şimdi 0.8)
+      gain.gain.setValueAtTime(0.8, ctx.currentTime);
+
       if (type === "success") {
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(880, ctx.currentTime);
-        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        osc.type = "square"; // Sine yerine square daha delici ve net duyulur
+        osc.frequency.setValueAtTime(1000, ctx.currentTime);
         osc.start();
-        osc.stop(ctx.currentTime + 0.15);
-      } else {
+        osc.stop(ctx.currentTime + 0.1);
+      } else if (type === "error") {
         osc.type = "sawtooth";
         osc.frequency.setValueAtTime(150, ctx.currentTime);
-        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.4);
+      } else if (type === "warning") {
+        // YAVAŞLA UYARISI: İnen tiz bir ses
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(800, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.3);
         osc.start();
         osc.stop(ctx.currentTime + 0.3);
+      } else if (type === "offline") {
+        // İNTERNET YOK UYARISI: İki farklı kalın ton (Alarm gibi)
+        osc.type = "square";
+        osc.frequency.setValueAtTime(300, ctx.currentTime);
+        osc.frequency.setValueAtTime(400, ctx.currentTime + 0.2);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.4);
       }
     } catch (e) {}
   };
 
-  const triggerFlash = (status: "success" | "error") => {
+  const triggerFlash = (status: "success" | "error" | "warning") => {
     setFlashStatus(status);
-    const timeout = setTimeout(() => setFlashStatus(null), 800);
+    const timeout = setTimeout(() => setFlashStatus(null), status === "success" ? 400 : 800);
     return () => clearTimeout(timeout);
   };
 
@@ -135,10 +154,7 @@ export default function CargoInboundPage() {
         time: "GEÇMİŞ" 
       }));
       setScannedItems(mappedLogs);
-      
-      // LOG KİLİDİNİ YÜKLE: Geçmiş kargoları hafızaya göm (Senkron Hız için)
       scannedSetRef.current = new Set(res.data.map((log: any) => log.tracking_number));
-      
       setSession({ id: activeSession.id, carrier: activeSession.carrier_name, status: "ACTIVE" });
       playSound("success");
     } else {
@@ -151,20 +167,33 @@ export default function CargoInboundPage() {
   const handleStartNewSession = (carrierName: string) => {
     if (!empBranchId) {
       setErrorMsg("Güvenlik Hatası: Şube yetkisi doğrulanamadı!");
-      triggerFlash("error");
-      return;
+      triggerFlash("error"); return;
     }
     setScannedItems([]);
-    scannedSetRef.current.clear(); // Yeni oturum, temiz kilit hafızası
+    scannedSetRef.current.clear();
+    pendingCountRef.current = 0;
+    setPendingUI(0);
     setSession({ carrier: carrierName, status: "ACTIVE" });
     playSound("success");
   };
 
-  // ANA MOTOR: Barkod Okutma (Race Condition Korumalı)
+  // ANA MOTOR YENİLENDİ
   const handleScan = async (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && barcode.trim() !== "") {
       const scannedCode = barcode.trim().toUpperCase();
       setBarcode(""); 
+
+      // 1. ZIRH: Ağ Kontrolü
+      if (!navigator.onLine) {
+        setErrorMsg("İNTERNET KESİNTİSİ: Lütfen bağlantınızı kontrol edin!");
+        playSound("offline"); triggerFlash("error"); return;
+      }
+
+      // 2. ZIRH: Hız Limitörü (Bekleyen 3'ten fazla veritabanı isteği varsa terminali durdur)
+      if (pendingCountRef.current >= 3) {
+        setErrorMsg("SİSTEM YETİŞEMİYOR: Lütfen daha yavaş okutun!");
+        playSound("warning"); triggerFlash("warning"); return;
+      }
 
       if (!session || session.status !== "ACTIVE") {
         setErrorMsg("HATA: Oturum kapalı, okutma yapılamaz!");
@@ -177,16 +206,16 @@ export default function CargoInboundPage() {
         playSound("error"); triggerFlash("error"); return;
       }
 
-      // 1. ZIRH: Senkron Ref (Set) Kullanımı. Asenkron State gecikmesine izin vermez.
+      // 3. ZIRH: Senkron Mükerrer Kontrolü
       if (scannedSetRef.current.has(scannedCode)) {
         setErrorMsg(`MÜKERRER: ${scannedCode} ZATEN OKUTULDU!`);
         playSound("error"); triggerFlash("error"); return;
       }
 
-      // KİLİTLE: Diğer milisaniyelik çift okumaları anında engellemek için listeye ekle.
+      // KİLİTLE & EKRANA YANSIT
       scannedSetRef.current.add(scannedCode);
-
       setErrorMsg(""); 
+      
       let currentSessionId = session.id;
 
       if (!currentSessionId) {
@@ -197,15 +226,9 @@ export default function CargoInboundPage() {
           setSession(prev => prev ? { ...prev, id: currentSessionId } : null);
         } else {
           setErrorMsg("SİSTEM HATASI: Kargo oturumu oluşturulamadı!");
-          scannedSetRef.current.delete(scannedCode); // Başarısız olursa kilidi aç
+          scannedSetRef.current.delete(scannedCode); 
           playSound("error"); triggerFlash("error"); return;
         }
-      }
-
-      if (!currentSessionId) {
-        setErrorMsg("SİSTEM HATASI: Oturum Kimliği Doğrulanamadı!");
-        scannedSetRef.current.delete(scannedCode);
-        return;
       }
 
       const nowTime = new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -213,29 +236,43 @@ export default function CargoInboundPage() {
       playSound("success");
       triggerFlash("success");
 
-      // Arka plan kayıt
-      const logRes = await logCargoBarcodeServer(currentSessionId, scannedCode);
-      if (!logRes.success) {
-        setErrorMsg(`UYARI: ${scannedCode} ağ kopması nedeniyle veya SQL RLS nedeniyle kaydedilemedi!`);
-        playSound("error"); triggerFlash("error");
-        scannedSetRef.current.delete(scannedCode); // Hata varsa blokajı kaldır ki tekrar denenebilsin
+      // ARKA PLAN KAYIT SÜRECİ (Kuyruk Takibi)
+      pendingCountRef.current += 1;
+      setPendingUI(pendingCountRef.current);
+
+      try {
+        const logRes = await logCargoBarcodeServer(currentSessionId, scannedCode);
+        if (!logRes.success) {
+          // BAŞARISIZ OLURSA GERİ AL
+          scannedSetRef.current.delete(scannedCode);
+          setScannedItems(prev => prev.filter(i => i.tracking !== scannedCode));
+          setErrorMsg(`UYARI: ${scannedCode} kaydedilemedi (Veritabanı Hatası)!`);
+          playSound("error"); triggerFlash("error");
+        }
+      } catch (err) {
+        // AĞ KOPMASI DURUMUNDA GERİ AL
+        scannedSetRef.current.delete(scannedCode);
         setScannedItems(prev => prev.filter(i => i.tracking !== scannedCode));
+        setErrorMsg(`BAĞLANTI KOPTU: ${scannedCode} sunucuya iletilemedi!`);
+        playSound("offline"); triggerFlash("error");
+      } finally {
+        pendingCountRef.current -= 1;
+        setPendingUI(pendingCountRef.current);
       }
     }
   };
 
   const handleCompleteSession = async () => {
-    if (!session) return;
-    
-    if (!session.id) {
+    if (!session || !session.id) {
       setSession(null);
       setIsCompleteModalOpen(false);
       return;
     }
 
     setIsLoading(true);
-    // Güvenlik artırıldı: Sadece state'e güvenmek yerine Set büyüklüğünü gönderiyoruz (Gerçek Unique Adet)
-    const res = await completeCargoSessionServer(session.id, scannedSetRef.current.size);
+    // Güvenlik artırıldı: Sadece başarılı olarak SET'te kalan son sayıyı gönderiyoruz.
+    const finalSize = scannedSetRef.current.size;
+    const res = await completeCargoSessionServer(session.id, finalSize);
     
     if (res.success) {
       playSound("success");
@@ -260,7 +297,7 @@ export default function CargoInboundPage() {
   return (
     <>
       <div className={`min-h-screen font-['Quicksand'] select-none flex flex-col transition-colors duration-200
-        ${flashStatus === "success" ? "bg-green-500/20" : flashStatus === "error" ? "bg-[#dc3545]/20" : "bg-slate-100"}`}>
+        ${flashStatus === "success" ? "bg-green-500/20" : flashStatus === "error" ? "bg-[#dc3545]/20" : flashStatus === "warning" ? "bg-yellow-500/20" : "bg-slate-100"}`}>
         
         <div className="bg-slate-900 shadow-md flex flex-col shrink-0 border-b-4 border-[#dc3545]">
           <div className="bg-[#dc3545] py-3 px-4 flex justify-between items-center">
@@ -300,6 +337,15 @@ export default function CargoInboundPage() {
 
         <div className="p-4 flex-1 flex flex-col max-w-3xl mx-auto w-full gap-5">
           
+          {!navigator.onLine && (
+             <div className="bg-yellow-500 text-slate-900 p-4 flex items-center gap-3 shadow-[4px_4px_0px_rgba(0,0,0,0.2)] animate-in slide-in-from-top-2 rounded-none border-l-4 border-slate-900">
+               <WifiOff size={24} className="shrink-0" />
+               <span className="text-sm font-black uppercase tracking-wider leading-snug">
+                 İnternet bağlantınız koptu! Lütfen bağlantıyı kontrol edin.
+               </span>
+             </div>
+          )}
+
           {errorMsg && (
             <div className="bg-[#dc3545] text-white p-4 flex items-center gap-3 shadow-[4px_4px_0px_rgba(0,0,0,0.2)] animate-in slide-in-from-top-2 rounded-none border-l-4 border-white">
               <AlertCircle size={24} className="shrink-0 text-white" />
@@ -309,7 +355,7 @@ export default function CargoInboundPage() {
 
           {!session ? (
             <div className="flex flex-col gap-8 w-full animate-in fade-in duration-300">
-              
+              {/* Eski Oturumlar Bölümü (Değiştirilmedi) */}
               {activeSessions.length > 0 && (
                 <div className="bg-slate-900 shadow-[6px_6px_0px_#cbd5e1] rounded-none border-2 border-slate-800">
                   <div className="bg-[#dc3545] p-3.5 flex items-center gap-2 border-b-2 border-slate-800">
@@ -346,6 +392,7 @@ export default function CargoInboundPage() {
                 </div>
               )}
 
+              {/* Yeni Oturum Bölümü (Değiştirilmedi) */}
               <div className="bg-white border-2 border-slate-300 shadow-[6px_6px_0px_#e2e8f0] rounded-none">
                 <div className="bg-slate-100 border-b-2 border-slate-300 p-3.5 flex items-center gap-2">
                   <Package size={18} className="text-slate-800" />
@@ -362,12 +409,7 @@ export default function CargoInboundPage() {
                       className="w-full bg-slate-50 hover:bg-slate-100 border-2 border-slate-300 p-4 flex flex-col items-center justify-center gap-3 transition-colors shadow-sm active:scale-[0.98] h-32 rounded-none border-l-8 border-l-[#dc3545]"
                     >
                       <div className="h-10 w-full flex items-center justify-center bg-transparent opacity-80 mix-blend-multiply">
-                        <img 
-                          src={c.logo} 
-                          alt={`${c.name} Logo`} 
-                          className="max-h-full max-w-full object-contain"
-                          crossOrigin="anonymous"
-                        />
+                        <img src={c.logo} alt={`${c.name} Logo`} className="max-h-full max-w-full object-contain" crossOrigin="anonymous" />
                       </div>
                       <span className="font-black text-[13px] text-slate-800 uppercase tracking-widest">
                         {c.name}
@@ -376,7 +418,6 @@ export default function CargoInboundPage() {
                   ))}
                 </div>
               </div>
-
             </div>
           ) : (
             <div className="flex flex-col gap-5 flex-1 animate-in fade-in duration-300 h-full">
@@ -416,9 +457,16 @@ export default function CargoInboundPage() {
                   <span className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-2">
                     <CheckCircle size={18} className="text-green-500"/> OKUTULAN HAVUZ
                   </span>
-                  <span className="bg-[#dc3545] text-white text-xs font-black px-4 py-1.5 rounded-none border border-red-400 shadow-inner">
-                    {scannedItems.length} ADET
-                  </span>
+                  
+                  {pendingUI > 0 ? (
+                    <span className="bg-yellow-500 text-slate-900 text-[10px] font-black px-3 py-1.5 rounded-none shadow-inner flex items-center gap-2">
+                      <Loader2 size={12} className="animate-spin" /> {pendingUI} KAYIT BEKLİYOR
+                    </span>
+                  ) : (
+                    <span className="bg-[#dc3545] text-white text-xs font-black px-4 py-1.5 rounded-none border border-red-400 shadow-inner">
+                      {scannedItems.length} ADET
+                    </span>
+                  )}
                 </div>
                 
                 <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50 custom-scrollbar">
@@ -442,12 +490,17 @@ export default function CargoInboundPage() {
                 </div>
               </div>
 
+              {/* BUTON BLOKAJI: Arka planda kayıt varsa butonu kilitler */}
               <button
-                disabled={isLoading}
+                disabled={isLoading || pendingUI > 0}
                 onClick={() => setIsCompleteModalOpen(true)}
                 className="w-full bg-[#dc3545] hover:bg-red-700 text-white font-black text-base uppercase tracking-widest p-5 rounded-none flex items-center justify-center gap-3 transition-colors shadow-[6px_6px_0px_rgba(220,53,69,0.3)] disabled:opacity-50 disabled:shadow-none mt-2 shrink-0 border-2 border-red-800 active:translate-y-[2px]"
               >
-                <Save size={24} strokeWidth={2.5} /> SAYIMI BİTİR VE MÜHÜRLE
+                {pendingUI > 0 ? (
+                  <><Loader2 size={24} className="animate-spin" /> SENKRONİZE EDİLİYOR...</>
+                ) : (
+                  <><Save size={24} strokeWidth={2.5} /> SAYIMI BİTİR VE MÜHÜRLE</>
+                )}
               </button>
             </div>
           )}
