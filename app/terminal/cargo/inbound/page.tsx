@@ -241,7 +241,9 @@ export default function CargoInboundPage() {
       setPendingUI(pendingCountRef.current);
 
       try {
-        const logRes = await logCargoBarcodeServer(currentSessionId, scannedCode);
+        // ÇÖZÜM: TypeScript derleyicisini rahatlatmak ve Vercel Build hatasını engellemek için Type Assertion (as string) uygulandı.
+        const logRes = await logCargoBarcodeServer(currentSessionId as string, scannedCode);
+        
         if (!logRes.success) {
           // BAŞARISIZ OLURSA GERİ AL
           scannedSetRef.current.delete(scannedCode);
@@ -355,7 +357,7 @@ export default function CargoInboundPage() {
 
           {!session ? (
             <div className="flex flex-col gap-8 w-full animate-in fade-in duration-300">
-              {/* Eski Oturumlar Bölümü (Değiştirilmedi) */}
+              {/* Eski Oturumlar Bölümü */}
               {activeSessions.length > 0 && (
                 <div className="bg-slate-900 shadow-[6px_6px_0px_#cbd5e1] rounded-none border-2 border-slate-800">
                   <div className="bg-[#dc3545] p-3.5 flex items-center gap-2 border-b-2 border-slate-800">
@@ -392,7 +394,7 @@ export default function CargoInboundPage() {
                 </div>
               )}
 
-              {/* Yeni Oturum Bölümü (Değiştirilmedi) */}
+              {/* Yeni Oturum Bölümü */}
               <div className="bg-white border-2 border-slate-300 shadow-[6px_6px_0px_#e2e8f0] rounded-none">
                 <div className="bg-slate-100 border-b-2 border-slate-300 p-3.5 flex items-center gap-2">
                   <Package size={18} className="text-slate-800" />
