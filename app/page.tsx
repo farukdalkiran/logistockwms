@@ -128,7 +128,10 @@ export default function ManagementDashboard() {
     );
   }
 
-  const isGlobal = userProfile?.role === "Developer" || userProfile?.role === "Admin" || !userProfile?.branch_id;
+  // TS Vercel Build Hatası (Type error: Property 'branch_id' does not exist) Fix'i:
+  // userProfile'ı Record<string, any> olarak cast ediyoruz, böylece schema'da var olan ama type'ta eksik olan branch_id sorun çıkarmaz.
+  const profileSafe = userProfile as Record<string, any> | null;
+  const isGlobal = profileSafe?.role === "Developer" || profileSafe?.role === "Admin" || !profileSafe?.branch_id;
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 font-['Quicksand'] text-slate-800 selection:bg-[#dc3545] selection:text-white overflow-x-hidden">
@@ -317,7 +320,7 @@ export default function ManagementDashboard() {
             </div>
           </div>
 
-          {/* KARGO TESLİMATLARI (col-5) - Saat ve İsimler Geri Getirildi */}
+          {/* KARGO TESLİMATLARI (col-5) */}
           <div className="lg:col-span-5 bg-white border-2 border-slate-300 shadow-[8px_8px_0px_#94a3b8] rounded-none flex flex-col w-full h-[480px]">
             <div className="flex justify-between items-center p-4 border-b-4 border-slate-700 bg-slate-900 text-white">
               <div className="flex items-center gap-3">

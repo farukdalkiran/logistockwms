@@ -1,8 +1,13 @@
 // types/index.ts
 
-export type Role = 'Admin' | 'Developer' | 'Sube_Yoneticisi';
-export type BranchType = 'Depo' | 'Mağaza';
-export type TransferStatus = 'pending' | 'picking' | 'in_transit' | 'completed' | 'cancelled';
+export type Role = "Admin" | "Developer" | "Sube_Yoneticisi";
+export type BranchType = "Depo" | "Mağaza";
+export type TransferStatus =
+  | "pending"
+  | "picking"
+  | "in_transit"
+  | "completed"
+  | "cancelled";
 
 export interface Branch {
   id: string;
@@ -12,7 +17,7 @@ export interface Branch {
 
 export interface Profile {
   id: string; // auth.users.id ile eşleşir
-  branch_id: string | null; // Developer (Örn: Faruk Dalkıran) için NULL olabilir
+  branch_id?: string | null;
   role: Role;
   last_password_change: string;
 }
@@ -35,7 +40,7 @@ export interface ShiftAttendance {
   end_time: string;
   check_in_time: string | null;
   check_out_time: string | null;
-  status: 'onTime' | 'late' | 'absent' | 'excused';
+  status: "onTime" | "late" | "absent" | "excused";
   manager_id: string | null; // Manuel düzeltme yapan yöneticinin ID'si
 }
 
@@ -80,13 +85,19 @@ export interface TransferItem {
   sent_qty: number;
   received_qty: number;
   products?: Product; // Join işlemleri için
-  stocks?: Stock[];   // Raf sırasına göre dizmek için join
+  stocks?: Stock[]; // Raf sırasına göre dizmek için join
 }
 
 export interface TransactionLog {
   id: string;
   employee_id: string; // İşlemi yapan 5 haneli ID
-  action_type: 'check_in' | 'check_out' | 'pick_item' | 'receive_item' | 'manual_override' | 'stock_update';
+  action_type:
+    | "check_in"
+    | "check_out"
+    | "pick_item"
+    | "receive_item"
+    | "manual_override"
+    | "stock_update";
   description: string;
   created_at: string;
 }
