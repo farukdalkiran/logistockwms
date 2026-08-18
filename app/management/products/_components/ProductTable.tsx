@@ -22,12 +22,13 @@ import {
   Layers,
   Tags,
   ArrowDownUp,
-  RotateCcw
+  RotateCcw,
 } from "lucide-react";
 
 interface Product {
   id: string;
   barcode: string;
+  alt_barcodes: string[]; // YENİ EKLENEN
   sku: string;
   name: string;
   category: string;
@@ -114,8 +115,9 @@ export default function ProductsTable({
       let query = supabase.from("products").select("*", { count: "exact" });
 
       if (debouncedSearch) {
+        // İsim, SKU, Ana Barkod veya Alternatif Barkod Dizisinde (exact match) arama
         query = query.or(
-          `barcode.ilike.%${debouncedSearch}%,sku.ilike.%${debouncedSearch}%,name.ilike.%${debouncedSearch}%`,
+          `barcode.ilike.%${debouncedSearch}%,sku.ilike.%${debouncedSearch}%,name.ilike.%${debouncedSearch}%,alt_barcodes.cs.{${debouncedSearch}}`,
         );
       }
       if (filters.category !== "all")
@@ -310,20 +312,21 @@ export default function ProductsTable({
   return (
     <div className="flex flex-col h-full w-full">
       <div className="flex-1 min-h-0 bg-white rounded-sm shadow-sm border border-slate-200 flex flex-col overflow-hidden">
-{/* ================================================================= */}
+        {/* ================================================================= */}
         {/* BİRLEŞİK KONTROL MERKEZİ (FERAH, AYDINLIK VE YÜKSEK KONTRASTLI) */}
         {/* ================================================================= */}
         <div className="bg-white border border-slate-200 border-t-4 border-t-[#dc3545] rounded-sm shadow-sm flex flex-col shrink-0 relative overflow-hidden z-10 font-['Quicksand']">
-          
           {/* Hafif Endüstriyel Dokunuş (Sadece çok silik bir arka plan çizgisi) */}
           <div className="absolute inset-0 opacity-[0.015] bg-[repeating-linear-gradient(45deg,#000,#000_1px,transparent_1px,transparent_10px)] pointer-events-none"></div>
 
           {/* 1. SATIR: HIZLI ARAMA VE DIŞA AKTARMA ARAÇLARI */}
           <div className="p-4 border-b border-slate-100 bg-slate-50/80 flex flex-col md:flex-row items-center justify-between gap-4 relative z-10">
-            
             {/* Arama Çubuğu (Light Tema Yüksek Kontrast) */}
             <div className="relative w-full md:max-w-lg">
-              <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Search
+                size={16}
+                className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+              />
               <input
                 type="text"
                 placeholder="Barkod, SKU veya Ürün Adı ile hızlı ara..."
@@ -370,7 +373,6 @@ export default function ProductsTable({
 
           {/* 2. SATIR: SABİT DETAYLI FİLTRELEME PANELİ */}
           <div className="px-5 py-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 relative z-10 bg-white">
-            
             {/* 1. Ürün Sınıfı */}
             <div className="space-y-1.5">
               <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
@@ -380,7 +382,11 @@ export default function ProductsTable({
                 className="w-full h-10 bg-slate-50 border border-slate-200 text-slate-700 rounded-sm px-3 text-sm outline-none focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] font-bold shadow-sm transition-all cursor-pointer hover:border-slate-300"
                 value={filters.type}
                 onChange={(e) => {
-                  setFilters((f) => ({ ...f, type: e.target.value, category: "all" }));
+                  setFilters((f) => ({
+                    ...f,
+                    type: e.target.value,
+                    category: "all",
+                  }));
                   setPage(1);
                 }}
               >
@@ -416,7 +422,8 @@ export default function ProductsTable({
             {/* 3. Sıralama Ölçütü */}
             <div className="space-y-1.5">
               <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
-                <ArrowDownUp size={14} className="text-[#dc3545]" /> Sıralama Algoritması
+                <ArrowDownUp size={14} className="text-[#dc3545]" /> Sıralama
+                Algoritması
               </label>
               <select
                 className="w-full h-10 bg-slate-50 border border-slate-200 text-slate-700 rounded-sm px-3 text-sm outline-none focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] font-bold shadow-sm transition-all cursor-pointer hover:border-slate-300"
@@ -427,11 +434,17 @@ export default function ProductsTable({
                   setPage(1);
                 }}
               >
-                <option value="created_at-desc">En Yeni Eklenenler (Önce)</option>
-                <option value="created_at-asc">En Eski Eklenenler (Önce)</option>
+                <option value="created_at-desc">
+                  En Yeni Eklenenler (Önce)
+                </option>
+                <option value="created_at-asc">
+                  En Eski Eklenenler (Önce)
+                </option>
                 <option value="name-asc">İsimlendirme (A-Z)</option>
                 <option value="name-desc">İsimlendirme (Z-A)</option>
-                <option value="max_order_limit-desc">Sipariş Limiti (Yüksekten Düşüğe)</option>
+                <option value="max_order_limit-desc">
+                  Sipariş Limiti (Yüksekten Düşüğe)
+                </option>
               </select>
             </div>
 
@@ -449,7 +462,6 @@ export default function ProductsTable({
                 <RotateCcw size={14} strokeWidth={2.5} /> FİLTRELERİ SIFIRLA
               </button>
             </div>
-
           </div>
         </div>
 
@@ -754,6 +766,7 @@ export default function ProductsTable({
                     title="Barkod değiştirilemez"
                   />
                 </div>
+                
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-slate-600">
                     SKU
@@ -769,6 +782,7 @@ export default function ProductsTable({
                       })
                     }
                   />
+                  
                 </div>
                 <div className="space-y-1 col-span-2">
                   <label className="text-xs font-bold text-slate-600">

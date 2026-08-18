@@ -7,6 +7,7 @@ import * as XLSX from "xlsx";
 import {
   FileSpreadsheet,
   ChevronLeft,
+  ChevronRight,
   CheckCircle,
   AlertTriangle,
   Plus,
@@ -70,6 +71,10 @@ export default function ExcelTransferCreatePage() {
   const [newBarcode, setNewBarcode] = useState("");
   const [newQty, setNewQty] = useState("");
 
+  // Sayfalama (Pagination) State'leri
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
   // Başlangıç verilerini çek (Şubeler ve aktif personelin şubesi)
   useEffect(() => {
     const fetchInitialData = async () => {
@@ -129,7 +134,7 @@ export default function ExcelTransferCreatePage() {
     }
   };
 
-  // --- EXCEL İŞLEME VE VERİTABANI ÇAPRAZ KONTROLÜ ---
+  // --- EXCEL İŞLEME VE VERİTABANI ÇAPRAZ KONTROLÜ (KESİN EŞLEŞTİRME VE 20'Lİ BÖLÜM) ---
   const processExcelFile = async () => {
     if (!file) return alert("Lütfen bir excel dosyası seçin.");
 
@@ -151,55 +156,103 @@ export default function ExcelTransferCreatePage() {
 
     setIsProcessing(true);
     await generateNextLgsCodePreview();
+    setCurrentPage(1);
 
     try {
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data, { type: "array" });
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet);
+      
+      const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" }) as any[][];
 
-      if (jsonData.length === 0) throw new Error("Yüklenen Excel dosyası boş.");
+      if (rows.length < 2) throw new Error("Yüklenen Excel dosyası boş veya okunamadı.");
 
-      // Sütun eşleştirme (Case-insensitive)
-      const parsedItems = jsonData
-        .map((row) => {
-          const barcodeKey = Object.keys(row).find(
-            (key) => key.trim().toLowerCase() === "barkod",
-          );
-          const qtyKey = Object.keys(row).find(
-            (key) => key.trim().toLowerCase() === "net adet",
-          );
-          return {
-            barcode: barcodeKey ? String(row[barcodeKey]).trim() : null,
-            quantity: qtyKey ? parseInt(row[qtyKey], 10) : 0,
-          };
-        })
-        .filter((item) => item.barcode && item.quantity > 0);
+      let barcodeIdx = -1;
+      let qtyIdx = -1;
+      let startRow = -1;
 
-      if (parsedItems.length === 0) {
-        throw new Error(
-          "'Barkod' ve 'Net Adet' sütunları bulunamadı veya satırlar geçersiz.",
-        );
+      // Başlıkları ilk 20 satır içinde KESİN EŞLEŞME (Exact Match) ile arıyoruz
+      for (let i = 0; i < Math.min(20, rows.length); i++) {
+        const rowHeaders = rows[i].map(h => String(h).trim().toLowerCase());
+        
+        let bIdx = rowHeaders.indexOf("barkod");
+        if (bIdx === -1) bIdx = rowHeaders.indexOf("barcode");
+        
+        // DİKKAT: Diğer "Adet" sütunlarını almaması için KESİN (Exact) Net Adet eşleşmesi arıyoruz
+        let qIdx = rowHeaders.indexOf("net adet");
+        if (qIdx === -1) qIdx = rowHeaders.indexOf("miktar");
+        if (qIdx === -1) qIdx = rowHeaders.indexOf("adet");
+
+        if (bIdx !== -1 && qIdx !== -1) {
+          barcodeIdx = bIdx;
+          qtyIdx = qIdx;
+          startRow = i + 1; // Verilerin başladığı satır
+          break;
+        }
       }
 
-      // Tek sorguda DB kontrolü
-      const barcodesToSearch = parsedItems.map((item) => item.barcode);
-      const { data: productsData, error: dbError } = await supabase
-        .from("products")
-        .select("id, barcode, sku, name")
-        .in("barcode", barcodesToSearch);
+      if (startRow === -1) {
+        throw new Error("Lütfen Excel'de tam olarak 'Barkod' ve 'Net Adet' sütunlarının var olduğundan emin olun.");
+      }
 
-      if (dbError) throw dbError;
+      // 1. KÜMELEME (Aggregation) Motoru
+      const aggregatedMap = new Map<string, number>();
 
-      const validated = parsedItems.map((excelItem) => {
-        const dbMatch = productsData?.find(
-          (p) => p.barcode === excelItem.barcode,
-        );
+      for (let i = startRow; i < rows.length; i++) {
+        const row = rows[i];
+        const rawBarcode = row[barcodeIdx];
+        const rawQty = row[qtyIdx];
+
+        if (rawBarcode !== undefined && rawBarcode !== null && String(rawBarcode).trim() !== "") {
+          let barcode = String(rawBarcode).trim();
+          
+          if (barcode.includes('e+') || barcode.includes('E+')) {
+             barcode = Number(rawBarcode).toLocaleString('fullwide', {useGrouping: false});
+          }
+
+          let quantity = 0;
+          if (typeof rawQty === "number") {
+            quantity = rawQty;
+          } else if (typeof rawQty === "string") {
+            const parsed = parseInt(rawQty.replace(/[^0-9]/g, ""), 10);
+            if (!isNaN(parsed)) quantity = parsed;
+          }
+
+          if (barcode && quantity > 0) {
+            aggregatedMap.set(barcode, (aggregatedMap.get(barcode) || 0) + quantity);
+          }
+        }
+      }
+
+      const uniqueBarcodes = Array.from(aggregatedMap.keys());
+      if (uniqueBarcodes.length === 0) throw new Error("Sistem geçerli barkod veya miktar verisi tespit edemedi.");
+
+      // 2. PARÇALAMA (Chunking) - Kullanıcının İstediği 20'şerli Bölme ve Gecikme (Animasyonlu İşleme Hissi)
+      const CHUNK_SIZE = 20; 
+      let allProductsData: any[] = [];
+      const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+      
+      for (let i = 0; i < uniqueBarcodes.length; i += CHUNK_SIZE) {
+        const chunk = uniqueBarcodes.slice(i, i + CHUNK_SIZE);
+        const { data: dbChunk, error: dbError } = await supabase
+          .from("products")
+          .select("id, barcode, sku, name")
+          .in("barcode", chunk);
+        
+        if (dbError) throw dbError;
+        if (dbChunk) allProductsData = [...allProductsData, ...dbChunk];
+        
+        await delay(50); // Tarayıcı kitlenmesini engelleyen animasyonlu işleme süresi
+      }
+
+      // Final Eşleştirme Modülü
+      const validated = Array.from(aggregatedMap.entries()).map(([barcode, quantity]) => {
+        const dbMatch = allProductsData.find((p) => p.barcode === barcode);
         if (dbMatch) {
           return {
             id: Math.random().toString(36).substring(7),
-            barcode: excelItem.barcode as string,
-            quantity: excelItem.quantity,
+            barcode: barcode,
+            quantity: quantity,
             productId: dbMatch.id,
             productName: dbMatch.name,
             sku: dbMatch.sku,
@@ -208,8 +261,8 @@ export default function ExcelTransferCreatePage() {
         }
         return {
           id: Math.random().toString(36).substring(7),
-          barcode: excelItem.barcode as string,
-          quantity: excelItem.quantity,
+          barcode: barcode,
+          quantity: quantity,
           productName: "SİSTEMDE BULUNAMADI",
           isValid: false,
         };
@@ -234,7 +287,12 @@ export default function ExcelTransferCreatePage() {
   };
 
   const removeItem = (id: string) => {
-    setExtractedItems((prev) => prev.filter((item) => item.id !== id));
+    setExtractedItems((prev) => {
+      const newList = prev.filter((item) => item.id !== id);
+      const totalPages = Math.ceil(newList.length / itemsPerPage);
+      if (currentPage > totalPages && totalPages > 0) setCurrentPage(totalPages);
+      return newList;
+    });
   };
 
   const handleManualAdd = async () => {
@@ -262,6 +320,7 @@ export default function ExcelTransferCreatePage() {
     ]);
     setNewBarcode("");
     setNewQty("");
+    setCurrentPage(1); 
   };
 
   // --- AKILLI ŞUBE ÇÖZÜMLEYİCİ (SMART BRANCH RESOLVER) ---
@@ -274,7 +333,6 @@ export default function ExcelTransferCreatePage() {
     const cleanName = customName.trim();
     if (!cleanName) throw new Error("Manuel şube adı boş olamaz.");
 
-    // 1. Şube veritabanında daha önce oluşturulmuş mu? (Case-Insensitive Arama)
     const { data: existingBranch } = await supabase
       .from("branches")
       .select("id")
@@ -283,7 +341,6 @@ export default function ExcelTransferCreatePage() {
 
     if (existingBranch?.id) return existingBranch.id;
 
-    // 2. Yoksa yeni ekle (Hata kısıtlamalarına takılmamak için varsayılan type: 'Mağaza')
     const { data: newBranch, error } = await supabase
       .from("branches")
       .insert({ name: cleanName, type: "Mağaza" })
@@ -308,7 +365,6 @@ export default function ExcelTransferCreatePage() {
 
     setIsSaving(true);
     try {
-      // 1. Şubeleri Çözümle (Yeni eklenenler veya var olanlar)
       const finalFromBranchId = await resolveBranchId(
         isCustomFrom,
         customFromBranch,
@@ -320,7 +376,6 @@ export default function ExcelTransferCreatePage() {
         toBranchId,
       );
 
-      // 2. Çift kontrol: LGS kodunu tekrar çekiyoruz (Çakışmayı önlemek için)
       const { data: lastTransfer } = await supabase
         .from("transfers")
         .select("transfer_code")
@@ -336,7 +391,6 @@ export default function ExcelTransferCreatePage() {
       }
       const finalTransferCode = `LGS${finalNumber}`;
 
-      // 3. Transfer Başlığı Oluştur
       const { data: transferRecord, error: txError } = await supabase
         .from("transfers")
         .insert({
@@ -351,7 +405,6 @@ export default function ExcelTransferCreatePage() {
 
       if (txError) throw txError;
 
-      // 4. Transfer Kalemlerini Ekle
       const itemsToInsert = validItems.map((item) => ({
         transfer_id: transferRecord.id,
         product_id: item.productId,
@@ -367,7 +420,6 @@ export default function ExcelTransferCreatePage() {
         .insert(itemsToInsert);
       if (itemsError) throw itemsError;
 
-      // 5. Kesin ve Kayıpsız Loglama
       await supabase.from("transaction_logs").insert({
         employee_id: empId,
         branch_id: finalFromBranchId,
@@ -395,13 +447,19 @@ export default function ExcelTransferCreatePage() {
     .filter((i) => i.isValid)
     .reduce((acc, curr) => acc + (curr.quantity || 0), 0);
 
-  // UI için şube isimlerini bulma
   const fromBranchObj = isCustomFrom
     ? { name: customFromBranch }
     : branches.find((b) => b.id === fromBranchId);
   const toBranchObj = isCustomTo
     ? { name: customToBranch }
     : branches.find((b) => b.id === toBranchId);
+
+  // Sayfalama (Pagination) Veri Hesaplaması
+  const totalPages = Math.ceil(extractedItems.length / itemsPerPage);
+  const paginatedItems = extractedItems.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
 
   return (
     <div className="min-h-screen bg-slate-50 font-['Quicksand'] select-none flex flex-col">
@@ -771,8 +829,7 @@ export default function ExcelTransferCreatePage() {
             </div>
 
             <div className="bg-white border border-slate-300 rounded-sm shadow-sm overflow-hidden flex-1 flex flex-col">
-              <div className="overflow-x-auto">
-                {/* table-fixed ile taşmaları tamamen durduruyoruz */}
+              <div className="overflow-x-auto flex-1">
                 <table className="w-full text-left border-collapse table-fixed min-w-[700px]">
                   <thead className="bg-slate-100 border-b border-slate-300 text-[11px] font-black text-slate-500 uppercase tracking-widest">
                     <tr>
@@ -784,7 +841,7 @@ export default function ExcelTransferCreatePage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-[13px] font-bold text-slate-700">
-                    {extractedItems.map((item) => (
+                    {paginatedItems.map((item) => (
                       <tr
                         key={item.id}
                         className={`hover:bg-slate-50 transition-colors ${!item.isValid ? "bg-red-50/40" : ""}`}
@@ -859,6 +916,31 @@ export default function ExcelTransferCreatePage() {
                   </tbody>
                 </table>
               </div>
+
+              {/* SAYFALAMA KONTROLLERİ */}
+              {totalPages > 1 && (
+                <div className="bg-slate-50 border-t border-slate-200 p-4 flex items-center justify-between shrink-0">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
+                    Sayfa {currentPage} / {totalPages} (Toplam {extractedItems.length} Çeşit)
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      disabled={currentPage === 1}
+                      className="px-3 py-1.5 bg-white border border-slate-300 rounded-sm text-slate-600 disabled:opacity-50 hover:bg-slate-100 text-[11px] font-bold uppercase"
+                    >
+                      Önceki
+                    </button>
+                    <button
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={currentPage === totalPages}
+                      className="px-3 py-1.5 bg-white border border-slate-300 rounded-sm text-slate-600 disabled:opacity-50 hover:bg-slate-100 text-[11px] font-bold uppercase"
+                    >
+                      Sonraki
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="shrink-0 mt-2 flex justify-end">

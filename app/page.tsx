@@ -9,7 +9,8 @@ import { getDashboardDataServer } from "@/app/actions/dashboard";
 import {
   Building2, Users, AlertCircle, Package, 
   Layers, Database, CalendarDays, BoxSelect, 
-  Truck, Clock, ArrowRight, ScanLine, Activity, CheckCircle2, Timer, Box
+  Truck, Clock, ArrowRight, ScanLine, Activity, CheckCircle2, Timer, Box,
+  AlertOctagon, BellRing, BarChart2
 } from "lucide-react";
 
 interface TransferData {
@@ -26,7 +27,7 @@ interface DashboardData {
   kpis: { branches: number; employees: number; stockVolume: number; pendingTotal: number; boxesTotal: number; productsTotal: number; };
   cargoDistribution: { carrier: string; count: number; color: string }[];
   recentTransfers: TransferData[];
-  recentPutawayLogs: { id: string; action_type: string; description: string; employee_name: string; }[];
+  recentPutawayLogs: { id: string; action_type: string; description: string; employee_name: string; created_at?: string }[];
   recentLeaveLogs: { id: string; leave_type: string; start_date: string; end_date: string; status: string; employee_name: string; }[];
   recentCargoSessions: { id: string; carrier_name: string; status: string; total_items: number; started_at: string; completed_at: string; employee_name: string; }[]; 
   dbSizeMB: number;
@@ -87,12 +88,18 @@ export default function ManagementDashboard() {
     return `${t1} - ${t2}`;
   };
 
+  // Kargo dağıtımında "Hepsijet" tespit edilirse rengi Mora zorluyoruz.
+  const cargoDist = data?.cargoDistribution?.map(c => ({
+    ...c,
+    color: (c.carrier.toUpperCase().includes("HEPSIJET") || c.carrier.toUpperCase().includes("HEPSİJET")) ? "#9333ea" : c.color
+  })) || [];
+
   const renderConicGradient = () => {
-    if (!data?.cargoDistribution || data.cargoDistribution.length === 0) return "conic-gradient(#f1f5f9 0% 100%)";
-    const total = data.cargoDistribution.reduce((acc, curr) => acc + curr.count, 0);
+    if (cargoDist.length === 0) return "conic-gradient(#f1f5f9 0% 100%)";
+    const total = cargoDist.reduce((acc, curr) => acc + curr.count, 0);
     if (total === 0) return "conic-gradient(#f1f5f9 0% 100%)";
     let currentPercent = 0;
-    const stops = data.cargoDistribution.map(item => {
+    const stops = cargoDist.map(item => {
       const start = currentPercent;
       const end = currentPercent + (item.count / total) * 100;
       currentPercent = end;
@@ -112,6 +119,10 @@ export default function ManagementDashboard() {
   };
   const tStats = getTransferStats();
 
+  // Bekleyen İzin ve Talepler (Yöneticinin Dikkatine)
+  const pendingRequests = data?.recentLeaveLogs?.filter(l => l.status === 'PENDING' || l.status.toUpperCase() === 'BEKLIYOR') || [];
+  const hasPending = pendingRequests.length > 0 || (data?.kpis?.pendingTotal ?? 0) > 0;
+
   if (isAuthLoading || (loading && !data)) {
     return (
       <div className="min-h-screen flex flex-col bg-slate-50 font-['Quicksand'] overflow-x-hidden">
@@ -128,8 +139,6 @@ export default function ManagementDashboard() {
     );
   }
 
-  // TS Vercel Build Hatası (Type error: Property 'branch_id' does not exist) Fix'i:
-  // userProfile'ı Record<string, any> olarak cast ediyoruz, böylece schema'da var olan ama type'ta eksik olan branch_id sorun çıkarmaz.
   const profileSafe = userProfile as Record<string, any> | null;
   const isGlobal = profileSafe?.role === "Developer" || profileSafe?.role === "Admin" || !profileSafe?.branch_id;
 
@@ -177,6 +186,27 @@ export default function ManagementDashboard() {
             </div>
           </div>
         </div>
+
+        {/* =========================================
+            YÖNETİCİNİN DİKKATİNE PANELI
+            ========================================= */}
+        {hasPending && (
+          <div className="w-full bg-[#fff4eb] border-2 border-orange-300 border-l-[12px] border-l-orange-500 rounded-none shadow-[6px_6px_0px_#f97316] relative overflow-hidden p-5 flex flex-col md:flex-row items-center justify-between gap-4 animate-in fade-in slide-in-from-top-4">
+            <AlertOctagon className="absolute -right-8 -top-8 w-40 h-40 text-orange-500/10 rotate-12" />
+            <div className="relative z-10 flex flex-col gap-1 w-full">
+              <div className="flex items-center gap-2">
+                <BellRing className="w-5 h-5 text-orange-600 animate-bounce" />
+                <h2 className="text-xl font-black text-orange-700 uppercase tracking-tighter">Yöneticinin Dikkatine</h2>
+              </div>
+              <p className="text-orange-600 font-bold text-xs uppercase tracking-widest mt-1 font-mono">
+                Sistemde onayınızı bekleyen <span className="text-lg bg-orange-200 px-1">{data?.kpis?.pendingTotal || pendingRequests.length}</span> adet talep veya aksiyon bulunmaktadır. Lütfen İK / Onay merkezini kontrol ediniz.
+              </p>
+            </div>
+            <button onClick={() => router.push('/management/hr/approvals')} className="relative z-10 bg-orange-500 hover:bg-orange-600 text-white font-black text-[10px] uppercase tracking-widest px-6 py-3 transition-colors border-2 border-orange-700 whitespace-nowrap shadow-[4px_4px_0px_#c2410c] hover:shadow-[2px_2px_0px_#c2410c] hover:translate-y-[2px] hover:translate-x-[2px]">
+              Talepleri İncele
+            </button>
+          </div>
+        )}
 
         {/* =========================================
             2. KPI KARTLARI (6 SÜTUN)
@@ -243,26 +273,23 @@ export default function ManagementDashboard() {
             <div className="flex flex-col w-1/2 h-full">
               <div className="flex items-center gap-2.5 mb-4 border-b-2 border-slate-100 pb-4">
                 <div className="p-1.5 bg-slate-900 border-2 border-slate-800"><Truck className="w-4 h-4 text-white" /></div>
-                <h3 className="text-xs font-black text-slate-900 uppercase tracking-widest">Kargo Çıkışı</h3>
+                <h3 className="text-xs font-black text-slate-900 uppercase tracking-widest">Günlük Kargo Çıkışı</h3>
               </div>
               <div className="flex-1 flex flex-col gap-2 overflow-y-auto custom-scrollbar pr-2">
-                {data?.cargoDistribution?.map((c, idx) => (
+                {cargoDist.map((c, idx) => (
                   <div key={idx} className="flex justify-between items-center text-[10px] font-black uppercase text-slate-700 tracking-widest">
                     <span className="flex items-center gap-2"><span className="w-2 h-2" style={{ backgroundColor: c.color }}></span>{c.carrier}</span>
                     <span className="font-mono">{c.count}</span>
                   </div>
                 ))}
-                {(!data?.cargoDistribution || data.cargoDistribution.length === 0) && (
+                {(cargoDist.length === 0) && (
                    <span className="text-xs text-slate-400 font-black uppercase mt-4">Veri Yok</span>
                 )}
               </div>
             </div>
             <div className="flex-1 flex w-1/2 items-center justify-center relative">
-              <div className="w-36 h-36 sm:w-44 sm:h-44 rounded-full flex items-center justify-center shadow-[inset_0px_0px_10px_rgba(0,0,0,0.1)] relative border-[6px] border-white ring-4 ring-slate-100" style={{ background: renderConicGradient() }}>
-                <div className="w-24 h-24 sm:w-28 sm:h-28 bg-white rounded-full flex flex-col items-center justify-center shadow-lg z-10 border-4 border-slate-50">
-                  <span className="text-2xl font-black text-slate-900 font-mono leading-none">{data?.cargoDistribution?.reduce((a, b) => a + b.count, 0) || 0}</span>
-                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Paket</span>
-                </div>
+              {/* Pasta Grafiği İçin Merkezdeki Beyaz Daire Kaldırıldı. (Donut -> Pie Chart) */}
+              <div className="w-36 h-36 sm:w-44 sm:h-44 rounded-full shadow-[inset_0px_0px_10px_rgba(0,0,0,0.1)] relative border-[4px] border-slate-100 ring-4 ring-slate-200" style={{ background: renderConicGradient() }}>
               </div>
             </div>
           </div>
@@ -275,7 +302,7 @@ export default function ManagementDashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 w-full items-start mt-2">
           
           {/* TRANSFER İŞLEMLERİ (col-7) */}
-          <div className="lg:col-span-7 bg-white border-2 border-slate-300 shadow-[8px_8px_0px_#94a3b8] rounded-none flex flex-col w-full h-[480px]">
+          <div className="lg:col-span-7 bg-white border-2 border-slate-300 shadow-[8px_8px_0px_#94a3b8] rounded-none flex flex-col w-full h-[540px]">
             <div className="flex justify-between items-center p-4 border-b-4 border-[#dc3545] bg-slate-900 text-white">
               <div className="flex items-center gap-3">
                 <div className="bg-white/10 p-2 border border-white/20"><Package className="w-5 h-5 text-[#dc3545]" /></div>
@@ -285,6 +312,33 @@ export default function ManagementDashboard() {
                 </div>
               </div>
             </div>
+
+            {/* SON 30 TRANSFER GRAFİĞİ (SPARKLINE) */}
+            <div className="bg-slate-50 border-b-2 border-slate-200 p-3 flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <h4 className="text-[9px] font-black uppercase text-slate-500 tracking-widest flex items-center gap-1"><BarChart2 size={12}/> Son 30 Transfer Grafiği</h4>
+              </div>
+              <div className="flex items-end gap-[2px] h-8 w-full">
+                {data?.recentTransfers?.slice(0, 30).map((tx, idx) => {
+                  let barColor = "bg-slate-300";
+                  let h = "h-4";
+                  const s = tx.status.toUpperCase().replace('İ', 'I');
+                  if (s === 'TAMAMLANDI') { barColor = "bg-emerald-500"; h = "h-8"; }
+                  else if (s === 'YOLDA') { barColor = "bg-blue-500"; h = "h-6"; }
+                  else if (s === 'TOPLANIYOR') { barColor = "bg-purple-500"; h = "h-5"; }
+                  else if (s === 'BEKLIYOR') { barColor = "bg-orange-500"; h = "h-4"; }
+                  else if (s === 'REJECTED' || s === 'IPTAL') { barColor = "bg-[#dc3545]"; h = "h-2"; }
+                  return (
+                    <div 
+                      key={idx} 
+                      title={`${tx.transfer_code} - ${getStatusText(tx.status)}`}
+                      className={`flex-1 ${barColor} ${h} hover:opacity-75 transition-all cursor-pointer rounded-t-sm`}
+                    ></div>
+                  )
+                })}
+              </div>
+            </div>
+
             <div className="flex-1 overflow-x-auto overflow-y-auto w-full custom-scrollbar">
               <table className="w-full text-left border-collapse min-w-[700px]">
                 <thead className="bg-slate-100 border-b-2 border-slate-300 sticky top-0 z-10">
@@ -293,7 +347,7 @@ export default function ManagementDashboard() {
                     <th className="py-3 px-4 border-r-2 border-white w-1/4">Nereden</th>
                     <th className="py-3 px-4 border-r-2 border-white w-1/4">Nereye</th>
                     <th className="py-3 px-4 border-r-2 border-white">Sayan/Görevli</th>
-                    <th className="py-3 px-4 text-right">Durum</th>
+                    <th className="py-3 px-4 text-right">Durum & Tarih</th>
                   </tr>
                 </thead>
                 <tbody className="text-xs font-bold text-slate-700 divide-y-2 divide-slate-100">
@@ -309,7 +363,12 @@ export default function ManagementDashboard() {
                       <td className="py-3 px-4 text-slate-600 uppercase text-[10px]">
                         <Users size={10} className="inline mr-1 text-slate-400" />{tx.picker_name}
                       </td>
-                      <td className="py-3 px-4 text-right"><span className={`px-2 py-1 border-2 rounded-none text-[8px] font-black uppercase tracking-widest whitespace-nowrap ${getStatusStyle(tx.status)}`}>{getStatusText(tx.status)}</span></td>
+                      <td className="py-3 px-4 text-right flex flex-col items-end gap-1">
+                        <span className={`px-2 py-1 border-2 rounded-none text-[8px] font-black uppercase tracking-widest whitespace-nowrap ${getStatusStyle(tx.status)}`}>{getStatusText(tx.status)}</span>
+                        {tx.created_at && (
+                           <span className="text-[9px] font-mono text-slate-400 block">{new Date(tx.created_at).toLocaleDateString('tr-TR')}</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                   {(!data?.recentTransfers || data.recentTransfers.length === 0) && (
@@ -321,7 +380,7 @@ export default function ManagementDashboard() {
           </div>
 
           {/* KARGO TESLİMATLARI (col-5) */}
-          <div className="lg:col-span-5 bg-white border-2 border-slate-300 shadow-[8px_8px_0px_#94a3b8] rounded-none flex flex-col w-full h-[480px]">
+          <div className="lg:col-span-5 bg-white border-2 border-slate-300 shadow-[8px_8px_0px_#94a3b8] rounded-none flex flex-col w-full h-[540px]">
             <div className="flex justify-between items-center p-4 border-b-4 border-slate-700 bg-slate-900 text-white">
               <div className="flex items-center gap-3">
                 <div className="bg-white/10 p-2 border border-white/20"><Truck className="w-5 h-5 text-white" /></div>
@@ -371,7 +430,7 @@ export default function ManagementDashboard() {
               <div className="flex items-center gap-3">
                 <div className="bg-white/10 p-2 border border-white/20"><BoxSelect className="w-5 h-5 text-blue-400" /></div>
                 <div>
-                  <h3 className="text-sm font-black uppercase tracking-widest">Depo Operasyon Logları</h3>
+                  <h3 className="text-sm font-black uppercase tracking-widest">Depo Operasyon Logları (Detaylı)</h3>
                 </div>
               </div>
             </div>
@@ -379,7 +438,7 @@ export default function ManagementDashboard() {
               <table className="w-full text-left border-collapse min-w-[500px]">
                 <thead className="bg-slate-100 border-b-2 border-slate-300 sticky top-0 z-10">
                   <tr className="text-[10px] uppercase tracking-widest text-slate-600 font-black">
-                    <th className="py-3 px-4 border-r-2 border-white w-1/4">Personel</th>
+                    <th className="py-3 px-4 border-r-2 border-white w-1/4">Tarih / Personel</th>
                     <th className="py-3 px-4 border-r-2 border-white w-1/2">İşlem Detayı</th>
                     <th className="py-3 px-4 text-right w-1/4">Aksiyon</th>
                   </tr>
@@ -390,10 +449,19 @@ export default function ManagementDashboard() {
                     const isPutaway = action.includes("INBOUND") || action.includes("PUTAWAY") || action.includes("ADD");
                     const isPicking = action.includes("OUTBOUND") || action.includes("PICKING") || action.includes("REMOVE");
                     return (
-                      <tr key={log.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="py-3 px-4 font-black text-slate-900 border-l-4 border-l-transparent hover:border-l-blue-500">{log.employee_name}</td>
-                        <td className="py-3 px-4 text-slate-600 font-medium">{log.description?.replace(/\[.*?\]\s*/g, "") || "-"}</td>
-                        <td className="py-3 px-4 text-right"><span className={`px-2 py-1 border-2 rounded-none text-[8px] font-black uppercase tracking-widest whitespace-nowrap inline-block ${isPutaway ? 'bg-emerald-50 text-emerald-700 border-emerald-400' : isPicking ? 'bg-red-50 text-[#dc3545] border-red-400' : 'bg-slate-50 text-slate-700 border-slate-300'}`}>{isPutaway ? 'RAFLAMA (+)' : isPicking ? 'ÇIKIŞ (-)' : 'DİĞER'}</span></td>
+                      <tr key={log.id} className="hover:bg-slate-50 transition-colors group">
+                        <td className="py-3 px-4 font-black text-slate-900 border-l-4 border-l-transparent hover:border-l-blue-500">
+                          <span className="block text-slate-800">{log.employee_name}</span>
+                          {log.created_at && <span className="block text-[9px] font-mono text-slate-400 mt-1">{new Date(log.created_at).toLocaleString('tr-TR')}</span>}
+                        </td>
+                        <td className="py-3 px-4 text-slate-600 font-medium">
+                          {log.description?.replace(/\[.*?\]\s*/g, "") || "-"}
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <span className={`px-2 py-1 border-2 rounded-none text-[8px] font-black uppercase tracking-widest whitespace-nowrap inline-block ${isPutaway ? 'bg-emerald-50 text-emerald-700 border-emerald-400' : isPicking ? 'bg-red-50 text-[#dc3545] border-red-400' : 'bg-slate-50 text-slate-700 border-slate-300'}`}>
+                            {isPutaway ? 'RAFLAMA (+)' : isPicking ? 'ÇIKIŞ (-)' : 'DİĞER'}
+                          </span>
+                        </td>
                       </tr>
                     )
                   })}
@@ -417,14 +485,16 @@ export default function ManagementDashboard() {
             </div>
             <div className="flex-1 overflow-y-auto custom-scrollbar p-3 flex flex-col gap-3">
               {data?.recentLeaveLogs?.slice(0, 7).map((log) => (
-                <div key={log.id} className="flex justify-between items-center border-b border-slate-100 pb-2 last:border-0 hover:bg-slate-50 p-1 rounded-sm">
+                <div key={log.id} className="flex justify-between items-center border-b border-slate-100 pb-2 last:border-0 hover:bg-slate-50 p-2 rounded-sm transition-colors border-l-4 border-l-transparent hover:border-l-orange-400">
                   <div className="flex flex-col">
                     <span className="text-xs font-black text-slate-900 truncate max-w-[160px]">{log.employee_name}</span>
                     <span className="text-[10px] text-slate-500 font-mono mt-0.5">{formatDateRange(log.start_date, log.end_date)}</span>
                   </div>
                   <div className="flex flex-col items-end gap-1">
                     <span className="inline-block bg-slate-100 border border-slate-200 px-1.5 py-0.5 text-[9px] text-slate-600 font-black uppercase">{log.leave_type}</span>
-                    <span className={`w-2 h-2 rounded-full ${getStatusStyle(log.status).split(' ')[0]}`} title={getStatusText(log.status)}></span>
+                    <span className={`px-1.5 py-0.5 rounded-none text-[8px] font-black uppercase tracking-widest border ${getStatusStyle(log.status)}`} title={getStatusText(log.status)}>
+                      {getStatusText(log.status)}
+                    </span>
                   </div>
                 </div>
               ))}
