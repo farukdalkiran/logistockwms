@@ -7,7 +7,7 @@ import {
   ShieldCheck, Save, Trash2, Key, Users,
   Settings, Activity, ShieldAlert, Search, ChevronRight,
   Copy, CheckSquare, XSquare, Package, ToyBrick, UserCog,
-  Fingerprint, LayoutDashboard, Layers, Lock, Check,
+  Fingerprint, LayoutDashboard, Layers, Lock, Check,Newspaper,
   AlertTriangle
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
@@ -54,6 +54,7 @@ export const SYSTEM_MODULES = [
     ]
   },
   { id: "terminal", name: "Terminal Ekranı (El Cihazı)", path: "/terminal", icon: <Fingerprint size={16} /> },
+    { id: "news", name: "LogiStock Bülten", path: "/management/news", icon: <Newspaper size={16} /> },
 ];
 
 export default function RoleSettingsPage() {
