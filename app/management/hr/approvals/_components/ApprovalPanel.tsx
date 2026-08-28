@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Lock, AlertCircle, CalendarDays, Calendar, CheckCircle2, XCircle, UserCheck, Clock, ShieldAlert, ArrowDownRight, History, ClipboardList, UserRoundCog, Trash2 } from "lucide-react";
+import { Lock, AlertCircle, CalendarDays, Calendar, CheckCircle2, XCircle, UserCheck, Clock, ShieldAlert, ArrowDownRight, History, ClipboardList, UserRoundCog, Trash2, CheckCheck, ListX } from "lucide-react";
 import { supabase } from "@/lib/supabase"; 
 import { processApproval, getPendingApprovals } from "@/app/actions/approvals";
 import { useRouter } from "next/navigation";
@@ -152,6 +152,39 @@ export default function ApprovalPanel({ managerBranchId, isGlobal }: ApprovalPan
     setLoading(false);
   };
 
+  // 🚀 YENİ: Toplu Onay/Ret Motoru
+  const handleBulkAction = async (items: any[], reqType: "ATTENDANCE" | "LEAVE", action: "APPROVE" | "REJECT") => {
+    if (!manager || items.length === 0) return;
+    
+    const confirmMsg = `Dikkat: Seçili listedeki ${items.length} kaydın TÜMÜNÜ ${action === "APPROVE" ? "ONAYLAMAK" : "REDDETMEK"} üzeresiniz. Onaylıyor musunuz?`;
+    if (!window.confirm(confirmMsg)) return;
+
+    const note = window.prompt(`Toplu işlem için genel bir not ekleyebilirsiniz (Opsiyonel):`, `Toplu İşlem (${items.length} Kayıt)`);
+    if (note === null) return;
+
+    setLoading(true);
+    const signatureNote = `[${manager.full_name}] - ${note || "Toplu işlem uygulandı."}`;
+    
+    let successCount = 0;
+
+    // Senkron (Sırayla) işlem - Veritabanını yormamak ve trigger/log çakışmalarını önlemek için WMS best-practice'idir.
+    for (const item of items) {
+      const result = await processApproval({
+        request_id: item.id,
+        request_type: reqType,
+        action: action,
+        manager_id: manager.id,
+        manager_note: signatureNote
+      });
+      if (result.success) successCount++;
+    }
+
+    alert(`Toplu İşlem Özeti: ${successCount} / ${items.length} işlem başarıyla uygulandı.`);
+    await fetchData(manager.id, manager.branch_id);
+    router.refresh();
+    setLoading(false);
+  };
+
   const formatDate = (iso: string) => iso ? new Date(iso).toLocaleDateString("tr-TR", { day: "2-digit", month: "short", year: "numeric" }) : "-";
   const formatTime = (iso: string) => iso ? new Date(iso).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "--:--";
 
@@ -288,7 +321,7 @@ export default function ApprovalPanel({ managerBranchId, isGlobal }: ApprovalPan
             {/* TAB 1: İZİNLER */}
             <button 
               onClick={() => setActiveTab("LEAVES")} 
-              className={`flex-1 py-4 px-2 flex items-center justify-center gap-3 transition-all duration-200 border-b-4 ${
+              className={`flex-1 py-4 px-2 flex items-center justify-center gap-3 transition-all duration-200 border-b-4 relative ${
                 activeTab === 'LEAVES' 
                   ? 'border-blue-600 bg-blue-50/50 text-blue-700' 
                   : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-700'
@@ -298,17 +331,24 @@ export default function ApprovalPanel({ managerBranchId, isGlobal }: ApprovalPan
                 <CalendarDays className={`w-5 h-5 ${activeTab === 'LEAVES' ? 'text-blue-600' : 'text-slate-400'}`} strokeWidth={2.5} />
                 <span className="text-[11px] font-black tracking-widest uppercase mt-0.5">İZİN ONAYLARI</span>
               </div>
-              <span className={`px-2 py-0.5 font-mono text-[10px] font-black rounded-none border shadow-sm ${
+              <span className={`relative px-2 py-0.5 font-mono text-[10px] font-black rounded-none border shadow-sm ${
                 activeTab === 'LEAVES' ? 'bg-blue-600 text-white border-blue-700' : 'bg-white text-slate-500 border-slate-300'
               }`}>
                 {pendingLeaves.length}
+                {/* YANIP SÖNEN ANİMASYON (BEKLEYEN VARSA) */}
+                {pendingLeaves.length > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 border border-white"></span>
+                  </span>
+                )}
               </span>
             </button>
 
             {/* TAB 2: MESAİ LOGLARI */}
             <button 
               onClick={() => setActiveTab("ATTENDANCE")} 
-              className={`flex-1 py-4 px-2 flex items-center justify-center gap-3 transition-all duration-200 border-b-4 ${
+              className={`flex-1 py-4 px-2 flex items-center justify-center gap-3 transition-all duration-200 border-b-4 relative ${
                 activeTab === 'ATTENDANCE' 
                   ? 'border-amber-500 bg-amber-50/50 text-amber-700' 
                   : 'border-transparent text-slate-500 hover:bg-slate-50 hover:text-slate-700'
@@ -318,10 +358,17 @@ export default function ApprovalPanel({ managerBranchId, isGlobal }: ApprovalPan
                 <Clock className={`w-5 h-5 ${activeTab === 'ATTENDANCE' ? 'text-amber-600' : 'text-slate-400'}`} strokeWidth={2.5} />
                 <span className="text-[11px] font-black tracking-widest uppercase mt-0.5">MESAİ DÜZELTMELERİ</span>
               </div>
-              <span className={`px-2 py-0.5 font-mono text-[10px] font-black rounded-none border shadow-sm ${
+              <span className={`relative px-2 py-0.5 font-mono text-[10px] font-black rounded-none border shadow-sm ${
                 activeTab === 'ATTENDANCE' ? 'bg-amber-500 text-white border-amber-600' : 'bg-white text-slate-500 border-slate-300'
               }`}>
                 {pendingAttendance.length}
+                {/* YANIP SÖNEN ANİMASYON (BEKLEYEN VARSA) */}
+                {pendingAttendance.length > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500 border border-white"></span>
+                  </span>
+                )}
               </span>
             </button>
 
@@ -353,11 +400,22 @@ export default function ApprovalPanel({ managerBranchId, isGlobal }: ApprovalPan
               {/* --- SEKME 1: İZİN ONAYLARI --- */}
               {activeTab === "LEAVES" && (
                 <div className="w-full animate-in fade-in duration-200">
-                  <div className="flex items-center justify-between mb-3 px-1">
+                  <div className="flex items-center justify-between mb-3 px-1 flex-wrap gap-3">
                      <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
                        <ClipboardList className="w-4 h-4 text-blue-600" strokeWidth={2.5} /> 
                        BEKLEYEN İZİN TALEPLERİ
                      </h3>
+                     {/* YENİ: TOPLU ONAY/RET BUTONLARI */}
+                     {pendingLeaves.length > 0 && (
+                       <div className="flex items-center gap-2">
+                          <button onClick={() => handleBulkAction(pendingLeaves, "LEAVE", "REJECT")} disabled={loading} className="flex items-center gap-1.5 bg-white text-slate-600 border border-slate-300 px-3 py-1.5 text-[9px] font-black tracking-widest uppercase hover:bg-red-50 hover:text-[#dc3545] hover:border-red-200 transition-colors shadow-sm active:scale-95">
+                            <ListX className="w-3.5 h-3.5" /> TÜMÜNÜ REDDET
+                          </button>
+                          <button onClick={() => handleBulkAction(pendingLeaves, "LEAVE", "APPROVE")} disabled={loading} className="flex items-center gap-1.5 bg-blue-600 text-white border border-blue-700 px-3 py-1.5 text-[9px] font-black tracking-widest uppercase hover:bg-blue-700 transition-colors shadow-sm active:scale-95">
+                            <CheckCheck className="w-3.5 h-3.5" /> TÜMÜNÜ ONAYLA
+                          </button>
+                       </div>
+                     )}
                   </div>
 
                   {pendingLeaves.length === 0 ? (
@@ -441,11 +499,22 @@ export default function ApprovalPanel({ managerBranchId, isGlobal }: ApprovalPan
               {/* --- SEKME 2: MESAİ ONAYLARI --- */}
               {activeTab === "ATTENDANCE" && (
                 <div className="w-full animate-in fade-in duration-200">
-                  <div className="flex items-center justify-between mb-3 px-1">
+                  <div className="flex items-center justify-between mb-3 px-1 flex-wrap gap-3">
                      <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
                        <Clock className="w-4 h-4 text-amber-500" strokeWidth={2.5} /> 
                        BEKLEYEN MESAİ DÜZELTMELERİ
                      </h3>
+                     {/* YENİ: TOPLU ONAY/RET BUTONLARI */}
+                     {pendingAttendance.length > 0 && (
+                       <div className="flex items-center gap-2">
+                          <button onClick={() => handleBulkAction(pendingAttendance, "ATTENDANCE", "REJECT")} disabled={loading} className="flex items-center gap-1.5 bg-white text-slate-600 border border-slate-300 px-3 py-1.5 text-[9px] font-black tracking-widest uppercase hover:bg-red-50 hover:text-[#dc3545] hover:border-red-200 transition-colors shadow-sm active:scale-95">
+                            <ListX className="w-3.5 h-3.5" /> TÜMÜNÜ REDDET
+                          </button>
+                          <button onClick={() => handleBulkAction(pendingAttendance, "ATTENDANCE", "APPROVE")} disabled={loading} className="flex items-center gap-1.5 bg-amber-500 text-amber-950 border border-amber-600 px-3 py-1.5 text-[9px] font-black tracking-widest uppercase hover:bg-amber-600 hover:text-white transition-colors shadow-sm active:scale-95">
+                            <CheckCheck className="w-3.5 h-3.5" /> TÜMÜNÜ ONAYLA
+                          </button>
+                       </div>
+                     )}
                   </div>
 
                   {pendingAttendance.length === 0 ? (
@@ -532,17 +601,21 @@ export default function ApprovalPanel({ managerBranchId, isGlobal }: ApprovalPan
                   </div>
                   
                   <div className="w-full border-2 border-slate-200 rounded-none bg-white shadow-sm">
+                    {/* YENİ: DAHA DETAYLI TABLO BAŞLIĞI */}
                     <div className="hidden lg:grid grid-cols-12 gap-2 px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest bg-slate-50 border-b-2 border-slate-200">
-                      <div className="col-span-2 border-r border-slate-300 pr-2">İşlem Modülü & Zaman</div>
-                      <div className="col-span-3 border-r border-slate-300 px-2">Personel Bilgisi</div>
-                      <div className="col-span-5 border-r border-slate-300 px-2">İşlem Özeti & Yönetici Notu</div>
+                      <div className="col-span-2 border-r border-slate-300 pr-2">Zaman & Modül</div>
+                      <div className="col-span-3 border-r border-slate-300 px-2">İşlem Gören Personel</div>
+                      <div className="col-span-3 border-r border-slate-300 px-2">Talebin Özeti</div>
+                      <div className="col-span-2 border-r border-slate-300 px-2">Karar Verici</div>
                       <div className="col-span-2 text-right pl-2">Sistem Kararı</div>
                     </div>
+                    
                     <div className="divide-y-2 divide-slate-100">
                       {historyLogs.length === 0 ? (
                         <div className="p-16 text-center text-xs font-black text-slate-400 uppercase tracking-widest bg-white">GEÇMİŞ İŞLEM BULUNMUYOR</div>
                       ) : historyLogs.map(log => {
                         const isApprove = log.status === 'APPROVED';
+                        
                         let summary = "";
                         if (log.req_type === 'LEAVE') {
                           const dInfo = parseDetailedLeaveDates(log.selected_dates, log.start_date, log.end_date);
@@ -551,40 +624,53 @@ export default function ApprovalPanel({ managerBranchId, isGlobal }: ApprovalPan
                           if (log.attendance_id && !log.req_check_in && !log.req_check_out) summary = "MESAİ KAYDI SİLİNMESİ";
                           else summary = `MESAİ: ${formatTime(log.req_check_in)} - ${formatTime(log.req_check_out)}`;
                         }
-                        const noteText = log.manager_note || "Ek açıklama düşülmedi.";
+                        
+                        // 🚀 YENİ: Yönetici adını ve notunu ayıklayan akıllı regex
+                        const noteMatch = log.manager_note?.match(/^\[(.*?)\]\s*-\s*(.*)$/);
+                        const managerName = noteMatch ? noteMatch[1] : 'BİLİNMEYEN YÖNETİCİ';
+                        const cleanNote = noteMatch ? noteMatch[2] : (log.manager_note || "Ek açıklama düşülmedi.");
                         
                         return (
                           <div key={log.id} className="grid grid-cols-1 lg:grid-cols-12 gap-2 items-center px-4 py-4 bg-white hover:bg-slate-50 border-slate-200 text-xs font-medium transition-colors">
                             
                             <div className="col-span-1 lg:col-span-2 flex flex-col gap-2">
-                              <span className={`text-[9px] font-black uppercase tracking-widest w-max px-2 py-1 rounded-none border shadow-sm ${
+                              <span className="text-[11px] font-mono text-slate-900 font-bold">{formatDate(log.created_at)}</span>
+                              <span className={`text-[9px] font-black uppercase tracking-widest w-max px-2 py-0.5 rounded-none border shadow-sm ${
                                 log.req_type === 'LEAVE' ? 'bg-blue-100 text-blue-800 border-blue-200' : 'bg-amber-100 text-amber-800 border-amber-200'
                               }`}>
-                                {log.req_type === 'LEAVE' ? 'İZİN MODÜLÜ' : 'MESAİ MODÜLÜ'}
+                                {log.req_type === 'LEAVE' ? 'İZİN' : 'MESAİ'}
                               </span>
-                              <span className="text-[11px] font-mono text-slate-500 font-bold">{formatDate(log.created_at)}</span>
                             </div>
                             
                             <div className="col-span-1 lg:col-span-3 font-black text-slate-900 uppercase tracking-wide truncate pr-2 text-xs mt-2 lg:mt-0">
                               {log.employees?.full_name}
                             </div>
 
-                            <div className="col-span-1 lg:col-span-5 flex flex-col gap-1.5 pr-2 lg:border-l-2 border-slate-100 lg:pl-4 mt-1 lg:mt-0">
-                              <span className="font-mono text-[11px] font-bold text-slate-800 uppercase">{summary}</span>
-                              <div className="flex items-start gap-1.5 mt-0.5 bg-slate-50 border border-slate-200 p-1.5 w-max max-w-full rounded-none">
-                                <UserRoundCog className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                                <span className="text-[10px] text-slate-600 font-medium italic truncate">"{noteText}"</span>
+                            <div className="col-span-1 lg:col-span-3 pr-2 lg:border-l-2 border-slate-100 lg:pl-4 mt-1 lg:mt-0 flex items-center">
+                              <span className="font-mono text-[10px] font-bold text-slate-700 uppercase leading-relaxed">{summary}</span>
+                            </div>
+
+                            {/* 🚀 YENİ: Yönetici & Not Alanı Tasarımı */}
+                            <div className="col-span-1 lg:col-span-2 flex flex-col gap-1.5 pr-2 lg:border-l-2 border-slate-100 lg:pl-4 mt-2 lg:mt-0">
+                              <div className="flex items-center gap-1.5">
+                                <ShieldAlert className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                <span className="font-black text-[10px] text-slate-800 uppercase tracking-widest truncate">{managerName}</span>
+                              </div>
+                              <div className="flex items-start gap-1.5 mt-0.5 bg-slate-50 border border-slate-200 p-1.5 w-full rounded-none shadow-inner">
+                                <UserRoundCog className="w-3 h-3 text-slate-400 shrink-0 mt-0.5" />
+                                <span className="text-[9px] text-slate-600 font-bold italic line-clamp-2 leading-relaxed">"{cleanNote}"</span>
                               </div>
                             </div>
 
                             <div className="col-span-1 lg:col-span-2 flex justify-end lg:border-l-2 border-slate-100 lg:pl-4 mt-3 lg:mt-0">
-                              <span className={`inline-flex items-center justify-center gap-2 px-3 py-1.5 rounded-none text-[10px] font-black uppercase tracking-widest border shadow-sm ${
-                                isApprove ? 'bg-[#0b9c2d]/10 text-[#0b9c2d] border-[#0b9c2d]/30' : 'bg-[#dc3545]/10 text-[#dc3545] border-[#dc3545]/30'
+                              <span className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-none text-[10px] font-black uppercase tracking-widest border shadow-sm ${
+                                isApprove ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-600 border-red-200'
                               }`}>
-                                {isApprove ? <CheckCircle2 className="w-4 h-4" strokeWidth={2.5} /> : <XCircle className="w-4 h-4" strokeWidth={2.5} />}
+                                {isApprove ? <CheckCircle2 className="w-3.5 h-3.5" strokeWidth={3} /> : <XCircle className="w-3.5 h-3.5" strokeWidth={3} />}
                                 {isApprove ? 'ONAYLANDI' : 'REDDEDİLDİ'}
                               </span>
                             </div>
+
                           </div>
                         )
                       })}

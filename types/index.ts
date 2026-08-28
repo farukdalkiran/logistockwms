@@ -101,3 +101,11 @@ export interface TransactionLog {
   description: string;
   created_at: string;
 }
+
+export interface CartItem {
+  product_id: string;
+  sku: string;
+  name: string;
+  image_url: string | null;
+  quantity: number;
+}
