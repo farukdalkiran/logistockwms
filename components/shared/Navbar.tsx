@@ -178,14 +178,7 @@ export const Navbar = () => {
       icon: <ToyBrick size={18} />,
       moduleCode: "cargo",
       allowedRoles: ["Developer", "Admin", "Mağaza Müdürü", "Depo Personeli"],
-    },
-       {
-      name: "Sarf Sipariş",
-      path: "/management/orders/products",
-      icon: <ToyBrick size={18} />,
-      moduleCode: "cargo",
-      allowedRoles: ["Developer", "Admin", "Mağaza Müdürü", "Depo Personeli"],
-    },
+    }
   ];
 
   const searchableLinks: SearchItem[] = rawNavLinks.flatMap((link) => {
