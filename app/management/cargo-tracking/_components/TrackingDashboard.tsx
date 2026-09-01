@@ -22,7 +22,7 @@ interface DashboardStats {
   todayProcessed: number;
 }
 
-// Chart verisi için Type (Vercel hatasını önler)
+// Chart verisi için Type
 interface ChartDataPoint {
   date: string;
   basarili: number;
@@ -80,7 +80,7 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
             const isError = /[a-zA-Z]/.test(tracking);
             const isReturned = row.is_returned;
 
-            // Type-Safe Statü Ataması (Vercel Çözümü 1)
+            // Type-Safe Statü Ataması
             let status: 'basarili' | 'iade' | 'hatali' = 'basarili';
             if (isReturned) {
               s.returned++;
@@ -99,7 +99,6 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
               dateMap.set(dateStr, { date: dateStr, basarili: 0, iade: 0, hatali: 0 });
             }
             
-            // Artık TypeScript bunun ChartDataPoint key'leri ile eşleştiğini biliyor
             const dayData = dateMap.get(dateStr)!;
             dayData[status]++;
           });
@@ -168,7 +167,7 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
         .loop-border::after {
           content: '';
           position: absolute;
-          inset: 3px; /* Kalınlaştırılmış İç Boşluk */
+          inset: 3px;
           background: #fff;
           border-radius: 0.25rem;
           z-index: -1;
@@ -183,7 +182,7 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
       {/* 1. SATIR: DİJİTAL KPI KARTLARI */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         
-        {/* BUGÜN İŞLENEN (MAVİ LOOP) */}
+        {/* BUGÜN İŞLENEN */}
         <div className="loop-border shadow-sm flex flex-col justify-center p-5 sm:p-6" style={{ '--loop-color': COLORS.today } as React.CSSProperties}>
           <div className="absolute top-4 right-4 p-2 bg-blue-50 border border-blue-100 rounded-md text-blue-500">
             <Activity className="w-5 h-5 animate-pulse" />
@@ -195,7 +194,7 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
           </div>
         </div>
 
-        {/* BAŞARILI KARGO (EMERALD LOOP) */}
+        {/* BAŞARILI KARGO */}
         <div className="loop-border shadow-sm flex flex-col justify-center p-5 sm:p-6" style={{ '--loop-color': COLORS.success } as React.CSSProperties}>
           <div className="absolute top-4 right-4 p-2 bg-emerald-50 border border-emerald-100 rounded-md text-[#03DF95]">
             <CheckCircle2 className="w-5 h-5" />
@@ -207,7 +206,7 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
           </div>
         </div>
 
-        {/* İADELER (PEMBE/MOR LOOP) */}
+        {/* İADELER */}
         <div className="loop-border shadow-sm flex flex-col justify-center p-5 sm:p-6" style={{ '--loop-color': COLORS.returned } as React.CSSProperties}>
           <div className="absolute top-4 right-4 p-2 bg-fuchsia-50 border border-fuchsia-100 rounded-md text-[#d946ef]">
             <Undo2 className="w-5 h-5" />
@@ -219,7 +218,7 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
           </div>
         </div>
 
-        {/* HATALI/EKSİK ADRES (TURUNCU LOOP) */}
+        {/* HATALI/EKSİK ADRES */}
         <div className="loop-border shadow-sm flex flex-col justify-center p-5 sm:p-6" style={{ '--loop-color': COLORS.error } as React.CSSProperties}>
           <div className="absolute top-4 right-4 p-2 bg-orange-50 border border-orange-100 rounded-md text-orange-500">
             <AlertTriangle className="w-5 h-5" />
@@ -266,15 +265,17 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                 <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b', fontWeight: 900 }} dy={10} />
                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b', fontWeight: 900 }} />
-                {/* Tooltip Formatter Tipi Düzeltildi (Vercel Çözümü 2) */}
+                
+                {/* DÜZELTİLEN TOOLTIP */}
                 <Tooltip 
-                  formatter={(value: number, name: string) => {
+                  formatter={(value: any, name: any) => {
                     const label = name === 'basarili' ? 'Başarılı' : name === 'iade' ? 'İade' : 'Hatalı';
                     return [`${value} Kayıt`, label];
                   }}
                   contentStyle={{ borderRadius: '6px', border: '3px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                   labelStyle={{ fontWeight: 'black', color: '#0f172a', marginBottom: '8px', textTransform: 'uppercase' }}
                 />
+                
                 <Area type="monotone" dataKey="basarili" stroke={COLORS.success} strokeWidth={3} fillOpacity={1} fill="url(#colorBasarili)" activeDot={{ r: 5, fill: '#fff', stroke: COLORS.success, strokeWidth: 3 }} />
                 <Area type="monotone" dataKey="iade" stroke={COLORS.returned} strokeWidth={3} fillOpacity={1} fill="url(#colorIade)" />
                 <Area type="monotone" dataKey="hatali" stroke={COLORS.error} strokeWidth={3} fill="none" strokeDasharray="5 5" />
@@ -309,16 +310,16 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
-                {/* Tooltip Formatter Tipi Düzeltildi */}
+                
+                {/* DÜZELTİLEN TOOLTIP */}
                 <Tooltip 
-                  formatter={(value: number) => [`${value} Kayıt`, '']}
+                  formatter={(value: any) => [`${value} Kayıt`, '']}
                   contentStyle={{ borderRadius: '6px', border: '3px solid #e2e8f0', background: '#fff', color: '#0f172a' }}
                   itemStyle={{ color: '#0f172a', fontWeight: '900', textTransform: 'uppercase' }}
                 />
               </PieChart>
             </ResponsiveContainer>
             
-            {/* Ortadaki Yüzde Göstergesi */}
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
               <span className="text-3xl font-black text-slate-800 font-mono">
                 {stats.totalRecords > 0 ? Math.round((stats.success / stats.totalRecords) * 100) : 0}%
@@ -327,7 +328,6 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
             </div>
           </div>
 
-          {/* Efsane (Legend) Listesi */}
           <div className="flex flex-col gap-2.5 mt-4 z-10">
             {pieData.map((item, idx) => (
               <div key={idx} className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest bg-slate-50 px-3 py-2.5 rounded-sm border-2 border-slate-200">
@@ -345,7 +345,7 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
       {/* 3. SATIR: İKİNCİL GRAFİK VE DETAYLAR (BAR CHART) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
-        {/* BAR CHART: İADE VS HATALI KARŞILAŞTIRMASI */}
+        {/* BAR CHART */}
         <div className="bg-white border-[3px] border-slate-200 rounded-md shadow-sm p-5 sm:p-6">
           <div className="flex flex-col mb-6">
             <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Sorunlu Kayıt Analizi</h3>
@@ -357,9 +357,10 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b', fontWeight: 900 }} dy={10} />
                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b', fontWeight: 900 }} />
-                {/* Tooltip Formatter Tipi Düzeltildi */}
+                
+                {/* DÜZELTİLEN TOOLTIP */}
                 <Tooltip 
-                  formatter={(value: number, name: string) => {
+                  formatter={(value: any, name: any) => {
                     const label = name === 'iade' ? 'İade' : 'Hatalı Adres';
                     return [`${value} Kayıt`, label];
                   }}
@@ -406,7 +407,6 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
         </div>
 
       </div>
-
     </div>
   );
 }
