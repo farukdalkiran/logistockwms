@@ -174,18 +174,18 @@ export const Navbar = () => {
     },
     {
       name: "Eksik Parça Yönetimi",
-      path: "/management/cargo",
+      path: "/management/cargo-tracking",
       icon: <ToyBrick size={18} />,
       moduleCode: "cargo",
       allowedRoles: ["Developer", "Admin", "Mağaza Müdürü", "Depo Personeli"],
     },
-    {
-      name: "LogiStock Bülten",
-      path: "/management/news",
-      icon: <Newspaper size={18} />,
-      moduleCode: "news",
-      allowedRoles: ["Developer", "Admin", "Mağaza Müdürü", "Depo Müdürü", "İK Bölge Müdürü", "Ekip Lideri"],
-    }
+       {
+      name: "Sarf Sipariş",
+      path: "/management/orders/products",
+      icon: <ToyBrick size={18} />,
+      moduleCode: "cargo",
+      allowedRoles: ["Developer", "Admin", "Mağaza Müdürü", "Depo Personeli"],
+    },
   ];
 
   const searchableLinks: SearchItem[] = rawNavLinks.flatMap((link) => {
