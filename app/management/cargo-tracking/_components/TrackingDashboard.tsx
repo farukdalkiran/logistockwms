@@ -23,7 +23,7 @@ interface DashboardStats {
 }
 
 interface ChartDataPoint {
-  date: string;
+  label: string; 
   basarili: number;
   iade: number;
   hatali: number;
@@ -39,7 +39,7 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
     todayProcessed: 0
   });
   
-  const [weeklyData, setWeeklyData] = useState<ChartDataPoint[]>([]);
+  const [batchData, setBatchData] = useState<ChartDataPoint[]>([]);
   const [loading, setLoading] = useState(true);
 
   // RENK PALETİ: İade kırmızı yapıldı.
@@ -59,31 +59,51 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
         const serverStats = await getKargoStats();
         const todayCount = serverStats.success ? serverStats.today : 0;
 
-        const { data: cargoData, error: cargoError } = await supabase
-          .from("cargo_records")
-          .select("created_at, aras_tracking_number, aras_shipment_number, is_returned, item_count")
-          .limit(10000)
-          .order("created_at", { ascending: false });
+        // YENİ MOTOR: Supabase 1000 limitini aşmak için Loop (Chunk) ile tüm veriyi çekme
+        let allData: any[] = [];
+        let from = 0;
+        const step = 1000;
+        let fetchMore = true;
 
-        if (cargoError) throw cargoError;
+        while (fetchMore) {
+          const { data, error } = await supabase
+            .from("cargo_records")
+            .select("created_at, aras_tracking_number, aras_shipment_number, is_returned, item_count")
+            .range(from, from + step - 1)
+            .order("created_at", { ascending: true }); // Eskiden yeniye
+
+          if (error) throw error;
+
+          if (data && data.length > 0) {
+            allData = [...allData, ...data];
+            // Eğer çekilen veri 1000'den azsa, son partiyi aldık demektir.
+            if (data.length < step) {
+              fetchMore = false;
+            } else {
+              from += step;
+            }
+          } else {
+            fetchMore = false;
+          }
+        }
 
         let s = { totalRecords: 0, totalItems: 0, success: 0, returned: 0, error: 0, todayProcessed: todayCount };
-        const dateMap = new Map<string, ChartDataPoint>();
+        
+        // Sanal Batch Haritası (Aynı dakika içinde yüklenen verileri 1 grup sayar)
+        const batchMap = new Map<string, ChartDataPoint>();
+        let batchCounter = 1;
 
-        if (cargoData) {
-          cargoData.forEach(row => {
+        if (allData.length > 0) {
+          allData.forEach(row => {
             s.totalRecords++;
             s.totalItems += (row.item_count || 1);
 
             const tracking = String(row.aras_tracking_number || "").trim();
             const shipment = String(row.aras_shipment_number || "").trim();
             
-            // EKSİK / HATALI ADRES MANTIĞI:
-            // 1. Herhangi birinde harf varsa (Türkçe veya İngilizce) -> Hatalı
-            // 2. İkisi de tamamen boşsa -> Hatalı
+            // EKSİK / HATALI ADRES MANTIĞI
             const hasLetter = /[a-zA-ZçğöşüıÇĞÖŞÜİ]/i;
             const isError = hasLetter.test(tracking) || hasLetter.test(shipment) || (tracking === "" && shipment === "");
-            
             const isReturned = row.is_returned;
 
             let status: 'basarili' | 'iade' | 'hatali' = 'basarili';
@@ -97,24 +117,29 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
               s.success++;
             }
 
+            // Yükleme (Batch) Tespiti: "Yıl-Ay-Gün Saat:Dakika"
             const recordDate = new Date(row.created_at);
-            const dateStr = recordDate.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' });
+            const batchKey = recordDate.toISOString().slice(0, 16); 
             
-            if (!dateMap.has(dateStr)) {
-              dateMap.set(dateStr, { date: dateStr, basarili: 0, iade: 0, hatali: 0 });
+            if (!batchMap.has(batchKey)) {
+              batchMap.set(batchKey, { 
+                label: `İşlem ${batchCounter++}`, 
+                basarili: 0, 
+                iade: 0, 
+                hatali: 0 
+              });
             }
             
-            const dayData = dateMap.get(dateStr)!;
-            dayData[status]++;
+            const currentBatch = batchMap.get(batchKey)!;
+            currentBatch[status]++;
           });
         }
 
-        const chartData = Array.from(dateMap.values())
-          .reverse()
-          .slice(-7);
+        // Sadece son 10 İşlemi/Yüklemeyi al (Grafikler kalabalık olmasın diye)
+        const chartData = Array.from(batchMap.values()).slice(-10);
 
         if (isMounted) {
-          setWeeklyData(chartData);
+          setBatchData(chartData);
           setStats(s);
         }
       } catch (err: any) {
@@ -146,7 +171,6 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
   return (
     <div className="w-full flex flex-col gap-6 animate-in fade-in duration-300 font-['Quicksand'] bg-slate-50 p-2 sm:p-4 min-h-screen">
       
-      {/* SADE VE İNCE LOOP ANİMASYONU */}
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes border-spin {
           100% { transform: rotate(360deg); }
@@ -154,7 +178,7 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
         .loop-border {
           position: relative;
           background: #fff;
-          border-radius: 0.375rem; /* rounded-md */
+          border-radius: 0.375rem; 
           z-index: 1;
           overflow: hidden;
         }
@@ -184,10 +208,7 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
         <p className="text-xs font-bold text-slate-500 uppercase">WMS Kargo İstatistik Merkezi</p>
       </div>
 
-      {/* 1. SATIR: DİJİTAL KPI KARTLARI */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-        
-        {/* BUGÜN İŞLENEN */}
         <div className="loop-border shadow-sm flex flex-col justify-center p-5 sm:p-6" style={{ '--loop-color': COLORS.today } as React.CSSProperties}>
           <div className="absolute top-4 right-4 p-2 bg-blue-50 border border-blue-100 rounded-md text-blue-500">
             <Activity className="w-5 h-5 animate-pulse" />
@@ -199,7 +220,6 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
           </div>
         </div>
 
-        {/* BAŞARILI KARGO */}
         <div className="loop-border shadow-sm flex flex-col justify-center p-5 sm:p-6" style={{ '--loop-color': COLORS.success } as React.CSSProperties}>
           <div className="absolute top-4 right-4 p-2 bg-emerald-50 border border-emerald-100 rounded-md text-[#03DF95]">
             <CheckCircle2 className="w-5 h-5" />
@@ -211,7 +231,6 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
           </div>
         </div>
 
-        {/* İADELER (KIRMIZI LOOP) */}
         <div className="loop-border shadow-sm flex flex-col justify-center p-5 sm:p-6" style={{ '--loop-color': COLORS.returned } as React.CSSProperties}>
           <div className="absolute top-4 right-4 p-2 bg-red-50 border border-red-100 rounded-md text-red-500">
             <Undo2 className="w-5 h-5" />
@@ -223,7 +242,6 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
           </div>
         </div>
 
-        {/* HATALI/EKSİK ADRES */}
         <div className="loop-border shadow-sm flex flex-col justify-center p-5 sm:p-6" style={{ '--loop-color': COLORS.error } as React.CSSProperties}>
           <div className="absolute top-4 right-4 p-2 bg-orange-50 border border-orange-100 rounded-md text-orange-500">
             <AlertTriangle className="w-5 h-5" />
@@ -234,29 +252,25 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
             <span className="text-[10px] text-orange-400 font-bold uppercase tracking-wider">KAYIT</span>
           </div>
         </div>
-
       </div>
 
-      {/* 2. SATIR: VERİ GÖRSELLEŞTİRME GRAFİKLERİ */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 mt-2">
-        
-        {/* ANA GRAFİK: ZAMAN ÇİZELGESİ (AREA CHART) */}
         <div className="xl:col-span-2 bg-white border border-slate-200 rounded-md shadow-sm flex flex-col p-5 sm:p-6">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
             <div className="flex flex-col">
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Haftalık Trend Analizi</h3>
-              <span className="text-[10px] font-bold text-slate-500 mt-0.5 uppercase tracking-wider">Son 7 Günlük Kargo İşlem Dağılımı</span>
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Performans Trend Analizi</h3>
+              <span className="text-[10px] font-bold text-slate-500 mt-0.5 uppercase tracking-wider">Son 10 Yükleme / İşlem Dağılımı</span>
             </div>
             <div className="flex items-center gap-4 text-[9px] font-black uppercase tracking-widest bg-slate-50 px-3 py-1.5 rounded border border-slate-100">
               <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#03DF95]"></span> BAŞARILI</div>
               <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#ef4444]"></span> İADE</div>
-              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#f97316]"></span> HATALI</div>
+              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#f97316]"></span> Eksik Adres</div>
             </div>
           </div>
           
           <div className="w-full h-80 mt-2">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={weeklyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+              <AreaChart data={batchData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorBasarili" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor={COLORS.success} stopOpacity={0.3}/>
@@ -268,12 +282,12 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b', fontWeight: 800 }} dy={10} />
+                <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b', fontWeight: 800 }} dy={10} />
                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b', fontWeight: 800 }} />
                 
                 <Tooltip 
                   formatter={(value: any, name: any) => {
-                    const label = name === 'basarili' ? 'Başarılı' : name === 'iade' ? 'İade' : 'Hatalı';
+                    const label = name === 'basarili' ? 'Başarılı' : name === 'iade' ? 'İade' : 'Eksik Adres';
                     return [`${value} Kayıt`, label];
                   }}
                   contentStyle={{ borderRadius: '6px', border: '2px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
@@ -289,9 +303,7 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
           </div>
         </div>
 
-        {/* SAĞ PANEL: DURUM DAĞILIMI (DONUT CHART) */}
         <div className="bg-white border border-slate-200 rounded-md shadow-sm flex flex-col p-5 sm:p-6 relative overflow-hidden">
-          
           <div className="flex flex-col mb-4 relative z-10">
             <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Oransal Dağılım</h3>
             <span className="text-[10px] font-bold text-slate-500 mt-0.5 uppercase tracking-wider">Tüm Veritabanı Özeti</span>
@@ -315,7 +327,6 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
-                
                 <Tooltip 
                   formatter={(value: any) => [`${value} Kayıt`, '']}
                   contentStyle={{ borderRadius: '6px', border: '2px solid #e2e8f0', background: '#fff', color: '#0f172a' }}
@@ -323,7 +334,6 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
                 />
               </PieChart>
             </ResponsiveContainer>
-            
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
               <span className="text-3xl font-black text-slate-800 font-mono">
                 {stats.totalRecords > 0 ? Math.round((stats.success / stats.totalRecords) * 100) : 0}%
@@ -346,10 +356,7 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
         </div>
       </div>
 
-      {/* 3. SATIR: İKİNCİL GRAFİK VE DETAYLAR (BAR CHART) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-2">
-        
-        {/* BAR CHART */}
         <div className="bg-white border border-slate-200 rounded-md shadow-sm p-5 sm:p-6">
           <div className="flex flex-col mb-6">
             <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Sorunlu Kayıt Analizi</h3>
@@ -357,14 +364,13 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
           </div>
           <div className="w-full h-60 mt-2">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={weeklyData} margin={{ top: 0, right: 0, left: -25, bottom: 0 }} barSize={25}>
+              <BarChart data={batchData} margin={{ top: 0, right: 0, left: -25, bottom: 0 }} barSize={25}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b', fontWeight: 800 }} dy={10} />
+                <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b', fontWeight: 800 }} dy={10} />
                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b', fontWeight: 800 }} />
-                
                 <Tooltip 
                   formatter={(value: any, name: any) => {
-                    const label = name === 'iade' ? 'İade' : 'Hatalı Adres';
+                    const label = name === 'iade' ? 'İade' : 'Eksik Adres';
                     return [`${value} Kayıt`, label];
                   }}
                   contentStyle={{ borderRadius: '6px', border: '2px solid #e2e8f0' }}
@@ -378,7 +384,6 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
           </div>
         </div>
 
-        {/* GENEL DURUM ÖZETİ KARTI */}
         <div className="bg-white border border-slate-200 rounded-md shadow-sm p-5 sm:p-6 flex flex-col justify-between">
            <div className="flex flex-col mb-6">
             <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Veritabanı Genel Özeti</h3>

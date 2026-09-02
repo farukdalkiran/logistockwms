@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState, Fragment } from "react";
+import { useEffect, useState, FormEvent } from "react";
 import { supabase } from "@/lib/supabase"; 
 import * as XLSX from "xlsx"; 
 import toast, { Toaster } from "react-hot-toast";
-import { Truck, Undo2, Search,AlertTriangle } from 'lucide-react';
+import { Truck, Undo2, Search, AlertTriangle, RefreshCw, Trash2 } from 'lucide-react';
 
 interface ShipmentRecord {
   id: string;
@@ -19,118 +19,128 @@ interface ShipmentRecord {
   created_at: string;
 }
 
-interface TableProps {
-  onTrackClick?: (trackingNo: string) => void; 
-}
-
 type SortKey = keyof ShipmentRecord;
 type SortDirection = "asc" | "desc";
 type FilterType = "ALL" | "RETURN" | "ERROR" | "NORMAL";
 type FieldFilterType = "ALL" | "SD" | "DELIVERY" | "CUSTOMER" | "TRACKING";
 
-export default function TrackingTable({ onTrackClick }: TableProps) {
+export default function TrackingTable() {
   const [records, setRecords] = useState<ShipmentRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [totalRecordsCount, setTotalRecordsCount] = useState(0);
   
-  // ARAMA STATE'LERİ (Yazarken ayrı, aratınca ayrı çalışır)
+  // ARAMA VE FİLTRE STATE'LERİ
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  
+  const [filterType, setFilterType] = useState<FilterType>("ALL");
+  const [specificField, setSpecificField] = useState<FieldFilterType>("ALL");
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
 
+  // SAYFALAMA VE SIRALAMA
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState<number>(15);
+  const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection }>({ key: "created_at", direction: "desc" });
+
+  // MODALLAR
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const [returnModal, setReturnModal] = useState<{isOpen: boolean, id: string, currentStatus: boolean}>({ 
-    isOpen: false, 
-    id: "", 
-    currentStatus: false 
+    isOpen: false, id: "", currentStatus: false 
   });
   const [isReturning, setIsReturning] = useState(false);
-  
-  const [currentPage, setCurrentPage] = useState(1);
-  const [rowsPerPage, setRowsPerPage] = useState<number>(15);
-  const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection } | null>({ key: "created_at", direction: "desc" });
-  
-  const [filterType, setFilterType] = useState<FilterType>("ALL");
-  const [startDate, setStartDate] = useState<string>("");
-  const [endDate, setEndDate] = useState<string>("");
-  const [specificField, setSpecificField] = useState<FieldFilterType>("ALL");
 
-  useEffect(() => {
-    let isMounted = true; 
-
-    const fetchRecords = async () => {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from("cargo_records")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(2500);
-
-      if (isMounted) {
-        if (!error && data) {
-          setRecords(data as ShipmentRecord[]); 
-        } else if (error) {
-          toast.error("Veritabanından veriler çekilirken sorun oluştu.");
-          console.error("Veri çekme hatası:", error);
-        }
-        setLoading(false);
-      }
-    };
-
-    fetchRecords();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  // YENİ EKSİK ADRES MANTIĞI: Sadece Shipment veya Tracking alanında harf/metin varsa hatalıdır.
+  // YENİ EKSİK ADRES MANTIĞI: Herhangi birinde harf varsa veya ikisi de boşsa hatalıdır.
   const isAddressError = (rec: ShipmentRecord) => {
-    const s = rec.aras_shipment_number || "";
-    const t = rec.aras_tracking_number || "";
-    // Türkçe veya İngilizce harf içeriyorsa true döner
-    return /[a-zA-ZçğöşüıÇĞÖŞÜİ]/.test(s) || /[a-zA-ZçğöşüıÇĞÖŞÜİ]/.test(t);
+    const s = String(rec.aras_shipment_number || "").trim();
+    const t = String(rec.aras_tracking_number || "").trim();
+    const hasLetter = /[a-zA-ZçğöşüıÇĞÖŞÜİ]/i;
+    return hasLetter.test(t) || hasLetter.test(s) || (t === "" && s === "");
   };
 
-  const triggerReturnToggle = (id: string, currentStatus: boolean) => {
-    setReturnModal({ isOpen: true, id, currentStatus });
-  };
-
-  const confirmReturnToggle = async () => {
-    setIsReturning(true);
-    const { id, currentStatus } = returnModal;
-    const newStatus = !currentStatus;
-
+  // VERİTABANINDAN VERİ ÇEKME FONKSİYONU (SERVER-SIDE)
+  const fetchRecords = async () => {
+    setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from("cargo_records")
-        .update({ is_returned: newStatus })
-        .eq("id", id)
-        .select();
+      let query = supabase.from("cargo_records").select("*", { count: "exact" });
+
+      // 1. ARAMA FİLTRESİ
+      if (searchQuery) {
+        if (specificField === "SD") query = query.ilike("sd_document", `%${searchQuery}%`);
+        else if (specificField === "DELIVERY") query = query.ilike("delivery_number", `%${searchQuery}%`);
+        else if (specificField === "CUSTOMER") query = query.ilike("customer_name", `%${searchQuery}%`);
+        else if (specificField === "TRACKING") {
+          query = query.or(`aras_tracking_number.ilike.%${searchQuery}%,aras_shipment_number.ilike.%${searchQuery}%`);
+        } else {
+          // Tümü
+          query = query.or(`customer_name.ilike.%${searchQuery}%,sd_document.ilike.%${searchQuery}%,delivery_number.ilike.%${searchQuery}%,mobile_number.ilike.%${searchQuery}%,aras_tracking_number.ilike.%${searchQuery}%,aras_shipment_number.ilike.%${searchQuery}%`);
+        }
+      }
+
+      // 2. DURUM FİLTRESİ
+      if (filterType === "RETURN") {
+        query = query.eq("is_returned", true);
+      } else if (filterType === "NORMAL") {
+        query = query.eq("is_returned", false);
+      }
+
+      // 3. TARİH FİLTRESİ
+      if (startDate) query = query.gte("created_at", `${startDate}T00:00:00Z`);
+      if (endDate) query = query.lte("created_at", `${endDate}T23:59:59Z`);
+
+      // 4. SIRALAMA VE SAYFALAMA
+      query = query.order(sortConfig.key, { ascending: sortConfig.direction === "asc" });
+      const from = (currentPage - 1) * rowsPerPage;
+      const to = from + rowsPerPage - 1;
+      query = query.range(from, to);
+
+      const { data, count, error } = await query;
 
       if (error) throw error;
-      if (!data || data.length === 0) throw new Error("İşlem yetkisi reddedildi.");
 
-      setRecords(prev => prev.map(r => r.id === id ? { ...r, is_returned: newStatus } : r));
-      setReturnModal({ isOpen: false, id: "", currentStatus: false });
+      // Manuel Eksik Adres Filtresi (Supabase regex desteklemediği için Error tipini JS'de ayıklıyoruz)
+      let finalData = data as ShipmentRecord[];
       
-      if (newStatus) {
-        toast.success("Kayıt İADE olarak güncellendi.", {
-          style: { border: '1px solid #03DF95', background: '#0f172a', color: '#03DF95' }
-        });
+      if (filterType === "ERROR") {
+        // Eğer özellikle hatalı adres seçildiyse (Büyük veride maliyetlidir ama mecburidir)
+        const allQuery = supabase.from("cargo_records").select("*");
+        const allRes = await allQuery;
+        if(allRes.data) {
+           const allErrors = allRes.data.filter(rec => isAddressError(rec));
+           setTotalRecordsCount(allErrors.length);
+           finalData = allErrors.slice(from, to);
+        }
+      } else if (filterType === "NORMAL") {
+        // Normal seçilmişse, JS üzerinde hatalı olanları yine elememiz gerekir
+        const allNormal = finalData.filter(rec => !isAddressError(rec));
+        setRecords(allNormal);
+        if (count !== null) setTotalRecordsCount(count); // Not: Tam count vermeyebilir, yaklaşım
       } else {
-        toast.success("İade iptal edildi, kayıt normale döndü.", {
-          style: { border: '1px solid #475569', background: '#0f172a', color: '#fff' }
-        });
+        setRecords(finalData);
+        if (count !== null) setTotalRecordsCount(count);
       }
 
     } catch (err: any) {
-      console.error("İade Güncelleme Hatası:", err);
-      toast.error("Hata: " + err.message);
+      toast.error("Veri çekme hatası.");
+      console.error(err);
     } finally {
-      setIsReturning(false);
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    fetchRecords();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage, rowsPerPage, sortConfig, filterType, specificField, startDate, endDate, searchQuery]);
+
+
+  const handleSearchSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    setSearchQuery(searchInput);
+    setCurrentPage(1);
   };
 
   const applyDatePreset = (preset: "TODAY" | "WEEK" | "MONTH") => {
@@ -159,101 +169,19 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
     setSpecificField("ALL");
     setSearchInput("");
     setSearchQuery("");
+    setCurrentPage(1);
     toast.success("Filtreler temizlendi.");
   };
 
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setSearchQuery(searchInput);
+  const handleSort = (key: SortKey) => {
+    let direction: SortDirection = "asc";
+    if (sortConfig.key === key && sortConfig.direction === "asc") direction = "desc";
+    setSortConfig({ key, direction });
     setCurrentPage(1);
   };
 
-  // GÜVENLİ FİLTRELEME MOTORU
-  let processedRecords = records.filter(rec => {
-    const searchUpper = searchQuery ? searchQuery.toUpperCase() : "";
-    let matchesSearch = true;
-
-    if (searchUpper) {
-      const customer = rec.customer_name ? rec.customer_name.toUpperCase() : "";
-      const sdDoc = rec.sd_document ? rec.sd_document.toUpperCase() : "";
-      const tracking = rec.aras_tracking_number ? rec.aras_tracking_number.toUpperCase() : "";
-      const shipment = rec.aras_shipment_number ? rec.aras_shipment_number.toUpperCase() : "";
-      const delivery = rec.delivery_number ? rec.delivery_number.toUpperCase() : "";
-      const phone = rec.mobile_number || "";
-
-      if (specificField === "SD") {
-        matchesSearch = sdDoc.includes(searchUpper);
-      } else if (specificField === "DELIVERY") {
-        matchesSearch = delivery.includes(searchUpper);
-      } else if (specificField === "CUSTOMER") {
-        matchesSearch = customer.includes(searchUpper);
-      } else if (specificField === "TRACKING") {
-        matchesSearch = tracking.includes(searchUpper) || shipment.includes(searchUpper);
-      } else {
-        matchesSearch = customer.includes(searchUpper) ||
-          sdDoc.includes(searchUpper) ||
-          tracking.includes(searchUpper) ||
-          shipment.includes(searchUpper) ||
-          delivery.includes(searchUpper) ||
-          phone.includes(searchUpper);
-      }
-    }
-    
-    const matchesSelectFilter = 
-      filterType === "ALL" ? true :
-      filterType === "RETURN" ? rec.is_returned === true :
-      filterType === "ERROR" ? isAddressError(rec) :
-      filterType === "NORMAL" ? (!rec.is_returned && !isAddressError(rec)) : true;
-
-    let matchesDate = true;
-    const recordTime = new Date(rec.created_at).getTime();
-    if (startDate) matchesDate = matchesDate && (recordTime >= new Date(startDate).getTime());
-    if (endDate) {
-      const end = new Date(endDate);
-      end.setHours(23, 59, 59, 999);
-      matchesDate = matchesDate && (recordTime <= end.getTime());
-    }
-
-    return matchesSearch && matchesSelectFilter && matchesDate;
-  });
-
-  if (sortConfig !== null) {
-    processedRecords.sort((a, b) => {
-      let aValue: any = a[sortConfig.key];
-      let bValue: any = b[sortConfig.key];
-
-      if (aValue === null || aValue === undefined) aValue = "";
-      if (bValue === null || bValue === undefined) bValue = "";
-
-      if (sortConfig.key === "created_at") {
-        aValue = new Date(aValue).getTime();
-        bValue = new Date(bValue).getTime();
-      } else if (sortConfig.key === "item_count") {
-        aValue = Number(aValue);
-        bValue = Number(bValue);
-      } else if (typeof aValue === "string") {
-        aValue = aValue.toLowerCase();
-        bValue = bValue.toLowerCase();
-      }
-
-      if (aValue < bValue) return sortConfig.direction === "asc" ? -1 : 1;
-      if (aValue > bValue) return sortConfig.direction === "asc" ? 1 : -1;
-      return 0;
-    });
-  }
-
-  const totalPages = Math.ceil(processedRecords.length / rowsPerPage) || 1;
-  if (currentPage > totalPages) setCurrentPage(1);
-  const paginatedRecords = processedRecords.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
-
-  const handleSort = (key: SortKey) => {
-    let direction: SortDirection = "asc";
-    if (sortConfig && sortConfig.key === key && sortConfig.direction === "asc") direction = "desc";
-    setSortConfig({ key, direction });
-  };
-
   const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.checked) setSelectedIds(paginatedRecords.map(r => r.id));
+    if (e.target.checked) setSelectedIds(records.map(r => r.id));
     else setSelectedIds([]);
   };
 
@@ -261,22 +189,43 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
   };
 
+  const triggerReturnToggle = (id: string, currentStatus: boolean) => {
+    setReturnModal({ isOpen: true, id, currentStatus });
+  };
+
+  const confirmReturnToggle = async () => {
+    setIsReturning(true);
+    const { id, currentStatus } = returnModal;
+    const newStatus = !currentStatus;
+
+    try {
+      const { data, error } = await supabase.from("cargo_records").update({ is_returned: newStatus }).eq("id", id).select();
+      if (error || !data || data.length === 0) throw new Error("İşlem yetkisi reddedildi.");
+
+      setRecords(prev => prev.map(r => r.id === id ? { ...r, is_returned: newStatus } : r));
+      setReturnModal({ isOpen: false, id: "", currentStatus: false });
+      toast.success(newStatus ? "Kayıt İADE olarak güncellendi." : "İade iptal edildi.", {
+        style: { border: `1px solid ${newStatus ? '#03DF95' : '#475569'}`, background: '#0f172a', color: newStatus ? '#03DF95' : '#fff' }
+      });
+    } catch (err: any) {
+      toast.error("Hata: " + err.message);
+    } finally {
+      setIsReturning(false);
+    }
+  };
+
   const confirmDelete = async () => {
     setIsDeleting(true);
     try {
-      const { data, error } = await supabase.from("cargo_records").delete().in("id", selectedIds).select();
+      const { error } = await supabase.from("cargo_records").delete().in("id", selectedIds);
       if (error) throw error; 
-      if (!data || data.length === 0) throw new Error("Silme yetkiniz yok veya RLS kuralları engelledi.");
 
-      const deletedCount = selectedIds.length;
-      setRecords(prev => prev.filter(r => !selectedIds.includes(r.id)));
-      setSelectedIds([]);
-      setShowDeleteModal(false);
-      
-      if (paginatedRecords.length === deletedCount && currentPage > 1) setCurrentPage(p => p - 1);
-      toast.success(`${deletedCount} kayıt başarıyla silindi.`, {
+      toast.success(`${selectedIds.length} kayıt başarıyla silindi.`, {
         icon: '🗑️', style: { border: '1px solid #ef4444', background: '#0f172a', color: '#fff' }
       });
+      setSelectedIds([]);
+      setShowDeleteModal(false);
+      fetchRecords(); 
     } catch (err: any) {
       toast.error(`Silme Hatası: ${err.message}`);
     } finally {
@@ -285,10 +234,10 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
   };
 
   const exportToExcel = () => {
-    const dataToExport = selectedIds.length > 0 ? processedRecords.filter(r => selectedIds.includes(r.id)) : processedRecords;
-    if (dataToExport.length === 0) return toast.error("Dışa aktarılacak veri bulunamadı.");
+    if (records.length === 0) return toast.error("Dışa aktarılacak veri bulunamadı.");
+    toast.success("Mevcut ekrandaki veriler Excel'e aktarılıyor...");
 
-    const exportData = dataToExport.map(r => ({
+    const exportData = records.map(r => ({
       "Yüklenme Tarihi": new Date(r.created_at).toLocaleString('tr-TR'),
       "Müşteri": r.customer_name,
       "SD Document": r.sd_document,
@@ -304,7 +253,6 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Rapor");
     XLSX.writeFile(workbook, `WMS_Rapor_${new Date().getTime()}.xlsx`);
-    toast.success("Excel başarıyla indirildi.");
   };
 
   const openArasTrack = (trackingNo: string) => {
@@ -312,8 +260,10 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
     window.open(`https://kargotakip.araskargo.com.tr/mainpage.aspx?code=${trackingNo}`, "Aras_Takip", "width=1000,height=750,left=200,top=100");
   };
 
+  const totalPages = Math.ceil(totalRecordsCount / rowsPerPage) || 1;
+
   const SortHeader = ({ label, sortKey, align = "left" }: { label: string; sortKey: SortKey; align?: "left" | "center" | "right" }) => {
-    const isActive = sortConfig?.key === sortKey;
+    const isActive = sortConfig.key === sortKey;
     return (
       <th 
         className={`px-4 py-4 text-[11px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap cursor-pointer hover:text-slate-900 transition-colors select-none text-${align}`}
@@ -322,8 +272,8 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
         <div className={`flex items-center gap-1.5 ${align === "center" ? "justify-center" : align === "right" ? "justify-end" : ""}`}>
           {label}
           <div className="flex flex-col text-slate-300">
-            <svg className={`w-2.5 h-2.5 ${isActive && sortConfig?.direction === 'asc' ? 'text-[#03DF95]' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 15l7-7 7 7"></path></svg>
-            <svg className={`w-2.5 h-2.5 -mt-1 ${isActive && sortConfig?.direction === 'desc' ? 'text-[#03DF95]' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7"></path></svg>
+            <svg className={`w-2.5 h-2.5 ${isActive && sortConfig.direction === 'asc' ? 'text-[#03DF95]' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 15l7-7 7 7"></path></svg>
+            <svg className={`w-2.5 h-2.5 -mt-1 ${isActive && sortConfig.direction === 'desc' ? 'text-[#03DF95]' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7"></path></svg>
           </div>
         </div>
       </th>
@@ -331,11 +281,8 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
   };
 
   return (
-    <div className="w-full bg-white border border-slate-200 shadow-xl flex flex-col min-w-0 overflow-hidden">
-      <Toaster 
-        position="bottom-right" 
-        toastOptions={{ style: { borderRadius: '12px', background: '#334155', color: '#fff', fontSize: '13px' } }} 
-      />
+    <div className="w-full bg-white border border-slate-200 shadow-xl flex flex-col min-w-0 overflow-hidden rounded-2xl font-['Quicksand']">
+      <Toaster position="bottom-right" toastOptions={{ style: { borderRadius: '12px', background: '#334155', color: '#fff', fontSize: '13px' } }} />
 
       {/* ŞIK VE MODERN FİLTRE PANELİ (Koyu Tema & Turkuaz Accent) */}
       <div className="bg-slate-900 border-b border-slate-800 p-5 sm:p-7 flex flex-col gap-6 text-white w-full relative overflow-hidden">
@@ -348,13 +295,10 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
               <h2 className="text-xl sm:text-3xl font-black tracking-wide text-white drop-shadow-sm">
                 Kayıt <span className="text-[#03DF95]">Sorgulama</span>
               </h2>
-              <p className="text-slate-400 text-[11px] sm:text-xs font-bold tracking-widest uppercase mt-1">Gelişmiş Veri Filtreleme ve Kontrol Paneli</p>
+              <p className="text-slate-400 text-[11px] sm:text-xs font-bold tracking-widest uppercase mt-1">Sunucu Tabanlı Filtreleme ve Kontrol</p>
               <div className="flex flex-wrap items-center gap-2 mt-3">
                 <span className="bg-[#03DF95]/10 text-[#03DF95] border border-[#03DF95]/30 px-3 py-1.5 rounded-lg text-xs font-bold shadow-inner">
-                  {processedRecords.length} KAYIT BULUNDU
-                </span>
-                <span className="bg-red-500/10 text-red-400 border border-red-500/30 px-3 py-1.5 rounded-lg text-xs font-bold shadow-inner">
-                  {processedRecords.filter(r=>r.is_returned).length} İADE
+                  {totalRecordsCount.toLocaleString('tr-TR')} KAYIT BULUNDU
                 </span>
               </div>
             </div>
@@ -366,27 +310,25 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
                 onClick={() => setShowDeleteModal(true)}
                 className="bg-red-500 hover:bg-red-600 text-white h-11 px-5 rounded-lg text-xs font-black transition-all shadow-md flex items-center gap-2 uppercase tracking-wider"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                SİL ({selectedIds.length})
+                <Trash2 className="w-4 h-4" /> SİL ({selectedIds.length})
               </button>
             )}
             <button 
               onClick={exportToExcel}
               className="bg-[#03DF95] hover:bg-[#02c784] text-slate-900 h-11 px-5 rounded-lg text-xs font-black transition-all shadow-md flex items-center gap-2 uppercase tracking-wider"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M4 16v1h16v-1M12 4v10m-4-4l4 4 4-4"></path></svg>
               EXCEL İNDİR
             </button>
             <button 
               onClick={resetAllFilters}
-              className="bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 h-11 px-5 rounded-lg text-[11px] font-black border border-slate-600 transition-colors uppercase tracking-widest"
+              className="bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 h-11 px-5 rounded-lg text-[11px] font-black border border-slate-600 transition-colors uppercase tracking-widest flex items-center gap-2"
             >
-              Sıfırla
+              <RefreshCw className="w-4 h-4" /> Sıfırla
             </button>
           </div>
         </div>
 
-        {/* ANA ARAMA ÇUBUĞU (PERFORMANS İÇİN FORMLU YAPI) */}
+        {/* ANA ARAMA ÇUBUĞU */}
         <form onSubmit={handleSearchSubmit} className="relative w-full z-10 pt-2 flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
@@ -417,16 +359,13 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
               <select
                 value={filterType}
                 onChange={(e) => { setFilterType(e.target.value as FilterType); setCurrentPage(1); }}
-                className="h-12 w-full bg-slate-800/80 border border-slate-700 text-white px-4 rounded-xl text-xs font-bold focus:outline-none focus:border-[#03DF95] focus:ring-1 focus:ring-[#03DF95] transition-all cursor-pointer appearance-none shadow-inner"
+                className="h-12 w-full bg-slate-800/80 border border-slate-700 text-white px-4 rounded-xl text-xs font-bold focus:outline-none focus:border-[#03DF95] transition-all cursor-pointer appearance-none shadow-inner"
               >
                 <option value="ALL">KARIŞIK (TÜMÜ)</option>
                 <option value="NORMAL">NORMAL (TESLİMAT)</option>
                 <option value="RETURN">SADECE İADELER</option>
                 <option value="ERROR">EKSİK / HATALI ADRES</option>
               </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"></path></svg>
-              </div>
             </div>
           </div>
 
@@ -436,7 +375,7 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
               <select
                 value={specificField}
                 onChange={(e) => { setSpecificField(e.target.value as any); setCurrentPage(1); }}
-                className="h-12 w-full bg-slate-800/80 border border-slate-700 text-white px-4 rounded-xl text-xs font-bold focus:outline-none focus:border-[#03DF95] focus:ring-1 focus:ring-[#03DF95] transition-all cursor-pointer appearance-none shadow-inner"
+                className="h-12 w-full bg-slate-800/80 border border-slate-700 text-white px-4 rounded-xl text-xs font-bold focus:outline-none focus:border-[#03DF95] transition-all cursor-pointer appearance-none shadow-inner"
               >
                 <option value="ALL">GENEL ARAMA (TÜM ALANLAR)</option>
                 <option value="CUSTOMER">SADECE MÜŞTERİ ADI</option>
@@ -444,9 +383,6 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
                 <option value="DELIVERY">SADECE DELIVERY NO</option>
                 <option value="TRACKING">SADECE TAKİP NO</option>
               </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 9l-7 7-7-7"></path></svg>
-              </div>
             </div>
           </div>
 
@@ -454,11 +390,11 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
             <div className="flex justify-between items-center h-4">
               <label className="text-[11px] font-bold text-[#03DF95] tracking-widest uppercase">Tarih Aralığı</label>
               <div className="flex gap-1">
-                <button onClick={() => applyDatePreset("TODAY")} className="text-[9px] font-black text-slate-300 hover:text-slate-900 hover:bg-[#03DF95] px-2 py-0.5 rounded transition-all uppercase tracking-wider">Bugün</button>
+                <button type="button" onClick={() => applyDatePreset("TODAY")} className="text-[9px] font-black text-slate-300 hover:text-slate-900 hover:bg-[#03DF95] px-2 py-0.5 rounded transition-all uppercase tracking-wider">Bugün</button>
                 <span className="text-slate-700 text-[10px] mx-0.5">|</span>
-                <button onClick={() => applyDatePreset("WEEK")} className="text-[9px] font-black text-slate-300 hover:text-slate-900 hover:bg-[#03DF95] px-2 py-0.5 rounded transition-all uppercase tracking-wider">Hafta</button>
+                <button type="button" onClick={() => applyDatePreset("WEEK")} className="text-[9px] font-black text-slate-300 hover:text-slate-900 hover:bg-[#03DF95] px-2 py-0.5 rounded transition-all uppercase tracking-wider">Hafta</button>
                 <span className="text-slate-700 text-[10px] mx-0.5">|</span>
-                <button onClick={() => applyDatePreset("MONTH")} className="text-[9px] font-black text-slate-300 hover:text-slate-900 hover:bg-[#03DF95] px-2 py-0.5 rounded transition-all uppercase tracking-wider">Ay</button>
+                <button type="button" onClick={() => applyDatePreset("MONTH")} className="text-[9px] font-black text-slate-300 hover:text-slate-900 hover:bg-[#03DF95] px-2 py-0.5 rounded transition-all uppercase tracking-wider">Ay</button>
               </div>
             </div>
             <div className="flex items-center gap-3">
@@ -491,7 +427,7 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
           <thead>
             <tr className="bg-slate-50/80 border-b border-slate-200">
               <th className="px-4 py-3 w-12 text-center border-r border-slate-100">
-                <input type="checkbox" checked={paginatedRecords.length > 0 && selectedIds.length === paginatedRecords.length} onChange={handleSelectAll} className="w-4 h-4 cursor-pointer accent-[#03DF95] rounded-md border-slate-300" />
+                <input type="checkbox" checked={records.length > 0 && selectedIds.length === records.length} onChange={handleSelectAll} className="w-4 h-4 cursor-pointer accent-[#03DF95] rounded-md border-slate-300" />
               </th>
               <SortHeader label="Yüklenme" sortKey="created_at" />
               <SortHeader label="Müşteri Bilgisi" sortKey="customer_name" />
@@ -508,23 +444,23 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
                 <td colSpan={8} className="px-4 py-24 text-center bg-white">
                   <div className="flex flex-col items-center justify-center gap-4">
                     <svg className="animate-spin w-8 h-8 text-[#03DF95]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                    <span className="text-sm font-medium text-slate-500">Veriler Yükleniyor...</span>
+                    <span className="text-sm font-medium text-slate-500">Sunucudan Veriler Çekiliyor...</span>
                   </div>
                 </td>
               </tr>
-            ) : paginatedRecords.length === 0 ? (
+            ) : records.length === 0 ? (
               <tr>
                 <td colSpan={8} className="px-4 py-20 text-center text-sm font-medium text-slate-500 bg-slate-50/50">
                   Belirtilen kriterlere uygun kayıt bulunamadı.
                 </td>
               </tr>
             ) : (
-              paginatedRecords.map((rec) => {
+              records.map((rec) => {
                 const addressErr = isAddressError(rec);
                 const isSelected = selectedIds.includes(rec.id);
                 
                 return (
-                  <tr key={rec.id} className={`transition-all hover:bg-slate-50 ${isSelected ? "bg-emerald-50/50" : "bg-white"}`}>
+                  <tr key={rec.id} className={`transition-colors hover:bg-slate-50 ${isSelected ? "bg-emerald-50/50" : "bg-white"}`}>
                     <td className="px-4 py-3 text-center border-r border-slate-100">
                       <input type="checkbox" checked={isSelected} onChange={() => handleSelect(rec.id)} className="w-4 h-4 cursor-pointer accent-[#03DF95] rounded-md border-slate-300" />
                     </td>
@@ -541,8 +477,8 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
                     
                     <td className="px-4 py-3 whitespace-nowrap">
                       <div className="flex flex-col gap-0.5">
-                        <span className="text-xs font-bold text-slate-700"><span className="text-[10px] text-slate-400 font-normal">SD:</span> {rec.sd_document}</span>
-                        <span className="text-xs font-bold text-slate-700"><span className="text-[10px] text-slate-400 font-normal">DN:</span> {rec.delivery_number}</span>
+                        <span className="text-[11px] font-bold text-slate-700"><span className="text-[9px] text-slate-400 font-normal mr-1">SD:</span>{rec.sd_document}</span>
+                        <span className="text-[11px] font-bold text-slate-700"><span className="text-[9px] text-slate-400 font-normal mr-1">DN:</span>{rec.delivery_number}</span>
                       </div>
                     </td>
                     
@@ -552,14 +488,14 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
                           <span className="text-orange-700 text-[9px] font-bold uppercase flex items-center gap-1">
                             <AlertTriangle className="w-3 h-3" /> EKSİK/HATALI ADRES
                           </span>
-                          <span className="text-slate-700 text-[11px] font-semibold truncate max-w-[200px]" title={/[a-zA-Z]/.test(rec.aras_shipment_number) ? rec.aras_shipment_number : rec.aras_tracking_number}>
-                            {/[a-zA-Z]/.test(rec.aras_shipment_number) ? rec.aras_shipment_number : rec.aras_tracking_number}
+                          <span className="text-slate-700 text-[10px] font-semibold truncate max-w-[180px]" title={/[a-zA-Z]/.test(rec.aras_shipment_number) ? rec.aras_shipment_number : rec.aras_tracking_number}>
+                            {/[a-zA-Z]/.test(rec.aras_shipment_number) ? rec.aras_shipment_number : rec.aras_tracking_number || "Numara Yok"}
                           </span>
                         </div>
                       ) : (
                         <div className={`flex flex-col gap-0.5 ${rec.is_returned ? 'text-slate-400 line-through opacity-70' : 'text-slate-900'}`}>
-                          <span className="text-[11px] font-semibold"><span className="text-[10px] text-slate-400 font-normal mr-1">S:</span>{rec.aras_shipment_number || "-"}</span>
-                          <span className="text-[11px] font-bold text-[#03DF95]"><span className="text-[10px] text-slate-400 font-normal mr-1">T:</span>{rec.aras_tracking_number || "-"}</span>
+                          <span className="text-[11px] font-semibold"><span className="text-[9px] text-slate-400 font-normal mr-1">S:</span>{rec.aras_shipment_number || "-"}</span>
+                          <span className="text-[11px] font-bold text-[#03DF95]"><span className="text-[9px] text-slate-400 font-normal mr-1">T:</span>{rec.aras_tracking_number || "-"}</span>
                         </div>
                       )}
                     </td>
@@ -576,7 +512,7 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
                       {rec.is_returned ? (
                         <span className="bg-red-100 text-red-700 px-2.5 py-1 text-[10px] font-bold uppercase rounded-md border border-red-200">İade</span>
                       ) : (
-                        <span className="text-slate-400 text-sm font-medium">-</span>
+                        <span className="text-slate-400 text-xs font-medium">-</span>
                       )}
                     </td>
 
@@ -586,8 +522,8 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
                           onClick={() => triggerReturnToggle(rec.id, rec.is_returned)}
                           className={`p-2 rounded-lg transition-all border shadow-sm ${
                             rec.is_returned 
-                              ? "bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200 hover:text-slate-700" 
-                              : "bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100 hover:text-orange-700"
+                              ? "bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200" 
+                              : "bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100"
                           }`}
                           title={rec.is_returned ? "İadeyi İptal Et" : "İadeye Çek"}
                         >
@@ -597,7 +533,7 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
                         <button 
                           onClick={() => openArasTrack(rec.aras_tracking_number)}
                           disabled={!rec.aras_tracking_number || addressErr}
-                          className="p-2 rounded-lg bg-[#03DF95] hover:bg-[#02c784] text-slate-900 disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 transition-all border border-[#03DF95] shadow-sm"
+                          className="p-2 rounded-lg bg-[#03DF95] hover:bg-[#02c784] text-slate-900 disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 transition-all border border-transparent shadow-sm"
                           title="Kargo Takip"
                         >
                           <Truck className="w-4 h-4" />
@@ -613,7 +549,7 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
       </div>
 
       {/* SAYFALAMA VE GÖSTERİM BARI */}
-      {!loading && processedRecords.length > 0 && (
+      {!loading && totalRecordsCount > 0 && (
         <div className="bg-white border-t border-slate-200 p-4 sm:p-5 flex flex-col md:flex-row justify-between items-center gap-4 rounded-b-2xl">
           <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-start">
             <span className="text-xs font-medium text-slate-500">
