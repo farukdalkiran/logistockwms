@@ -93,7 +93,8 @@ export default function TrackingManager({ employeeId = "00000" }: ManagerProps) 
         )}
         {activeTab === "SEARCH" && (
           <div className="animate-in fade-in duration-300 ease-out">
-            <TrackingTable onTrackClick={(trackingNo) => setActiveTrackingNo(trackingNo)} />
+            {/* onTrackClick Vercel hatası düzeltmesi için TrackingTable'ın kendisinde handle edilecek */}
+            <TrackingTable />
           </div>
         )}
         {activeTab === "UPLOAD" && (

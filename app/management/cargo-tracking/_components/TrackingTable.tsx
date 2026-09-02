@@ -4,7 +4,7 @@ import { useEffect, useState, FormEvent } from "react";
 import { supabase } from "@/lib/supabase"; 
 import * as XLSX from "xlsx"; 
 import toast, { Toaster } from "react-hot-toast";
-import { Truck, Undo2, Search, AlertTriangle, RefreshCw, Trash2 } from 'lucide-react';
+import { Truck, Undo2, Search, AlertTriangle, RefreshCw, Trash2, CheckCircle2 } from 'lucide-react';
 
 interface ShipmentRecord {
   id: string;
@@ -53,7 +53,7 @@ export default function TrackingTable() {
   });
   const [isReturning, setIsReturning] = useState(false);
 
-  // YENİ EKSİK ADRES MANTIĞI: Herhangi birinde harf varsa veya ikisi de boşsa hatalıdır.
+  // YENİ EKSİK ADRES MANTIĞI
   const isAddressError = (rec: ShipmentRecord) => {
     const s = String(rec.aras_shipment_number || "").trim();
     const t = String(rec.aras_tracking_number || "").trim();
@@ -67,7 +67,6 @@ export default function TrackingTable() {
     try {
       let query = supabase.from("cargo_records").select("*", { count: "exact" });
 
-      // 1. ARAMA FİLTRESİ
       if (searchQuery) {
         if (specificField === "SD") query = query.ilike("sd_document", `%${searchQuery}%`);
         else if (specificField === "DELIVERY") query = query.ilike("delivery_number", `%${searchQuery}%`);
@@ -75,37 +74,30 @@ export default function TrackingTable() {
         else if (specificField === "TRACKING") {
           query = query.or(`aras_tracking_number.ilike.%${searchQuery}%,aras_shipment_number.ilike.%${searchQuery}%`);
         } else {
-          // Tümü
           query = query.or(`customer_name.ilike.%${searchQuery}%,sd_document.ilike.%${searchQuery}%,delivery_number.ilike.%${searchQuery}%,mobile_number.ilike.%${searchQuery}%,aras_tracking_number.ilike.%${searchQuery}%,aras_shipment_number.ilike.%${searchQuery}%`);
         }
       }
 
-      // 2. DURUM FİLTRESİ
       if (filterType === "RETURN") {
         query = query.eq("is_returned", true);
       } else if (filterType === "NORMAL") {
         query = query.eq("is_returned", false);
       }
 
-      // 3. TARİH FİLTRESİ
       if (startDate) query = query.gte("created_at", `${startDate}T00:00:00Z`);
       if (endDate) query = query.lte("created_at", `${endDate}T23:59:59Z`);
 
-      // 4. SIRALAMA VE SAYFALAMA
       query = query.order(sortConfig.key, { ascending: sortConfig.direction === "asc" });
       const from = (currentPage - 1) * rowsPerPage;
       const to = from + rowsPerPage - 1;
       query = query.range(from, to);
 
       const { data, count, error } = await query;
-
       if (error) throw error;
 
-      // Manuel Eksik Adres Filtresi (Supabase regex desteklemediği için Error tipini JS'de ayıklıyoruz)
       let finalData = data as ShipmentRecord[];
       
       if (filterType === "ERROR") {
-        // Eğer özellikle hatalı adres seçildiyse (Büyük veride maliyetlidir ama mecburidir)
         const allQuery = supabase.from("cargo_records").select("*");
         const allRes = await allQuery;
         if(allRes.data) {
@@ -114,10 +106,9 @@ export default function TrackingTable() {
            finalData = allErrors.slice(from, to);
         }
       } else if (filterType === "NORMAL") {
-        // Normal seçilmişse, JS üzerinde hatalı olanları yine elememiz gerekir
         const allNormal = finalData.filter(rec => !isAddressError(rec));
         setRecords(allNormal);
-        if (count !== null) setTotalRecordsCount(count); // Not: Tam count vermeyebilir, yaklaşım
+        if (count !== null) setTotalRecordsCount(count); 
       } else {
         setRecords(finalData);
         if (count !== null) setTotalRecordsCount(count);
@@ -233,10 +224,8 @@ export default function TrackingTable() {
     }
   };
 
-  const exportToExcel = () => {
-    if (records.length === 0) return toast.error("Dışa aktarılacak veri bulunamadı.");
-    toast.success("Mevcut ekrandaki veriler Excel'e aktarılıyor...");
-
+  const exportToExcel = async () => {
+    toast.success("Mevcut sayfa Excel'e aktarılıyor...");
     const exportData = records.map(r => ({
       "Yüklenme Tarihi": new Date(r.created_at).toLocaleString('tr-TR'),
       "Müşteri": r.customer_name,
@@ -281,54 +270,53 @@ export default function TrackingTable() {
   };
 
   return (
-    <div className="w-full bg-white border border-slate-200 shadow-xl flex flex-col min-w-0 overflow-hidden rounded-2xl font-['Quicksand']">
-      <Toaster position="bottom-right" toastOptions={{ style: { borderRadius: '12px', background: '#334155', color: '#fff', fontSize: '13px' } }} />
+    <div className="w-full bg-white border border-slate-200 shadow-sm flex flex-col min-w-0 overflow-hidden rounded-md font-['Quicksand']">
+      <Toaster position="bottom-right" toastOptions={{ style: { borderRadius: '8px', background: '#0f172a', color: '#fff', fontSize: '12px' } }} />
 
-      {/* ŞIK VE MODERN FİLTRE PANELİ (Koyu Tema & Turkuaz Accent) */}
+      {/* FİLTRE PANELİ */}
       <div className="bg-slate-900 border-b border-slate-800 p-5 sm:p-7 flex flex-col gap-6 text-white w-full relative overflow-hidden">
-        
-        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-[#03DF95]/5 rounded-full blur-3xl pointer-events-none -translate-y-1/2 translate-x-1/3"></div>
+        <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-[#03DF95]/5 rounded-full blur-3xl pointer-events-none -translate-y-1/2 translate-x-1/3"></div>
 
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 relative z-10">
           <div className="flex items-center gap-5">
             <div className="flex flex-col">
-              <h2 className="text-xl sm:text-3xl font-black tracking-wide text-white drop-shadow-sm">
+              <h2 className="text-xl sm:text-2xl font-black tracking-wide text-white drop-shadow-sm">
                 Kayıt <span className="text-[#03DF95]">Sorgulama</span>
               </h2>
-              <p className="text-slate-400 text-[11px] sm:text-xs font-bold tracking-widest uppercase mt-1">Sunucu Tabanlı Filtreleme ve Kontrol</p>
+              <p className="text-slate-400 text-[11px] font-bold tracking-widest uppercase mt-1">Sunucu Tabanlı Filtreleme ve Kontrol</p>
               <div className="flex flex-wrap items-center gap-2 mt-3">
-                <span className="bg-[#03DF95]/10 text-[#03DF95] border border-[#03DF95]/30 px-3 py-1.5 rounded-lg text-xs font-bold shadow-inner">
+                <span className="bg-[#03DF95]/10 text-[#03DF95] border border-[#03DF95]/30 px-3 py-1 rounded-md text-xs font-bold shadow-sm">
                   {totalRecordsCount.toLocaleString('tr-TR')} KAYIT BULUNDU
                 </span>
               </div>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
             {selectedIds.length > 0 && (
               <button 
                 onClick={() => setShowDeleteModal(true)}
-                className="bg-red-500 hover:bg-red-600 text-white h-11 px-5 rounded-lg text-xs font-black transition-all shadow-md flex items-center gap-2 uppercase tracking-wider"
+                className="bg-red-500 hover:bg-red-600 text-white h-10 px-4 rounded-md text-[11px] font-black transition-colors flex items-center gap-2 uppercase tracking-wider"
               >
                 <Trash2 className="w-4 h-4" /> SİL ({selectedIds.length})
               </button>
             )}
             <button 
               onClick={exportToExcel}
-              className="bg-[#03DF95] hover:bg-[#02c784] text-slate-900 h-11 px-5 rounded-lg text-xs font-black transition-all shadow-md flex items-center gap-2 uppercase tracking-wider"
+              className="bg-[#03DF95] hover:bg-[#02c784] text-slate-900 h-10 px-4 rounded-md text-[11px] font-black transition-colors flex items-center gap-2 uppercase tracking-wider"
             >
               EXCEL İNDİR
             </button>
             <button 
               onClick={resetAllFilters}
-              className="bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 h-11 px-5 rounded-lg text-[11px] font-black border border-slate-600 transition-colors uppercase tracking-widest flex items-center gap-2"
+              className="bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 h-10 px-4 rounded-md text-[10px] font-black border border-slate-700 transition-colors uppercase tracking-widest flex items-center gap-2"
             >
-              <RefreshCw className="w-4 h-4" /> Sıfırla
+              <RefreshCw className="w-3 h-3" /> Sıfırla
             </button>
           </div>
         </div>
 
-        {/* ANA ARAMA ÇUBUĞU */}
+        {/* ARAMA ÇUBUĞU */}
         <form onSubmit={handleSearchSubmit} className="relative w-full z-10 pt-2 flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
@@ -338,83 +326,75 @@ export default function TrackingTable() {
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              className="w-full h-12 sm:h-14 pl-12 pr-4 bg-slate-800/80 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-[#03DF95] focus:ring-1 focus:ring-[#03DF95] uppercase placeholder:text-slate-500 transition-all shadow-inner"
+              className="w-full h-12 pl-12 pr-4 bg-slate-800 border border-slate-700 rounded-md text-white text-sm focus:outline-none focus:border-[#03DF95] uppercase placeholder:text-slate-500 transition-colors"
               placeholder="İSİM, TAKİP NO, SD DOCUMENT VEYA TELEFON YAZIN..."
             />
           </div>
           <button 
             type="submit" 
-            className="h-12 sm:h-14 bg-[#03DF95] hover:bg-[#02c784] text-slate-900 px-8 rounded-xl text-sm font-black uppercase tracking-widest transition-all shadow-md"
+            className="h-12 bg-[#03DF95] hover:bg-[#02c784] text-slate-900 px-8 rounded-md text-xs font-black uppercase tracking-widest transition-colors"
           >
             ARA
           </button>
         </form>
 
-        {/* FİLTRE GRID YAPISI */}
+        {/* FİLTRE GRID */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full relative z-10 pt-4 border-t border-slate-800/50">
           
           <div className="flex flex-col gap-2">
-            <label className="text-[11px] font-bold text-[#03DF95] tracking-widest uppercase">Kargo Durumu</label>
-            <div className="relative">
-              <select
-                value={filterType}
-                onChange={(e) => { setFilterType(e.target.value as FilterType); setCurrentPage(1); }}
-                className="h-12 w-full bg-slate-800/80 border border-slate-700 text-white px-4 rounded-xl text-xs font-bold focus:outline-none focus:border-[#03DF95] transition-all cursor-pointer appearance-none shadow-inner"
-              >
-                <option value="ALL">KARIŞIK (TÜMÜ)</option>
-                <option value="NORMAL">NORMAL (TESLİMAT)</option>
-                <option value="RETURN">SADECE İADELER</option>
-                <option value="ERROR">EKSİK / HATALI ADRES</option>
-              </select>
-            </div>
+            <label className="text-[10px] font-bold text-[#03DF95] tracking-widest uppercase">Kargo Durumu</label>
+            <select
+              value={filterType}
+              onChange={(e) => { setFilterType(e.target.value as FilterType); setCurrentPage(1); }}
+              className="h-10 w-full bg-slate-800 border border-slate-700 text-white px-3 rounded-md text-[11px] font-bold focus:outline-none focus:border-[#03DF95] cursor-pointer"
+            >
+              <option value="ALL">KARIŞIK (TÜMÜ)</option>
+              <option value="NORMAL">NORMAL (TESLİMAT)</option>
+              <option value="RETURN">SADECE İADELER</option>
+              <option value="ERROR">EKSİK / HATALI ADRES</option>
+            </select>
           </div>
 
           <div className="flex flex-col gap-2">
-            <label className="text-[11px] font-bold text-[#03DF95] tracking-widest uppercase">Arama Odağı</label>
-            <div className="relative">
-              <select
-                value={specificField}
-                onChange={(e) => { setSpecificField(e.target.value as any); setCurrentPage(1); }}
-                className="h-12 w-full bg-slate-800/80 border border-slate-700 text-white px-4 rounded-xl text-xs font-bold focus:outline-none focus:border-[#03DF95] transition-all cursor-pointer appearance-none shadow-inner"
-              >
-                <option value="ALL">GENEL ARAMA (TÜM ALANLAR)</option>
-                <option value="CUSTOMER">SADECE MÜŞTERİ ADI</option>
-                <option value="SD">SADECE SD DOCUMENT</option>
-                <option value="DELIVERY">SADECE DELIVERY NO</option>
-                <option value="TRACKING">SADECE TAKİP NO</option>
-              </select>
-            </div>
+            <label className="text-[10px] font-bold text-[#03DF95] tracking-widest uppercase">Arama Odağı</label>
+            <select
+              value={specificField}
+              onChange={(e) => { setSpecificField(e.target.value as any); setCurrentPage(1); }}
+              className="h-10 w-full bg-slate-800 border border-slate-700 text-white px-3 rounded-md text-[11px] font-bold focus:outline-none focus:border-[#03DF95] cursor-pointer"
+            >
+              <option value="ALL">GENEL ARAMA</option>
+              <option value="CUSTOMER">SADECE MÜŞTERİ ADI</option>
+              <option value="SD">SADECE SD DOCUMENT</option>
+              <option value="DELIVERY">SADECE DELIVERY NO</option>
+              <option value="TRACKING">SADECE TAKİP NO</option>
+            </select>
           </div>
 
           <div className="flex flex-col gap-2">
             <div className="flex justify-between items-center h-4">
-              <label className="text-[11px] font-bold text-[#03DF95] tracking-widest uppercase">Tarih Aralığı</label>
+              <label className="text-[10px] font-bold text-[#03DF95] tracking-widest uppercase">Tarih Aralığı</label>
               <div className="flex gap-1">
-                <button type="button" onClick={() => applyDatePreset("TODAY")} className="text-[9px] font-black text-slate-300 hover:text-slate-900 hover:bg-[#03DF95] px-2 py-0.5 rounded transition-all uppercase tracking-wider">Bugün</button>
-                <span className="text-slate-700 text-[10px] mx-0.5">|</span>
-                <button type="button" onClick={() => applyDatePreset("WEEK")} className="text-[9px] font-black text-slate-300 hover:text-slate-900 hover:bg-[#03DF95] px-2 py-0.5 rounded transition-all uppercase tracking-wider">Hafta</button>
-                <span className="text-slate-700 text-[10px] mx-0.5">|</span>
-                <button type="button" onClick={() => applyDatePreset("MONTH")} className="text-[9px] font-black text-slate-300 hover:text-slate-900 hover:bg-[#03DF95] px-2 py-0.5 rounded transition-all uppercase tracking-wider">Ay</button>
+                <button type="button" onClick={() => applyDatePreset("TODAY")} className="text-[9px] font-bold text-slate-400 hover:text-white px-1">Bugün</button>
+                <span className="text-slate-600">|</span>
+                <button type="button" onClick={() => applyDatePreset("WEEK")} className="text-[9px] font-bold text-slate-400 hover:text-white px-1">Hafta</button>
+                <span className="text-slate-600">|</span>
+                <button type="button" onClick={() => applyDatePreset("MONTH")} className="text-[9px] font-bold text-slate-400 hover:text-white px-1">Ay</button>
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="relative flex-1">
-                <input 
-                  type="date" 
-                  value={startDate} 
-                  onChange={(e) => setStartDate(e.target.value)} 
-                  className="h-12 w-full bg-slate-800/80 border border-slate-700 text-white rounded-xl text-[11px] font-bold px-3 focus:outline-none focus:border-[#03DF95] transition-all uppercase shadow-inner" 
-                />
-              </div>
-              <span className="text-slate-500 font-black text-sm">-</span>
-              <div className="relative flex-1">
-                <input 
-                  type="date" 
-                  value={endDate} 
-                  onChange={(e) => setEndDate(e.target.value)} 
-                  className="h-12 w-full bg-slate-800/80 border border-slate-700 text-white rounded-xl text-[11px] font-bold px-3 focus:outline-none focus:border-[#03DF95] transition-all uppercase shadow-inner" 
-                />
-              </div>
+            <div className="flex items-center gap-2">
+              <input 
+                type="date" 
+                value={startDate} 
+                onChange={(e) => setStartDate(e.target.value)} 
+                className="h-10 w-full bg-slate-800 border border-slate-700 text-white rounded-md text-[11px] font-bold px-2 focus:outline-none focus:border-[#03DF95]" 
+              />
+              <span className="text-slate-500 font-black">-</span>
+              <input 
+                type="date" 
+                value={endDate} 
+                onChange={(e) => setEndDate(e.target.value)} 
+                className="h-10 w-full bg-slate-800 border border-slate-700 text-white rounded-md text-[11px] font-bold px-2 focus:outline-none focus:border-[#03DF95]" 
+              />
             </div>
           </div>
 
@@ -423,19 +403,19 @@ export default function TrackingTable() {
 
       {/* VERİ TABLOSU */}
       <div className="overflow-x-auto w-full flex-1 bg-white">
-        <table className="w-full text-left border-collapse min-w-[1200px]">
+        <table className="w-full text-left border-collapse min-w-[1250px]">
           <thead>
-            <tr className="bg-slate-50/80 border-b border-slate-200">
-              <th className="px-4 py-3 w-12 text-center border-r border-slate-100">
-                <input type="checkbox" checked={records.length > 0 && selectedIds.length === records.length} onChange={handleSelectAll} className="w-4 h-4 cursor-pointer accent-[#03DF95] rounded-md border-slate-300" />
+            <tr className="bg-slate-50 border-b border-slate-200">
+              <th className="px-4 py-3 w-10 text-center border-r border-slate-100">
+                <input type="checkbox" checked={records.length > 0 && selectedIds.length === records.length} onChange={handleSelectAll} className="w-3.5 h-3.5 cursor-pointer accent-[#03DF95] rounded-sm" />
               </th>
               <SortHeader label="Yüklenme" sortKey="created_at" />
               <SortHeader label="Müşteri Bilgisi" sortKey="customer_name" />
               <SortHeader label="Evrak & Sipariş" sortKey="sd_document" />
               <SortHeader label="Kargo Numaraları" sortKey="aras_tracking_number" />
               <SortHeader label="Adet" sortKey="item_count" align="center" />
-              <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">Durum</th>
-              <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right pr-6">İşlemler</th>
+              <th className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center">Durum</th>
+              <th className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-right pr-6">İşlemler</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -460,19 +440,19 @@ export default function TrackingTable() {
                 const isSelected = selectedIds.includes(rec.id);
                 
                 return (
-                  <tr key={rec.id} className={`transition-colors hover:bg-slate-50 ${isSelected ? "bg-emerald-50/50" : "bg-white"}`}>
+                  <tr key={rec.id} className={`transition-colors hover:bg-slate-50 ${isSelected ? "bg-emerald-50/30" : "bg-white"}`}>
                     <td className="px-4 py-3 text-center border-r border-slate-100">
-                      <input type="checkbox" checked={isSelected} onChange={() => handleSelect(rec.id)} className="w-4 h-4 cursor-pointer accent-[#03DF95] rounded-md border-slate-300" />
+                      <input type="checkbox" checked={isSelected} onChange={() => handleSelect(rec.id)} className="w-3.5 h-3.5 cursor-pointer accent-[#03DF95] rounded-sm" />
                     </td>
                     
                     <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="text-xs font-semibold text-slate-800 block">{new Date(rec.created_at).toLocaleDateString('tr-TR')}</span>
-                      <span className="text-[11px] text-slate-500 font-medium block mt-0.5">{new Date(rec.created_at).toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'})}</span>
+                      <span className="text-[11px] font-bold text-slate-800 block">{new Date(rec.created_at).toLocaleDateString('tr-TR')}</span>
+                      <span className="text-[10px] text-slate-500 font-medium block mt-0.5">{new Date(rec.created_at).toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'})}</span>
                     </td>
                     
                     <td className="px-4 py-3">
                       <span className="text-xs font-bold text-slate-900 block truncate max-w-[200px]">{rec.customer_name || "-"}</span>
-                      <span className="text-[11px] font-medium text-slate-500 block mt-0.5">{rec.mobile_number || "Telefon Yok"}</span>
+                      <span className="text-[10px] font-medium text-slate-500 block mt-0.5">{rec.mobile_number || "Telefon Yok"}</span>
                     </td>
                     
                     <td className="px-4 py-3 whitespace-nowrap">
@@ -484,7 +464,7 @@ export default function TrackingTable() {
                     
                     <td className="px-4 py-3 whitespace-nowrap">
                       {addressErr ? (
-                        <div className="flex flex-col items-start gap-1 p-1.5 bg-orange-50 border border-orange-200 rounded-md">
+                        <div className="flex flex-col items-start gap-1 p-1.5 bg-orange-50 border border-orange-200 rounded-md w-fit">
                           <span className="text-orange-700 text-[9px] font-bold uppercase flex items-center gap-1">
                             <AlertTriangle className="w-3 h-3" /> EKSİK/HATALI ADRES
                           </span>
@@ -501,7 +481,7 @@ export default function TrackingTable() {
                     </td>
 
                     <td className="px-4 py-3 text-center">
-                      <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold shadow-sm border ${
+                      <span className={`inline-flex items-center justify-center w-6 h-6 rounded text-[11px] font-bold border ${
                         rec.item_count > 1 ? "bg-slate-900 text-[#03DF95] border-slate-800" : "bg-slate-50 text-slate-600 border-slate-200"
                       }`}>
                         {rec.item_count}
@@ -510,33 +490,34 @@ export default function TrackingTable() {
 
                     <td className="px-4 py-3 text-center">
                       {rec.is_returned ? (
-                        <span className="bg-red-100 text-red-700 px-2.5 py-1 text-[10px] font-bold uppercase rounded-md border border-red-200">İade</span>
+                        <span className="bg-red-100 text-red-700 px-2 py-0.5 text-[9px] font-bold uppercase rounded border border-red-200">İade</span>
                       ) : (
                         <span className="text-slate-400 text-xs font-medium">-</span>
                       )}
                     </td>
 
                     <td className="px-4 py-3 text-right pr-6 whitespace-nowrap">
+                      {/* DÜZENLENEN İŞLEM BUTONLARI */}
                       <div className="flex items-center justify-end gap-2">
                         <button 
                           onClick={() => triggerReturnToggle(rec.id, rec.is_returned)}
-                          className={`p-2 rounded-lg transition-all border shadow-sm ${
+                          className={`px-3 py-1.5 rounded text-[10px] font-bold flex items-center gap-1.5 transition-colors border ${
                             rec.is_returned 
-                              ? "bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200" 
+                              ? "bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200" 
                               : "bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100"
                           }`}
-                          title={rec.is_returned ? "İadeyi İptal Et" : "İadeye Çek"}
                         >
-                          <Undo2 className="w-4 h-4" />
+                          {rec.is_returned ? <Undo2 className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+                          {rec.is_returned ? "İADEYİ İPTAL ET" : "İADEYE ÇEK"}
                         </button>
 
                         <button 
                           onClick={() => openArasTrack(rec.aras_tracking_number)}
                           disabled={!rec.aras_tracking_number || addressErr}
-                          className="p-2 rounded-lg bg-[#03DF95] hover:bg-[#02c784] text-slate-900 disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 transition-all border border-transparent shadow-sm"
-                          title="Kargo Takip"
+                          className="px-3 py-1.5 rounded text-[10px] font-bold flex items-center gap-1.5 bg-[#03DF95] hover:bg-[#02c784] text-slate-900 disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 transition-colors border border-transparent disabled:border-slate-200"
                         >
-                          <Truck className="w-4 h-4" />
+                          <Truck className="w-3 h-3" />
+                          {addressErr ? "TAKİP YOK" : "KARGO TAKİP"}
                         </button>
                       </div>
                     </td>
@@ -548,42 +529,42 @@ export default function TrackingTable() {
         </table>
       </div>
 
-      {/* SAYFALAMA VE GÖSTERİM BARI */}
+      {/* SAYFALAMA BARI */}
       {!loading && totalRecordsCount > 0 && (
-        <div className="bg-white border-t border-slate-200 p-4 sm:p-5 flex flex-col md:flex-row justify-between items-center gap-4 rounded-b-2xl">
-          <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-start">
-            <span className="text-xs font-medium text-slate-500">
-              Sayfa <span className="text-[#03DF95] font-bold mx-1">{currentPage}</span> / {totalPages}
+        <div className="bg-slate-50 border-t border-slate-200 p-3 sm:p-4 flex flex-col md:flex-row justify-between items-center gap-3">
+          <div className="flex items-center gap-4">
+            <span className="text-[11px] font-bold text-slate-500">
+              Sayfa <span className="text-slate-900 font-black mx-1">{currentPage}</span> / {totalPages}
             </span>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-medium text-slate-500">Gösterim:</span>
+            <div className="flex items-center gap-2 border-l border-slate-200 pl-4">
+              <span className="text-[10px] font-bold text-slate-500 uppercase">Satır:</span>
               <select 
                 value={rowsPerPage}
                 onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}
-                className="h-8 bg-slate-50 border border-slate-200 text-slate-700 text-xs font-medium px-2 focus:outline-none rounded-lg cursor-pointer"
+                className="h-7 bg-white border border-slate-200 text-slate-700 text-[11px] font-bold px-1 focus:outline-none rounded cursor-pointer"
               >
-                <option value={15}>15 Satır</option>
-                <option value={30}>30 Satır</option>
-                <option value={50}>50 Satır</option>
-                <option value={100}>100 Satır</option>
+                <option value={15}>15</option>
+                <option value={30}>30</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
               </select>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 w-full md:w-auto">
-            <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1} className="px-3 py-2 bg-white border border-slate-200 disabled:opacity-50 text-slate-700 text-xs font-medium rounded-lg hover:bg-slate-50 transition-colors">«</button>
-            <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="flex-1 sm:flex-none px-4 py-2 bg-white border border-slate-200 disabled:opacity-50 text-slate-700 text-xs font-medium rounded-lg hover:bg-slate-50 transition-colors">Önceki</button>
-            <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="flex-1 sm:flex-none px-4 py-2 bg-white border border-slate-200 disabled:opacity-50 text-slate-700 text-xs font-medium rounded-lg hover:bg-slate-50 transition-colors">Sonraki</button>
-            <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} className="px-3 py-2 bg-white border border-slate-200 disabled:opacity-50 text-slate-700 text-xs font-medium rounded-lg hover:bg-slate-50 transition-colors">»</button>
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1} className="px-2.5 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-[11px] font-bold rounded hover:bg-slate-100 transition-colors">«</button>
+            <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-3 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-[11px] font-bold rounded hover:bg-slate-100 transition-colors uppercase tracking-widest">Önceki</button>
+            <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="px-3 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-[11px] font-bold rounded hover:bg-slate-100 transition-colors uppercase tracking-widest">Sonraki</button>
+            <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} className="px-2.5 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-[11px] font-bold rounded hover:bg-slate-100 transition-colors">»</button>
           </div>
         </div>
       )}
 
-      {/* İADE ONAY MODALI */}
+      {/* İADE MODALI */}
       {returnModal.isOpen && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
-          <div className="bg-white border border-slate-200 shadow-xl w-full max-w-sm flex flex-col rounded-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className={`p-5 flex items-center justify-center ${!returnModal.currentStatus ? "bg-orange-500" : "bg-slate-800"}`}>
+          <div className="bg-white shadow-xl w-full max-w-sm flex flex-col rounded-md overflow-hidden">
+            <div className={`p-4 flex items-center justify-center ${!returnModal.currentStatus ? "bg-orange-500" : "bg-slate-800"}`}>
               <h2 className="font-bold text-sm text-white uppercase tracking-widest">
                 {!returnModal.currentStatus ? "İade İşlemi Onayı" : "İade İptal Onayı"}
               </h2>
@@ -594,9 +575,9 @@ export default function TrackingTable() {
                   ? "Bu paketi fiziki olarak teslim aldığınızı ve sisteme iade olarak işleneceğini onaylıyor musunuz?" 
                   : "Bu paketin iade durumunu kaldırıp normal statüsüne almak istediğinize emin misiniz?"}
               </p>
-              <div className="flex gap-3 w-full mt-4">
-                <button onClick={() => setReturnModal({isOpen: false, id: "", currentStatus: false})} disabled={isReturning} className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold h-12 text-xs uppercase tracking-widest rounded-xl transition-all shadow-sm">İptal</button>
-                <button onClick={confirmReturnToggle} disabled={isReturning} className={`flex-1 text-white font-bold h-12 text-xs uppercase tracking-widest rounded-xl transition-all shadow-sm ${!returnModal.currentStatus ? "bg-orange-500 hover:bg-orange-600 border-orange-600" : "bg-[#03DF95] hover:bg-[#02c784] text-slate-900 border-[#03DF95]"}`}>
+              <div className="flex gap-2 w-full mt-2">
+                <button onClick={() => setReturnModal({isOpen: false, id: "", currentStatus: false})} disabled={isReturning} className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold h-10 text-[11px] uppercase tracking-widest rounded transition-colors">İptal</button>
+                <button onClick={confirmReturnToggle} disabled={isReturning} className={`flex-1 text-white font-bold h-10 text-[11px] uppercase tracking-widest rounded transition-colors ${!returnModal.currentStatus ? "bg-orange-500 hover:bg-orange-600" : "bg-[#03DF95] hover:bg-[#02c784] text-slate-900"}`}>
                   {isReturning ? "İşleniyor" : "Onayla"}
                 </button>
               </div>
@@ -605,23 +586,23 @@ export default function TrackingTable() {
         </div>
       )}
 
-      {/* SİLME ONAY MODALI */}
+      {/* SİLME MODALI */}
       {showDeleteModal && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
-          <div className="bg-white border border-slate-200 shadow-xl w-full max-w-md flex flex-col rounded-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="bg-red-500 p-5 flex items-center justify-center">
+          <div className="bg-white shadow-xl w-full max-w-sm flex flex-col rounded-md overflow-hidden">
+            <div className="bg-red-500 p-4 flex items-center justify-center">
               <h2 className="text-white font-bold text-sm text-center uppercase tracking-widest">Kalıcı Silme Onayı</h2>
             </div>
             <div className="p-6 flex flex-col items-center gap-4">
               <div className="text-center w-full">
-                <h3 className="text-2xl font-black text-red-600 mb-2">{selectedIds.length} Kayıt</h3>
-                <p className="text-sm font-medium text-slate-700 leading-relaxed bg-red-50 p-4 rounded-xl border border-red-100">
-                  Seçili kayıtlar veritabanından kalıcı olarak silinecektir. Bu işlem geri alınamaz, onaylıyor musunuz?
+                <h3 className="text-xl font-black text-red-600 mb-2">{selectedIds.length} Kayıt</h3>
+                <p className="text-sm font-medium text-slate-700 leading-relaxed bg-red-50 p-3 rounded border border-red-100">
+                  Seçili kayıtlar veritabanından kalıcı olarak silinecektir. Bu işlem geri alınamaz.
                 </p>
               </div>
-              <div className="flex gap-3 w-full mt-4">
-                <button onClick={() => setShowDeleteModal(false)} disabled={isDeleting} className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold h-12 text-xs uppercase tracking-widest rounded-xl transition-all shadow-sm">İptal</button>
-                <button onClick={confirmDelete} disabled={isDeleting} className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold h-12 text-xs uppercase tracking-widest rounded-xl transition-all shadow-sm border-red-600">
+              <div className="flex gap-2 w-full mt-2">
+                <button onClick={() => setShowDeleteModal(false)} disabled={isDeleting} className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold h-10 text-[11px] uppercase tracking-widest rounded transition-colors">İptal</button>
+                <button onClick={confirmDelete} disabled={isDeleting} className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold h-10 text-[11px] uppercase tracking-widest rounded transition-colors">
                   {isDeleting ? "Siliniyor" : "Evet, Sil"}
                 </button>
               </div>
