@@ -68,7 +68,8 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
         while (fetchMore) {
           const { data, error } = await supabase
             .from("cargo_records")
-            .select("created_at, aras_tracking_number, aras_shipment_number, is_returned, item_count")
+            // missing_address KOLONU EKLENDİ! GEREKSİZ KOLONLAR ÇIKARILARAK HIZLANDIRILDI
+            .select("created_at, is_returned, missing_address, item_count")
             .range(from, from + step - 1)
             .order("created_at", { ascending: true }); // Eskiden yeniye
 
@@ -97,14 +98,10 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
           allData.forEach(row => {
             s.totalRecords++;
             s.totalItems += (row.item_count || 1);
-
-            const tracking = String(row.aras_tracking_number || "").trim();
-            const shipment = String(row.aras_shipment_number || "").trim();
             
-            // EKSİK / HATALI ADRES MANTIĞI
-            const hasLetter = /[a-zA-ZçğöşüıÇĞÖŞÜİ]/i;
-            const isError = hasLetter.test(tracking) || hasLetter.test(shipment) || (tracking === "" && shipment === "");
-            const isReturned = row.is_returned;
+            // DOĞRUDAN VERİTABANI 'missing_address' KOLONUNDAN KONTROL EDİLİYOR
+            const isError = row.missing_address === true;
+            const isReturned = row.is_returned === true;
 
             let status: 'basarili' | 'iade' | 'hatali' = 'basarili';
             if (isReturned) {
@@ -264,7 +261,7 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
             <div className="flex items-center gap-4 text-[9px] font-black uppercase tracking-widest bg-slate-50 px-3 py-1.5 rounded border border-slate-100">
               <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#03DF95]"></span> BAŞARILI</div>
               <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#ef4444]"></span> İADE</div>
-              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#f97316]"></span> Eksik Adres</div>
+              <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-[#f97316]"></span> HATALI</div>
             </div>
           </div>
           
@@ -287,7 +284,7 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
                 
                 <Tooltip 
                   formatter={(value: any, name: any) => {
-                    const label = name === 'basarili' ? 'Başarılı' : name === 'iade' ? 'İade' : 'Eksik Adres';
+                    const label = name === 'basarili' ? 'Başarılı' : name === 'iade' ? 'İade' : 'Hatalı Adres';
                     return [`${value} Kayıt`, label];
                   }}
                   contentStyle={{ borderRadius: '6px', border: '2px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
@@ -370,7 +367,7 @@ export default function TrackingDashboard({ onNavigate }: DashboardProps) {
                 <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b', fontWeight: 800 }} />
                 <Tooltip 
                   formatter={(value: any, name: any) => {
-                    const label = name === 'iade' ? 'İade' : 'Eksik Adres';
+                    const label = name === 'iade' ? 'İade' : 'Hatalı Adres';
                     return [`${value} Kayıt`, label];
                   }}
                   contentStyle={{ borderRadius: '6px', border: '2px solid #e2e8f0' }}

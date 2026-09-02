@@ -17,6 +17,7 @@ interface ShipmentRecord {
   is_returned: boolean;
   item_count: number;
   created_at: string;
+  missing_address: boolean; // Veritabanındaki kolon
 }
 
 type SortKey = keyof ShipmentRecord;
@@ -53,20 +54,13 @@ export default function TrackingTable() {
   });
   const [isReturning, setIsReturning] = useState(false);
 
-  // YENİ EKSİK ADRES MANTIĞI
-  const isAddressError = (rec: ShipmentRecord) => {
-    const s = String(rec.aras_shipment_number || "").trim();
-    const t = String(rec.aras_tracking_number || "").trim();
-    const hasLetter = /[a-zA-ZçğöşüıÇĞÖŞÜİ]/i;
-    return hasLetter.test(t) || hasLetter.test(s) || (t === "" && s === "");
-  };
-
-  // VERİTABANINDAN VERİ ÇEKME FONKSİYONU (SERVER-SIDE)
+  // VERİTABANINDAN VERİ ÇEKME FONKSİYONU (KUSURSUZ SAYFALAMA)
   const fetchRecords = async () => {
     setLoading(true);
     try {
       let query = supabase.from("cargo_records").select("*", { count: "exact" });
 
+      // 1. ARAMA FİLTRESİ
       if (searchQuery) {
         if (specificField === "SD") query = query.ilike("sd_document", `%${searchQuery}%`);
         else if (specificField === "DELIVERY") query = query.ilike("delivery_number", `%${searchQuery}%`);
@@ -78,16 +72,25 @@ export default function TrackingTable() {
         }
       }
 
+      // 2. DURUM FİLTRESİ (GÜNCELLENMİŞ MANTIK)
       if (filterType === "RETURN") {
         query = query.eq("is_returned", true);
+      } else if (filterType === "ERROR") {
+        query = query.eq("missing_address", true);
       } else if (filterType === "NORMAL") {
-        query = query.eq("is_returned", false);
+        // Eski kayıtlardaki 'null' durumunu ve yeni kayıtlardaki 'false' durumunu yakalar
+        query = query.eq("is_returned", false).or('missing_address.eq.false,missing_address.is.null');
       }
 
+      // 3. TARİH FİLTRESİ
       if (startDate) query = query.gte("created_at", `${startDate}T00:00:00Z`);
       if (endDate) query = query.lte("created_at", `${endDate}T23:59:59Z`);
 
-      query = query.order(sortConfig.key, { ascending: sortConfig.direction === "asc" });
+      // 4. SIRALAMA VE SAYFALAMA (AYNI VERİLERİN GELMEMESİ İÇİN İKİNCİL SIRALAMA EKLENDİ)
+      query = query
+        .order(sortConfig.key, { ascending: sortConfig.direction === "asc" })
+        .order("id", { ascending: true }); // Pagination kaymasını önleyen kritik satır!
+
       const from = (currentPage - 1) * rowsPerPage;
       const to = from + rowsPerPage - 1;
       query = query.range(from, to);
@@ -95,24 +98,8 @@ export default function TrackingTable() {
       const { data, count, error } = await query;
       if (error) throw error;
 
-      let finalData = data as ShipmentRecord[];
-      
-      if (filterType === "ERROR") {
-        const allQuery = supabase.from("cargo_records").select("*");
-        const allRes = await allQuery;
-        if(allRes.data) {
-           const allErrors = allRes.data.filter(rec => isAddressError(rec));
-           setTotalRecordsCount(allErrors.length);
-           finalData = allErrors.slice(from, to);
-        }
-      } else if (filterType === "NORMAL") {
-        const allNormal = finalData.filter(rec => !isAddressError(rec));
-        setRecords(allNormal);
-        if (count !== null) setTotalRecordsCount(count); 
-      } else {
-        setRecords(finalData);
-        if (count !== null) setTotalRecordsCount(count);
-      }
+      setRecords(data as ShipmentRecord[]);
+      if (count !== null) setTotalRecordsCount(count);
 
     } catch (err: any) {
       toast.error("Veri çekme hatası.");
@@ -126,7 +113,6 @@ export default function TrackingTable() {
     fetchRecords();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentPage, rowsPerPage, sortConfig, filterType, specificField, startDate, endDate, searchQuery]);
-
 
   const handleSearchSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -235,7 +221,7 @@ export default function TrackingTable() {
       "Aras Shipment No": r.aras_shipment_number,
       "Takip No": r.aras_tracking_number,
       "Kalem": r.item_count || 1,
-      "Durum": r.is_returned ? "İADE" : (isAddressError(r) ? "EKSİK/HATALI ADRES" : "NORMAL")
+      "Durum": r.is_returned ? "İADE" : (r.missing_address ? "EKSİK/HATALI ADRES" : "NORMAL")
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -255,14 +241,14 @@ export default function TrackingTable() {
     const isActive = sortConfig.key === sortKey;
     return (
       <th 
-        className={`px-4 py-4 text-[11px] font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap cursor-pointer hover:text-slate-900 transition-colors select-none text-${align}`}
+        className={`px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap cursor-pointer hover:text-slate-900 transition-colors select-none text-${align}`}
         onClick={() => handleSort(sortKey)}
       >
         <div className={`flex items-center gap-1.5 ${align === "center" ? "justify-center" : align === "right" ? "justify-end" : ""}`}>
           {label}
           <div className="flex flex-col text-slate-300">
-            <svg className={`w-2.5 h-2.5 ${isActive && sortConfig.direction === 'asc' ? 'text-[#03DF95]' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 15l7-7 7 7"></path></svg>
-            <svg className={`w-2.5 h-2.5 -mt-1 ${isActive && sortConfig.direction === 'desc' ? 'text-[#03DF95]' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7"></path></svg>
+            <svg className={`w-3 h-3 ${isActive && sortConfig.direction === 'asc' ? 'text-[#03DF95]' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 15l7-7 7 7"></path></svg>
+            <svg className={`w-3 h-3 -mt-1 ${isActive && sortConfig.direction === 'desc' ? 'text-[#03DF95]' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7"></path></svg>
           </div>
         </div>
       </th>
@@ -283,7 +269,7 @@ export default function TrackingTable() {
               <h2 className="text-xl sm:text-2xl font-black tracking-wide text-white drop-shadow-sm">
                 Kayıt <span className="text-[#03DF95]">Sorgulama</span>
               </h2>
-              <p className="text-slate-400 text-[11px] font-bold tracking-widest uppercase mt-1">Sunucu Tabanlı Filtreleme ve Kontrol</p>
+              <p className="text-slate-400 text-xs font-bold tracking-widest uppercase mt-1">Sunucu Tabanlı Filtreleme ve Kontrol</p>
               <div className="flex flex-wrap items-center gap-2 mt-3">
                 <span className="bg-[#03DF95]/10 text-[#03DF95] border border-[#03DF95]/30 px-3 py-1 rounded-md text-xs font-bold shadow-sm">
                   {totalRecordsCount.toLocaleString('tr-TR')} KAYIT BULUNDU
@@ -296,22 +282,22 @@ export default function TrackingTable() {
             {selectedIds.length > 0 && (
               <button 
                 onClick={() => setShowDeleteModal(true)}
-                className="bg-red-500 hover:bg-red-600 text-white h-10 px-4 rounded-md text-[11px] font-black transition-colors flex items-center gap-2 uppercase tracking-wider"
+                className="bg-red-500 hover:bg-red-600 text-white h-10 px-4 rounded-md text-xs font-black transition-colors flex items-center gap-2 uppercase tracking-wider"
               >
                 <Trash2 className="w-4 h-4" /> SİL ({selectedIds.length})
               </button>
             )}
             <button 
               onClick={exportToExcel}
-              className="bg-[#03DF95] hover:bg-[#02c784] text-slate-900 h-10 px-4 rounded-md text-[11px] font-black transition-colors flex items-center gap-2 uppercase tracking-wider"
+              className="bg-[#03DF95] hover:bg-[#02c784] text-slate-900 h-10 px-4 rounded-md text-xs font-black transition-colors flex items-center gap-2 uppercase tracking-wider"
             >
               EXCEL İNDİR
             </button>
             <button 
               onClick={resetAllFilters}
-              className="bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 h-10 px-4 rounded-md text-[10px] font-black border border-slate-700 transition-colors uppercase tracking-widest flex items-center gap-2"
+              className="bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 h-10 px-4 rounded-md text-xs font-black border border-slate-700 transition-colors uppercase tracking-widest flex items-center gap-2"
             >
-              <RefreshCw className="w-3 h-3" /> Sıfırla
+              <RefreshCw className="w-4 h-4" /> Sıfırla
             </button>
           </div>
         </div>
@@ -342,11 +328,11 @@ export default function TrackingTable() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full relative z-10 pt-4 border-t border-slate-800/50">
           
           <div className="flex flex-col gap-2">
-            <label className="text-[10px] font-bold text-[#03DF95] tracking-widest uppercase">Kargo Durumu</label>
+            <label className="text-xs font-bold text-[#03DF95] tracking-widest uppercase">Kargo Durumu</label>
             <select
               value={filterType}
               onChange={(e) => { setFilterType(e.target.value as FilterType); setCurrentPage(1); }}
-              className="h-10 w-full bg-slate-800 border border-slate-700 text-white px-3 rounded-md text-[11px] font-bold focus:outline-none focus:border-[#03DF95] cursor-pointer"
+              className="h-10 w-full bg-slate-800 border border-slate-700 text-white px-3 rounded-md text-xs font-bold focus:outline-none focus:border-[#03DF95] cursor-pointer"
             >
               <option value="ALL">KARIŞIK (TÜMÜ)</option>
               <option value="NORMAL">NORMAL (TESLİMAT)</option>
@@ -356,11 +342,11 @@ export default function TrackingTable() {
           </div>
 
           <div className="flex flex-col gap-2">
-            <label className="text-[10px] font-bold text-[#03DF95] tracking-widest uppercase">Arama Odağı</label>
+            <label className="text-xs font-bold text-[#03DF95] tracking-widest uppercase">Arama Odağı</label>
             <select
               value={specificField}
               onChange={(e) => { setSpecificField(e.target.value as any); setCurrentPage(1); }}
-              className="h-10 w-full bg-slate-800 border border-slate-700 text-white px-3 rounded-md text-[11px] font-bold focus:outline-none focus:border-[#03DF95] cursor-pointer"
+              className="h-10 w-full bg-slate-800 border border-slate-700 text-white px-3 rounded-md text-xs font-bold focus:outline-none focus:border-[#03DF95] cursor-pointer"
             >
               <option value="ALL">GENEL ARAMA</option>
               <option value="CUSTOMER">SADECE MÜŞTERİ ADI</option>
@@ -372,13 +358,13 @@ export default function TrackingTable() {
 
           <div className="flex flex-col gap-2">
             <div className="flex justify-between items-center h-4">
-              <label className="text-[10px] font-bold text-[#03DF95] tracking-widest uppercase">Tarih Aralığı</label>
+              <label className="text-xs font-bold text-[#03DF95] tracking-widest uppercase">Tarih Aralığı</label>
               <div className="flex gap-1">
-                <button type="button" onClick={() => applyDatePreset("TODAY")} className="text-[9px] font-bold text-slate-400 hover:text-white px-1">Bugün</button>
+                <button type="button" onClick={() => applyDatePreset("TODAY")} className="text-[10px] font-bold text-slate-400 hover:text-white px-1">Bugün</button>
                 <span className="text-slate-600">|</span>
-                <button type="button" onClick={() => applyDatePreset("WEEK")} className="text-[9px] font-bold text-slate-400 hover:text-white px-1">Hafta</button>
+                <button type="button" onClick={() => applyDatePreset("WEEK")} className="text-[10px] font-bold text-slate-400 hover:text-white px-1">Hafta</button>
                 <span className="text-slate-600">|</span>
-                <button type="button" onClick={() => applyDatePreset("MONTH")} className="text-[9px] font-bold text-slate-400 hover:text-white px-1">Ay</button>
+                <button type="button" onClick={() => applyDatePreset("MONTH")} className="text-[10px] font-bold text-slate-400 hover:text-white px-1">Ay</button>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -386,14 +372,14 @@ export default function TrackingTable() {
                 type="date" 
                 value={startDate} 
                 onChange={(e) => setStartDate(e.target.value)} 
-                className="h-10 w-full bg-slate-800 border border-slate-700 text-white rounded-md text-[11px] font-bold px-2 focus:outline-none focus:border-[#03DF95]" 
+                className="h-10 w-full bg-slate-800 border border-slate-700 text-white rounded-md text-xs font-bold px-2 focus:outline-none focus:border-[#03DF95]" 
               />
               <span className="text-slate-500 font-black">-</span>
               <input 
                 type="date" 
                 value={endDate} 
                 onChange={(e) => setEndDate(e.target.value)} 
-                className="h-10 w-full bg-slate-800 border border-slate-700 text-white rounded-md text-[11px] font-bold px-2 focus:outline-none focus:border-[#03DF95]" 
+                className="h-10 w-full bg-slate-800 border border-slate-700 text-white rounded-md text-xs font-bold px-2 focus:outline-none focus:border-[#03DF95]" 
               />
             </div>
           </div>
@@ -407,15 +393,15 @@ export default function TrackingTable() {
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200">
               <th className="px-4 py-3 w-10 text-center border-r border-slate-100">
-                <input type="checkbox" checked={records.length > 0 && selectedIds.length === records.length} onChange={handleSelectAll} className="w-3.5 h-3.5 cursor-pointer accent-[#03DF95] rounded-sm" />
+                <input type="checkbox" checked={records.length > 0 && selectedIds.length === records.length} onChange={handleSelectAll} className="w-4 h-4 cursor-pointer accent-[#03DF95] rounded-sm" />
               </th>
               <SortHeader label="Yüklenme" sortKey="created_at" />
               <SortHeader label="Müşteri Bilgisi" sortKey="customer_name" />
               <SortHeader label="Evrak & Sipariş" sortKey="sd_document" />
               <SortHeader label="Kargo Numaraları" sortKey="aras_tracking_number" />
               <SortHeader label="Adet" sortKey="item_count" align="center" />
-              <th className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center">Durum</th>
-              <th className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-right pr-6">İşlemler</th>
+              <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Durum</th>
+              <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider text-right pr-6">İşlemler</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -436,52 +422,52 @@ export default function TrackingTable() {
               </tr>
             ) : (
               records.map((rec) => {
-                const addressErr = isAddressError(rec);
+                const addressErr = rec.missing_address; 
                 const isSelected = selectedIds.includes(rec.id);
                 
                 return (
                   <tr key={rec.id} className={`transition-colors hover:bg-slate-50 ${isSelected ? "bg-emerald-50/30" : "bg-white"}`}>
                     <td className="px-4 py-3 text-center border-r border-slate-100">
-                      <input type="checkbox" checked={isSelected} onChange={() => handleSelect(rec.id)} className="w-3.5 h-3.5 cursor-pointer accent-[#03DF95] rounded-sm" />
+                      <input type="checkbox" checked={isSelected} onChange={() => handleSelect(rec.id)} className="w-4 h-4 cursor-pointer accent-[#03DF95] rounded-sm" />
                     </td>
                     
                     <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="text-[11px] font-bold text-slate-800 block">{new Date(rec.created_at).toLocaleDateString('tr-TR')}</span>
-                      <span className="text-[10px] text-slate-500 font-medium block mt-0.5">{new Date(rec.created_at).toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'})}</span>
+                      <span className="text-xs font-bold text-slate-800 block">{new Date(rec.created_at).toLocaleDateString('tr-TR')}</span>
+                      <span className="text-[11px] text-slate-500 font-medium block mt-0.5">{new Date(rec.created_at).toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'})}</span>
                     </td>
                     
                     <td className="px-4 py-3">
-                      <span className="text-xs font-bold text-slate-900 block truncate max-w-[200px]">{rec.customer_name || "-"}</span>
-                      <span className="text-[10px] font-medium text-slate-500 block mt-0.5">{rec.mobile_number || "Telefon Yok"}</span>
+                      <span className="text-sm font-bold text-slate-900 block truncate max-w-[200px]">{rec.customer_name || "-"}</span>
+                      <span className="text-xs font-medium text-slate-500 block mt-0.5">{rec.mobile_number || "Telefon Yok"}</span>
                     </td>
                     
                     <td className="px-4 py-3 whitespace-nowrap">
                       <div className="flex flex-col gap-0.5">
-                        <span className="text-[11px] font-bold text-slate-700"><span className="text-[9px] text-slate-400 font-normal mr-1">SD:</span>{rec.sd_document}</span>
-                        <span className="text-[11px] font-bold text-slate-700"><span className="text-[9px] text-slate-400 font-normal mr-1">DN:</span>{rec.delivery_number}</span>
+                        <span className="text-xs font-bold text-slate-700"><span className="text-[10px] text-slate-400 font-normal mr-1">SD:</span>{rec.sd_document}</span>
+                        <span className="text-xs font-bold text-slate-700"><span className="text-[10px] text-slate-400 font-normal mr-1">DN:</span>{rec.delivery_number}</span>
                       </div>
                     </td>
                     
                     <td className="px-4 py-3 whitespace-nowrap">
                       {addressErr ? (
                         <div className="flex flex-col items-start gap-1 p-1.5 bg-orange-50 border border-orange-200 rounded-md w-fit">
-                          <span className="text-orange-700 text-[9px] font-bold uppercase flex items-center gap-1">
-                            <AlertTriangle className="w-3 h-3" /> EKSİK/HATALI ADRES
+                          <span className="text-orange-700 text-[10px] font-bold uppercase flex items-center gap-1">
+                            <AlertTriangle className="w-3.5 h-3.5" /> EKSİK/HATALI ADRES
                           </span>
-                          <span className="text-slate-700 text-[10px] font-semibold truncate max-w-[180px]" title={/[a-zA-Z]/.test(rec.aras_shipment_number) ? rec.aras_shipment_number : rec.aras_tracking_number}>
+                          <span className="text-slate-700 text-[11px] font-semibold truncate max-w-[180px]" title={/[a-zA-Z]/.test(rec.aras_shipment_number) ? rec.aras_shipment_number : rec.aras_tracking_number}>
                             {/[a-zA-Z]/.test(rec.aras_shipment_number) ? rec.aras_shipment_number : rec.aras_tracking_number || "Numara Yok"}
                           </span>
                         </div>
                       ) : (
                         <div className={`flex flex-col gap-0.5 ${rec.is_returned ? 'text-slate-400 line-through opacity-70' : 'text-slate-900'}`}>
-                          <span className="text-[11px] font-semibold"><span className="text-[9px] text-slate-400 font-normal mr-1">S:</span>{rec.aras_shipment_number || "-"}</span>
-                          <span className="text-[11px] font-bold text-[#03DF95]"><span className="text-[9px] text-slate-400 font-normal mr-1">T:</span>{rec.aras_tracking_number || "-"}</span>
+                          <span className="text-xs font-semibold"><span className="text-[10px] text-slate-400 font-normal mr-1">S:</span>{rec.aras_shipment_number || "-"}</span>
+                          <span className="text-xs font-bold text-[#03DF95]"><span className="text-[10px] text-slate-400 font-normal mr-1">T:</span>{rec.aras_tracking_number || "-"}</span>
                         </div>
                       )}
                     </td>
 
                     <td className="px-4 py-3 text-center">
-                      <span className={`inline-flex items-center justify-center w-6 h-6 rounded text-[11px] font-bold border ${
+                      <span className={`inline-flex items-center justify-center w-7 h-7 rounded text-xs font-bold border ${
                         rec.item_count > 1 ? "bg-slate-900 text-[#03DF95] border-slate-800" : "bg-slate-50 text-slate-600 border-slate-200"
                       }`}>
                         {rec.item_count}
@@ -490,34 +476,35 @@ export default function TrackingTable() {
 
                     <td className="px-4 py-3 text-center">
                       {rec.is_returned ? (
-                        <span className="bg-red-100 text-red-700 px-2 py-0.5 text-[9px] font-bold uppercase rounded border border-red-200">İade</span>
+                        <span className="bg-red-100 text-red-700 px-3 py-1 text-[10px] font-bold uppercase rounded border border-red-200">İade</span>
                       ) : (
                         <span className="text-slate-400 text-xs font-medium">-</span>
                       )}
                     </td>
 
                     <td className="px-4 py-3 text-right pr-6 whitespace-nowrap">
-                      {/* DÜZENLENEN İŞLEM BUTONLARI */}
                       <div className="flex items-center justify-end gap-2">
                         <button 
                           onClick={() => triggerReturnToggle(rec.id, rec.is_returned)}
-                          className={`px-3 py-1.5 rounded text-[10px] font-bold flex items-center gap-1.5 transition-colors border ${
+                          className={`px-3 py-2 rounded text-[11px] font-bold flex items-center gap-1.5 transition-colors border ${
                             rec.is_returned 
-                              ? "bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200" 
-                              : "bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100"
+                              ? "bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200 hover:text-slate-700" 
+                              : "bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100 hover:text-orange-700"
                           }`}
+                          title={rec.is_returned ? "İadeyi İptal Et" : "İadeye Çek"}
                         >
-                          {rec.is_returned ? <Undo2 className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
-                          {rec.is_returned ? "İADEYİ İPTAL ET" : "İADEYE ÇEK"}
+                          <Undo2 className="w-4 h-4" />
+                          {rec.is_returned ? "İPTAL ET" : "İADEYE ÇEK"}
                         </button>
 
                         <button 
                           onClick={() => openArasTrack(rec.aras_tracking_number)}
                           disabled={!rec.aras_tracking_number || addressErr}
-                          className="px-3 py-1.5 rounded text-[10px] font-bold flex items-center gap-1.5 bg-[#03DF95] hover:bg-[#02c784] text-slate-900 disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 transition-colors border border-transparent disabled:border-slate-200"
+                          className="px-3 py-2 rounded text-[11px] font-bold flex items-center gap-1.5 bg-[#03DF95] hover:bg-[#02c784] text-slate-900 disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 transition-colors border border-transparent disabled:border-slate-200"
+                          title="Kargo Takip"
                         >
-                          <Truck className="w-3 h-3" />
-                          {addressErr ? "TAKİP YOK" : "KARGO TAKİP"}
+                          <Truck className="w-4 h-4" />
+                          TAKİP
                         </button>
                       </div>
                     </td>
@@ -531,17 +518,17 @@ export default function TrackingTable() {
 
       {/* SAYFALAMA BARI */}
       {!loading && totalRecordsCount > 0 && (
-        <div className="bg-slate-50 border-t border-slate-200 p-3 sm:p-4 flex flex-col md:flex-row justify-between items-center gap-3">
-          <div className="flex items-center gap-4">
-            <span className="text-[11px] font-bold text-slate-500">
+        <div className="bg-slate-50 border-t border-slate-200 p-3 sm:p-4 flex flex-col md:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-start">
+            <span className="text-xs font-bold text-slate-500">
               Sayfa <span className="text-slate-900 font-black mx-1">{currentPage}</span> / {totalPages}
             </span>
             <div className="flex items-center gap-2 border-l border-slate-200 pl-4">
-              <span className="text-[10px] font-bold text-slate-500 uppercase">Satır:</span>
+              <span className="text-[11px] font-bold text-slate-500 uppercase">Satır:</span>
               <select 
                 value={rowsPerPage}
                 onChange={(e) => { setRowsPerPage(Number(e.target.value)); setCurrentPage(1); }}
-                className="h-7 bg-white border border-slate-200 text-slate-700 text-[11px] font-bold px-1 focus:outline-none rounded cursor-pointer"
+                className="h-8 bg-white border border-slate-200 text-slate-700 text-xs font-bold px-1 focus:outline-none rounded cursor-pointer"
               >
                 <option value={15}>15</option>
                 <option value={30}>30</option>
@@ -551,11 +538,11 @@ export default function TrackingTable() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1} className="px-2.5 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-[11px] font-bold rounded hover:bg-slate-100 transition-colors">«</button>
-            <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-3 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-[11px] font-bold rounded hover:bg-slate-100 transition-colors uppercase tracking-widest">Önceki</button>
-            <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="px-3 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-[11px] font-bold rounded hover:bg-slate-100 transition-colors uppercase tracking-widest">Sonraki</button>
-            <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} className="px-2.5 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-[11px] font-bold rounded hover:bg-slate-100 transition-colors">»</button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1} className="px-3 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-xs font-bold rounded hover:bg-slate-100 transition-colors">«</button>
+            <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-4 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-xs font-bold rounded hover:bg-slate-100 transition-colors uppercase tracking-widest">Önceki</button>
+            <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="px-4 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-xs font-bold rounded hover:bg-slate-100 transition-colors uppercase tracking-widest">Sonraki</button>
+            <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} className="px-3 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-xs font-bold rounded hover:bg-slate-100 transition-colors">»</button>
           </div>
         </div>
       )}
@@ -589,7 +576,7 @@ export default function TrackingTable() {
       {/* SİLME MODALI */}
       {showDeleteModal && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
-          <div className="bg-white shadow-xl w-full max-w-sm flex flex-col rounded-md overflow-hidden">
+          <div className="bg-white shadow-xl w-full max-w-md flex flex-col rounded-md overflow-hidden">
             <div className="bg-red-500 p-4 flex items-center justify-center">
               <h2 className="text-white font-bold text-sm text-center uppercase tracking-widest">Kalıcı Silme Onayı</h2>
             </div>

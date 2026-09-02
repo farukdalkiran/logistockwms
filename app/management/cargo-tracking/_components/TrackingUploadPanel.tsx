@@ -29,7 +29,7 @@ interface ParsedRow {
   item_count: number;
   isValid: boolean;
   errorReasons: string[];
-  hasAddressError: boolean;
+  missing_address: boolean; // Veritabanı ile eşleşen doğru isim
 }
 
 export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelProps) {
@@ -48,8 +48,8 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
   const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0, isUploading: false });
 
   const downloadTemplate = () => {
-    const headers = "Customer name;1st Mobile number;SD Document;Delivery number;Aras Shipment Number;Aras Tracking Number;İade\n";
-    const sampleRow = "FARUK DALKIRAN;5551234567;SD100293;DLV9921;SHP882910;40192837461;Hayır\n";
+    const headers = "Customer name;1st Mobile number;SD Document;Delivery number;Aras Shipment Number;Aras Tracking Number;İade;Eksik Adres\n";
+    const sampleRow = "FARUK DALKIRAN;5551234567;T555555;4000000;6666666666;999999999;Hayır;Hayır\n";
     const csvContent = "\uFEFF" + headers + sampleRow;
     
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -124,8 +124,9 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
         const shipmentNo = formatLargeNumber(row["Aras Shipment Number"] || row["Shipment number"]);
         const trackingNo = formatLargeNumber(row["Aras Tracking Number"] || row["Aras Kargo Takip No"]);
         
-        // Takip numarası veya gönderi numarası harf/metin içeriyorsa bu eksik adrestir.
-        const hasAddressError = /[a-zA-Z]/.test(shipmentNo) || /[a-zA-Z]/.test(trackingNo);
+        const excelMissingStatus = row["Eksik Adres"]?.toString().trim().toLowerCase() === "evet";
+        const hasLetter = /[a-zA-ZçğöşüıÇĞÖŞÜİ]/i;
+        const isMissingAddress = excelMissingStatus || hasLetter.test(trackingNo) || hasLetter.test(shipmentNo) || (trackingNo === "" && shipmentNo === "");
 
         const parsedRow: ParsedRow = {
           rowNumber: rowNum,
@@ -139,7 +140,7 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
           item_count: 1,
           isValid: true,
           errorReasons: [],
-          hasAddressError
+          missing_address: isMissingAddress
         };
 
         if (!sdDoc || !delNo) {
@@ -229,8 +230,6 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
 
     try {
       for (let i = 0; i < validData.length; i += CHUNK_SIZE) {
-        // VERİTABANI YÜKLEME PAYLOAD'U DÜZELTİLDİ
-        // Sadece cargo_records tablosunda var olan orijinal kolonlar gönderiliyor.
         const chunk = validData.slice(i, i + CHUNK_SIZE).map(item => ({
           customer_name: item.customer_name,
           mobile_number: item.mobile_number,
@@ -239,7 +238,8 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
           aras_shipment_number: item.aras_shipment_number,
           aras_tracking_number: item.aras_tracking_number,
           is_returned: item.is_returned,
-          item_count: item.item_count
+          item_count: item.item_count,
+          missing_address: item.missing_address 
         }));
         
         const { error } = await supabase.from("cargo_records").insert(chunk);
@@ -270,6 +270,7 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
       
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
         
+        {/* SOL KOLON: BİLGİLENDİRME VE ŞABLON */}
         <div className="xl:col-span-5 flex flex-col gap-6">
           
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 shadow-sm">
@@ -289,13 +290,13 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
                   <h2 className="text-base sm:text-lg font-black text-slate-800 uppercase tracking-widest truncate">SİSTEM TALİMATLARI</h2>
                 </div>
                 <p className="text-[11px] sm:text-xs font-bold text-slate-600 leading-relaxed">
-                  Yükleyeceğiniz belgede eşleşme sorunları yaşamamak için en az şu <b>7 kolonun</b> eksiksiz bulunması zorunludur:
+                  Yükleyeceğiniz belgede eşleşme sorunları yaşamamak için en az şu <b>8 kolonun</b> eksiksiz bulunması zorunludur:
                 </p>
               </div>
             </div>
 
             <div className="flex flex-wrap gap-2 mb-5">
-              {["Customer name", "1st Mobile number", "SD Document", "Delivery number", "Aras Shipment Number", "Aras Tracking Number", "İade"].map((col, i) => (
+              {["Customer name", "1st Mobile number", "SD Document", "Delivery number", "Aras Shipment Number", "Aras Tracking Number", "İade", "Eksik Adres"].map((col, i) => (
                 <span key={i} className="bg-white border border-slate-200 text-slate-700 px-2.5 py-1 text-[10px] font-bold tracking-widest uppercase rounded-md shadow-sm">
                   {col}
                 </span>
@@ -309,7 +310,7 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
               </li>
               <li className="text-xs font-semibold text-orange-600 flex items-start gap-2 bg-orange-50 p-2 rounded-md border border-orange-100">
                 <div className="w-1.5 h-1.5 rounded-full bg-orange-500 shrink-0 mt-1.5"></div> 
-                <span><b>Takip Numarası boş bırakılabilir.</b> Eğer Shipment No veya Tracking No alanlarına numara yerine <b>metin (harf)</b> yazılmışsa sistem bu kaydı Eksik/Hatalı Adres kabul eder.</span>
+                <span><b>Takip Numarası boş bırakılabilir.</b> Eğer numara yerine <b>metin (harf)</b> yazılmışsa sistem bu kaydı <u className="font-bold">Eksik/Hatalı Adres</u> kabul eder ve veritabanına öyle kaydeder.</span>
               </li>
             </ul>
           </div>
@@ -324,6 +325,7 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
           </button>
         </div>
 
+        {/* SAĞ KOLON: DOSYA YÜKLEME ALANI */}
         <form onSubmit={handleProcessFile} className="xl:col-span-7 flex flex-col gap-6 h-full">
           <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
             <div className="bg-slate-900 text-[#03DF95] p-2 rounded-lg">
@@ -381,10 +383,12 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
         </form>
       </div>
 
+      {/* POP-UP ONAY VE VERİ İNCELEME EKRANI (MODAL) */}
       {showConfirmModal && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/80 p-4 backdrop-blur-sm transition-all font-['Quicksand']">
           <div className="bg-white shadow-2xl w-full max-w-6xl rounded-2xl overflow-hidden flex flex-col h-[90vh] animate-in zoom-in-95 duration-200">
             
+            {/* Modal Header */}
             <div className="bg-slate-900 p-5 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
                 <div className="bg-[#03DF95]/20 p-2 rounded-lg">
@@ -399,8 +403,10 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
               )}
             </div>
 
+            {/* Modal Body */}
             <div className="flex-1 bg-slate-50 flex flex-col min-h-0 overflow-hidden">
               
+              {/* Sekmeler (Tabs) */}
               <div className="flex items-center gap-2 p-4 pb-0 border-b border-slate-200 shrink-0">
                 <button 
                   onClick={() => {setActiveTab("VALID"); setCurrentPage(1)}}
@@ -420,6 +426,7 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
                 </button>
               </div>
 
+              {/* Hatalı Kayıtlar için Aksiyon Uyarısı */}
               {activeTab === "INVALID" && invalidData.length > 0 && (
                 <div className="bg-orange-50 border-b border-orange-100 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shrink-0">
                   <div className="min-w-0 pr-4 flex items-start gap-3">
@@ -438,8 +445,9 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
                 </div>
               )}
 
+              {/* Tablo Alanı */}
               <div className="flex-1 overflow-auto bg-white">
-                <table className="w-full text-left border-collapse min-w-[900px]">
+                <table className="w-full text-left border-collapse min-w-[950px]">
                   <thead className="sticky top-0 bg-white border-b border-slate-200 shadow-sm z-10">
                     <tr>
                       <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">Satır</th>
@@ -448,15 +456,16 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
                       <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">Delivery No</th>
                       <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">Shipment / Takip No</th>
                       <th className="px-4 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center whitespace-nowrap">Adet</th>
+                      <th className="px-4 py-3 text-[10px] font-bold text-orange-500 uppercase tracking-widest text-center whitespace-nowrap">Eksik Adres</th>
                       {activeTab === "INVALID" && (
-                        <th className="px-4 py-3 text-[10px] font-bold text-orange-500 uppercase tracking-widest whitespace-nowrap">Hata Nedeni</th>
+                        <th className="px-4 py-3 text-[10px] font-bold text-red-500 uppercase tracking-widest whitespace-nowrap">Hata Nedeni</th>
                       )}
                     </tr>
                   </thead>
                   <tbody>
                     {currentDisplayData.length === 0 ? (
                       <tr>
-                        <td colSpan={activeTab === "INVALID" ? 7 : 6} className="px-4 py-16 text-center text-sm font-semibold text-slate-400 bg-slate-50/50">
+                        <td colSpan={activeTab === "INVALID" ? 8 : 7} className="px-4 py-16 text-center text-sm font-semibold text-slate-400 bg-slate-50/50">
                           Bu kategoride gösterilecek kayıt bulunamadı.
                         </td>
                       </tr>
@@ -471,7 +480,7 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
                             <span className="block text-[10px] text-slate-400">S: {row.aras_shipment_number || "-"}</span>
                             
                             {/* DASHBOARD MANTIĞI: EKSİK ADRES GÖSTERİMİ */}
-                            {row.hasAddressError ? (
+                            {row.missing_address ? (
                               <div className="flex flex-col items-start gap-1 p-1 mt-1 bg-orange-50 border border-orange-200 rounded-md">
                                 <span className="text-orange-700 text-[9px] font-bold uppercase flex items-center gap-1">
                                   <AlertTriangle className="w-3 h-3" /> EKSİK/HATALI ADRES
@@ -491,8 +500,15 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
                               {row.item_count}
                             </span>
                           </td>
+                          <td className="px-4 py-2 text-center">
+                            {row.missing_address ? (
+                              <span className="bg-orange-100 text-orange-700 px-2 py-0.5 rounded text-[10px] font-bold border border-orange-200">EVET</span>
+                            ) : (
+                              <span className="text-slate-400 text-xs font-medium">-</span>
+                            )}
+                          </td>
                           {activeTab === "INVALID" && (
-                            <td className="px-4 py-2 text-xs font-medium text-orange-600 max-w-[250px] truncate" title={row.errorReasons.join(", ")}>
+                            <td className="px-4 py-2 text-xs font-medium text-red-600 max-w-[250px] truncate" title={row.errorReasons.join(", ")}>
                               {row.errorReasons.join(" | ")}
                             </td>
                           )}
@@ -503,6 +519,7 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
                 </table>
               </div>
 
+              {/* Sayfalama Alanı */}
               <div className="bg-white border-t border-slate-200 p-3 flex justify-between items-center shrink-0">
                 <span className="text-[11px] font-bold text-slate-500">
                   Sayfa <span className="text-slate-900">{currentPage}</span> / {totalPages}
@@ -521,6 +538,7 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
                 </div>
               </div>
 
+              {/* Progress Bar */}
               {uploadProgress.isUploading && (
                 <div className="w-full bg-slate-100 h-8 relative overflow-hidden shrink-0 border-t border-slate-200">
                   <div 
@@ -537,6 +555,7 @@ export default function TrackingUploadPanel({ onUploadComplete }: UploadPanelPro
 
             </div>
 
+            {/* Modal Footer (Action Butonları) */}
             <div className="p-4 bg-white border-t border-slate-200 flex flex-col-reverse sm:flex-row gap-3 shrink-0 rounded-b-2xl">
               <button 
                 onClick={() => setShowConfirmModal(false)}
