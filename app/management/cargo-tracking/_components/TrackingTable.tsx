@@ -4,7 +4,7 @@ import { useEffect, useState, Fragment } from "react";
 import { supabase } from "@/lib/supabase"; 
 import * as XLSX from "xlsx"; 
 import toast, { Toaster } from "react-hot-toast";
-import { Truck, Undo2, Search } from 'lucide-react';
+import { Truck, Undo2, Search,AlertTriangle } from 'lucide-react';
 
 interface ShipmentRecord {
   id: string;
@@ -32,13 +32,13 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
   const [records, setRecords] = useState<ShipmentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // ARAMA STATE'İ (Buraya Taşındı)
+  // ARAMA STATE'LERİ (Yazarken ayrı, aratınca ayrı çalışır)
+  const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [expandedRows, setExpandedRows] = useState<string[]>([]);
 
   const [returnModal, setReturnModal] = useState<{isOpen: boolean, id: string, currentStatus: boolean}>({ 
     isOpen: false, 
@@ -85,13 +85,12 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
     };
   }, []);
 
-  const isAddressError = (trackingNo: string | undefined | null) => {
-    if (!trackingNo) return false;
-    return /[a-zA-Z]/.test(trackingNo); 
-  };
-
-  const toggleRowExpansion = (id: string) => {
-    setExpandedRows(prev => prev.includes(id) ? prev.filter(rowId => rowId !== id) : [...prev, id]);
+  // YENİ EKSİK ADRES MANTIĞI: Sadece Shipment veya Tracking alanında harf/metin varsa hatalıdır.
+  const isAddressError = (rec: ShipmentRecord) => {
+    const s = rec.aras_shipment_number || "";
+    const t = rec.aras_tracking_number || "";
+    // Türkçe veya İngilizce harf içeriyorsa true döner
+    return /[a-zA-ZçğöşüıÇĞÖŞÜİ]/.test(s) || /[a-zA-ZçğöşüıÇĞÖŞÜİ]/.test(t);
   };
 
   const triggerReturnToggle = (id: string, currentStatus: boolean) => {
@@ -158,8 +157,15 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
     setStartDate("");
     setEndDate("");
     setSpecificField("ALL");
+    setSearchInput("");
     setSearchQuery("");
     toast.success("Filtreler temizlendi.");
+  };
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSearchQuery(searchInput);
+    setCurrentPage(1);
   };
 
   // GÜVENLİ FİLTRELEME MOTORU
@@ -171,6 +177,7 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
       const customer = rec.customer_name ? rec.customer_name.toUpperCase() : "";
       const sdDoc = rec.sd_document ? rec.sd_document.toUpperCase() : "";
       const tracking = rec.aras_tracking_number ? rec.aras_tracking_number.toUpperCase() : "";
+      const shipment = rec.aras_shipment_number ? rec.aras_shipment_number.toUpperCase() : "";
       const delivery = rec.delivery_number ? rec.delivery_number.toUpperCase() : "";
       const phone = rec.mobile_number || "";
 
@@ -181,11 +188,12 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
       } else if (specificField === "CUSTOMER") {
         matchesSearch = customer.includes(searchUpper);
       } else if (specificField === "TRACKING") {
-        matchesSearch = tracking.includes(searchUpper);
+        matchesSearch = tracking.includes(searchUpper) || shipment.includes(searchUpper);
       } else {
         matchesSearch = customer.includes(searchUpper) ||
           sdDoc.includes(searchUpper) ||
           tracking.includes(searchUpper) ||
+          shipment.includes(searchUpper) ||
           delivery.includes(searchUpper) ||
           phone.includes(searchUpper);
       }
@@ -194,8 +202,8 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
     const matchesSelectFilter = 
       filterType === "ALL" ? true :
       filterType === "RETURN" ? rec.is_returned === true :
-      filterType === "ERROR" ? isAddressError(rec.aras_tracking_number) :
-      filterType === "NORMAL" ? (!rec.is_returned && !isAddressError(rec.aras_tracking_number)) : true;
+      filterType === "ERROR" ? isAddressError(rec) :
+      filterType === "NORMAL" ? (!rec.is_returned && !isAddressError(rec)) : true;
 
     let matchesDate = true;
     const recordTime = new Date(rec.created_at).getTime();
@@ -289,7 +297,7 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
       "Aras Shipment No": r.aras_shipment_number,
       "Takip No": r.aras_tracking_number,
       "Kalem": r.item_count || 1,
-      "Durum": r.is_returned ? "İADE" : (isAddressError(r.aras_tracking_number) ? "EKSİK/HATALI ADRES" : "NORMAL")
+      "Durum": r.is_returned ? "İADE" : (isAddressError(r) ? "EKSİK/HATALI ADRES" : "NORMAL")
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -299,9 +307,9 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
     toast.success("Excel başarıyla indirildi.");
   };
 
-  const open17Track = (trackingNo: string) => {
-    if (!trackingNo || isAddressError(trackingNo)) return;
-    window.open(`https://t.17track.net/tr#nums=${trackingNo}&fc=100607`, "17Track_Takip", "width=1000,height=750,left=200,top=100");
+  const openArasTrack = (trackingNo: string) => {
+    if (!trackingNo || /[a-zA-Z]/.test(trackingNo)) return;
+    window.open(`https://kargotakip.araskargo.com.tr/mainpage.aspx?code=${trackingNo}`, "Aras_Takip", "width=1000,height=750,left=200,top=100");
   };
 
   const SortHeader = ({ label, sortKey, align = "left" }: { label: string; sortKey: SortKey; align?: "left" | "center" | "right" }) => {
@@ -323,19 +331,17 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
   };
 
   return (
-    <div className="w-full bg-white border border-slate-200 shadow-xl flex flex-col min-w-0 overflow-hidden animate-in fade-in duration-300">
+    <div className="w-full bg-white border border-slate-200 shadow-xl flex flex-col min-w-0 overflow-hidden">
       <Toaster 
         position="bottom-right" 
         toastOptions={{ style: { borderRadius: '12px', background: '#334155', color: '#fff', fontSize: '13px' } }} 
       />
 
       {/* ŞIK VE MODERN FİLTRE PANELİ (Koyu Tema & Turkuaz Accent) */}
-      <div className="bg-slate-900 border-b border-slate-800 p-5 sm:p-7 flex flex-col gap-8 text-white w-full relative overflow-hidden">
+      <div className="bg-slate-900 border-b border-slate-800 p-5 sm:p-7 flex flex-col gap-6 text-white w-full relative overflow-hidden">
         
-        {/* Dekoratif Gradient Arkalan */}
         <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-[#03DF95]/5 rounded-full blur-3xl pointer-events-none -translate-y-1/2 translate-x-1/3"></div>
 
-        {/* ÜST BAŞLIK VE GIF */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 relative z-10">
           <div className="flex items-center gap-5">
             <div className="flex flex-col">
@@ -380,19 +386,27 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
           </div>
         </div>
 
-        {/* ANA ARAMA ÇUBUĞU */}
-        <div className="relative w-full z-10 pt-2">
-          <div className="absolute inset-y-0 left-0 flex items-center pl-4 pt-2 pointer-events-none">
-             <Search className="w-5 h-5 text-slate-400" />
+        {/* ANA ARAMA ÇUBUĞU (PERFORMANS İÇİN FORMLU YAPI) */}
+        <form onSubmit={handleSearchSubmit} className="relative w-full z-10 pt-2 flex flex-col sm:flex-row gap-3">
+          <div className="relative flex-1">
+            <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
+               <Search className="w-5 h-5 text-slate-400" />
+            </div>
+            <input
+              type="text"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className="w-full h-12 sm:h-14 pl-12 pr-4 bg-slate-800/80 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-[#03DF95] focus:ring-1 focus:ring-[#03DF95] uppercase placeholder:text-slate-500 transition-all shadow-inner"
+              placeholder="İSİM, TAKİP NO, SD DOCUMENT VEYA TELEFON YAZIN..."
+            />
           </div>
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full h-12 sm:h-14 pl-12 pr-4 bg-slate-800/80 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-[#03DF95] focus:ring-1 focus:ring-[#03DF95] uppercase placeholder:text-slate-500 transition-all shadow-inner"
-            placeholder="TAKİP NO, SD DOCUMENT VEYA MÜŞTERİ ARA..."
-          />
-        </div>
+          <button 
+            type="submit" 
+            className="h-12 sm:h-14 bg-[#03DF95] hover:bg-[#02c784] text-slate-900 px-8 rounded-xl text-sm font-black uppercase tracking-widest transition-all shadow-md"
+          >
+            ARA
+          </button>
+        </form>
 
         {/* FİLTRE GRID YAPISI */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full relative z-10 pt-4 border-t border-slate-800/50">
@@ -402,7 +416,7 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
             <div className="relative">
               <select
                 value={filterType}
-                onChange={(e) => setFilterType(e.target.value as FilterType)}
+                onChange={(e) => { setFilterType(e.target.value as FilterType); setCurrentPage(1); }}
                 className="h-12 w-full bg-slate-800/80 border border-slate-700 text-white px-4 rounded-xl text-xs font-bold focus:outline-none focus:border-[#03DF95] focus:ring-1 focus:ring-[#03DF95] transition-all cursor-pointer appearance-none shadow-inner"
               >
                 <option value="ALL">KARIŞIK (TÜMÜ)</option>
@@ -421,13 +435,13 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
             <div className="relative">
               <select
                 value={specificField}
-                onChange={(e) => setSpecificField(e.target.value as any)}
+                onChange={(e) => { setSpecificField(e.target.value as any); setCurrentPage(1); }}
                 className="h-12 w-full bg-slate-800/80 border border-slate-700 text-white px-4 rounded-xl text-xs font-bold focus:outline-none focus:border-[#03DF95] focus:ring-1 focus:ring-[#03DF95] transition-all cursor-pointer appearance-none shadow-inner"
               >
                 <option value="ALL">GENEL ARAMA (TÜM ALANLAR)</option>
+                <option value="CUSTOMER">SADECE MÜŞTERİ ADI</option>
                 <option value="SD">SADECE SD DOCUMENT</option>
                 <option value="DELIVERY">SADECE DELIVERY NO</option>
-                <option value="CUSTOMER">SADECE MÜŞTERİ ADI</option>
                 <option value="TRACKING">SADECE TAKİP NO</option>
               </select>
               <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-slate-400">
@@ -473,19 +487,19 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
 
       {/* VERİ TABLOSU */}
       <div className="overflow-x-auto w-full flex-1 bg-white">
-        <table className="w-full text-left border-collapse min-w-[1100px]">
+        <table className="w-full text-left border-collapse min-w-[1200px]">
           <thead>
             <tr className="bg-slate-50/80 border-b border-slate-200">
               <th className="px-4 py-3 w-12 text-center border-r border-slate-100">
                 <input type="checkbox" checked={paginatedRecords.length > 0 && selectedIds.length === paginatedRecords.length} onChange={handleSelectAll} className="w-4 h-4 cursor-pointer accent-[#03DF95] rounded-md border-slate-300" />
               </th>
               <SortHeader label="Yüklenme" sortKey="created_at" />
-              <SortHeader label="Müşteri" sortKey="customer_name" />
-              <SortHeader label="SD Document" sortKey="sd_document" />
-              <SortHeader label="Delivery No" sortKey="delivery_number" />
-              <SortHeader label="Takip No" sortKey="aras_tracking_number" />
+              <SortHeader label="Müşteri Bilgisi" sortKey="customer_name" />
+              <SortHeader label="Evrak & Sipariş" sortKey="sd_document" />
+              <SortHeader label="Kargo Numaraları" sortKey="aras_tracking_number" />
+              <SortHeader label="Adet" sortKey="item_count" align="center" />
               <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">Durum</th>
-              <th className="px-4 py-3 w-16 border-l border-slate-100"></th>
+              <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right pr-6">İşlemler</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -506,114 +520,91 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
               </tr>
             ) : (
               paginatedRecords.map((rec) => {
-                const addressErr = isAddressError(rec.aras_tracking_number);
+                const addressErr = isAddressError(rec);
                 const isSelected = selectedIds.includes(rec.id);
-                const isExpanded = expandedRows.includes(rec.id);
                 
                 return (
-                  <Fragment key={rec.id}>
-                    <tr className={`transition-all hover:bg-slate-50 ${isSelected ? "bg-emerald-50/50" : "bg-white"}`}>
-                      <td className="px-4 py-3.5 text-center border-r border-slate-100">
-                        <input type="checkbox" checked={isSelected} onChange={() => handleSelect(rec.id)} className="w-4 h-4 cursor-pointer accent-[#03DF95] rounded-md border-slate-300" />
-                      </td>
-                      <td className="px-4 py-3.5 whitespace-nowrap">
-                        <span className="text-xs font-semibold text-slate-800">{new Date(rec.created_at).toLocaleDateString('tr-TR')}</span> <br/>
-                        <span className="text-[11px] text-slate-500 font-medium">{new Date(rec.created_at).toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'})}</span>
-                      </td>
-                      <td className="px-4 py-3.5 flex flex-col gap-0.5 items-start">
-                        <span className="text-xs font-bold text-slate-900 truncate max-w-[200px]">{rec.customer_name || "-"}</span>
-                        <span className="text-[11px] font-medium text-slate-500">{rec.mobile_number || "-"}</span>
-                      </td>
-                      <td className="px-4 py-3.5 text-xs font-medium text-slate-700 whitespace-nowrap">{rec.sd_document}</td>
-                      <td className="px-4 py-3.5 text-xs font-bold text-slate-900 whitespace-nowrap">{rec.delivery_number}</td>
-                      
-                      <td className="px-4 py-3.5 text-xs font-medium whitespace-nowrap">
-                        {addressErr ? (
-                          <div className="flex flex-col items-start gap-1 p-1.5 bg-orange-50 border border-orange-200 rounded-md">
-                            <span className="text-orange-700 text-[10px] font-bold uppercase flex items-center gap-1">
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-                              EKSİK/HATALI ADRES
-                            </span>
-                            <span className="text-slate-700 font-semibold">{rec.aras_tracking_number}</span>
-                          </div>
-                        ) : (
-                          <span className={`${rec.is_returned ? 'text-slate-400 line-through' : 'text-emerald-600 font-extrabold '}`}>{rec.aras_tracking_number || "-"}</span>
-                        )}
-                      </td>
+                  <tr key={rec.id} className={`transition-all hover:bg-slate-50 ${isSelected ? "bg-emerald-50/50" : "bg-white"}`}>
+                    <td className="px-4 py-3 text-center border-r border-slate-100">
+                      <input type="checkbox" checked={isSelected} onChange={() => handleSelect(rec.id)} className="w-4 h-4 cursor-pointer accent-[#03DF95] rounded-md border-slate-300" />
+                    </td>
+                    
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className="text-xs font-semibold text-slate-800 block">{new Date(rec.created_at).toLocaleDateString('tr-TR')}</span>
+                      <span className="text-[11px] text-slate-500 font-medium block mt-0.5">{new Date(rec.created_at).toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'})}</span>
+                    </td>
+                    
+                    <td className="px-4 py-3">
+                      <span className="text-xs font-bold text-slate-900 block truncate max-w-[200px]">{rec.customer_name || "-"}</span>
+                      <span className="text-[11px] font-medium text-slate-500 block mt-0.5">{rec.mobile_number || "Telefon Yok"}</span>
+                    </td>
+                    
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-xs font-bold text-slate-700"><span className="text-[10px] text-slate-400 font-normal">SD:</span> {rec.sd_document}</span>
+                        <span className="text-xs font-bold text-slate-700"><span className="text-[10px] text-slate-400 font-normal">DN:</span> {rec.delivery_number}</span>
+                      </div>
+                    </td>
+                    
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {addressErr ? (
+                        <div className="flex flex-col items-start gap-1 p-1.5 bg-orange-50 border border-orange-200 rounded-md">
+                          <span className="text-orange-700 text-[9px] font-bold uppercase flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" /> EKSİK/HATALI ADRES
+                          </span>
+                          <span className="text-slate-700 text-[11px] font-semibold truncate max-w-[200px]" title={/[a-zA-Z]/.test(rec.aras_shipment_number) ? rec.aras_shipment_number : rec.aras_tracking_number}>
+                            {/[a-zA-Z]/.test(rec.aras_shipment_number) ? rec.aras_shipment_number : rec.aras_tracking_number}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className={`flex flex-col gap-0.5 ${rec.is_returned ? 'text-slate-400 line-through opacity-70' : 'text-slate-900'}`}>
+                          <span className="text-[11px] font-semibold"><span className="text-[10px] text-slate-400 font-normal mr-1">S:</span>{rec.aras_shipment_number || "-"}</span>
+                          <span className="text-[11px] font-bold text-[#03DF95]"><span className="text-[10px] text-slate-400 font-normal mr-1">T:</span>{rec.aras_tracking_number || "-"}</span>
+                        </div>
+                      )}
+                    </td>
 
-                      <td className="px-4 py-3.5 text-center">
-                        {rec.is_returned ? (
-                          <span className="bg-red-100 text-red-700 px-2.5 py-1 text-[10px] font-bold uppercase rounded-md border border-red-200">İade</span>
-                        ) : (
-                          <span className="text-slate-400 text-sm font-medium">-</span>
-                        )}
-                      </td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-bold shadow-sm border ${
+                        rec.item_count > 1 ? "bg-slate-900 text-[#03DF95] border-slate-800" : "bg-slate-50 text-slate-600 border-slate-200"
+                      }`}>
+                        {rec.item_count}
+                      </span>
+                    </td>
 
-                      <td className="px-4 py-3.5 text-right border-l border-slate-100">
+                    <td className="px-4 py-3 text-center">
+                      {rec.is_returned ? (
+                        <span className="bg-red-100 text-red-700 px-2.5 py-1 text-[10px] font-bold uppercase rounded-md border border-red-200">İade</span>
+                      ) : (
+                        <span className="text-slate-400 text-sm font-medium">-</span>
+                      )}
+                    </td>
+
+                    <td className="px-4 py-3 text-right pr-6 whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-2">
                         <button 
-                          onClick={() => toggleRowExpansion(rec.id)}
-                          className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-lg transition-all border ${
-                            isExpanded ? "bg-[#03DF95]/10 text-[#00b377] border-[#03DF95]/30" : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50 hover:text-slate-800"
+                          onClick={() => triggerReturnToggle(rec.id, rec.is_returned)}
+                          className={`p-2 rounded-lg transition-all border shadow-sm ${
+                            rec.is_returned 
+                              ? "bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200 hover:text-slate-700" 
+                              : "bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100 hover:text-orange-700"
                           }`}
+                          title={rec.is_returned ? "İadeyi İptal Et" : "İadeye Çek"}
                         >
-                          {isExpanded ? "−" : "+"}
+                          <Undo2 className="w-4 h-4" />
                         </button>
-                      </td>
-                    </tr>
 
-                    {/* AÇILIR İÇERİK PANOSU (AKORDİYON) */}
-                    {isExpanded && (
-                      <tr className="bg-slate-50/50 border-b border-slate-200">
-                        <td colSpan={8} className="p-4 sm:p-6">
-                          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-6 bg-white border border-slate-200 p-5 rounded-xl shadow-sm">
-                            
-                            <div className="flex flex-col sm:flex-row items-center gap-6 w-full sm:w-auto">
-                              {/* YUMUŞATILMIŞ RENKLİ KALEM ADEDİ */}
-                              <div className="bg-emerald-50 border border-[#03DF95]/30 text-emerald-700 p-4 rounded-xl flex flex-col items-center justify-center min-w-[100px]">
-                                <span className="text-3xl font-black leading-none">{rec.item_count || 1}</span>
-                                <span className="text-[10px] font-bold uppercase tracking-wider mt-1">Kalem</span>
-                              </div>
-
-                              <div className="flex gap-10">
-                                <div className="flex flex-col">
-                                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Gönderi Numarası</span>
-                                  <span className="text-sm font-medium text-slate-800">{rec.aras_shipment_number || "Belirtilmemiş"}</span>
-                                </div>
-                                <div className="flex flex-col">
-                                  <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Takip Numarası</span>
-                                  <span className="text-sm font-medium text-slate-800">{rec.aras_tracking_number || "Belirtilmemiş"}</span>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
-                              <button 
-                                onClick={() => triggerReturnToggle(rec.id, rec.is_returned)}
-                                className={`w-full sm:w-auto px-5 py-2.5 text-xs font-bold flex items-center justify-center gap-2 transition-all rounded-lg border ${
-                                  rec.is_returned 
-                                    ? "bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200" 
-                                    : "bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100"
-                                }`}
-                              >
-                                <Undo2 className="w-4 h-4" />
-                                {rec.is_returned ? "İadeyi İptal Et" : "İadeye Çek"}
-                              </button>
-
-                              <button 
-                                onClick={() => open17Track(rec.aras_tracking_number)}
-                                disabled={!rec.aras_tracking_number || addressErr}
-                                className="w-full sm:w-auto bg-[#03DF95] hover:bg-[#02c784] disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 text-slate-900 px-5 py-2.5 text-xs font-extrabold transition-all rounded-lg flex items-center justify-center gap-2 border border-[#03DF95]"
-                              >
-                                <Truck className="w-4 h-4" />
-                                Kargo Takip
-                              </button>
-                            </div>
-
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
+                        <button 
+                          onClick={() => openArasTrack(rec.aras_tracking_number)}
+                          disabled={!rec.aras_tracking_number || addressErr}
+                          className="p-2 rounded-lg bg-[#03DF95] hover:bg-[#02c784] text-slate-900 disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 transition-all border border-[#03DF95] shadow-sm"
+                          title="Kargo Takip"
+                        >
+                          <Truck className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
                 );
               })
             )}
@@ -654,10 +645,10 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
 
       {/* İADE ONAY MODALI */}
       {returnModal.isOpen && (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
-          <div className="bg-white border border-slate-200 shadow-xl w-full max-w-sm flex flex-col rounded-2xl overflow-hidden">
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <div className="bg-white border border-slate-200 shadow-xl w-full max-w-sm flex flex-col rounded-2xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className={`p-5 flex items-center justify-center ${!returnModal.currentStatus ? "bg-orange-500" : "bg-slate-800"}`}>
-              <h2 className="font-bold text-sm text-white">
+              <h2 className="font-bold text-sm text-white uppercase tracking-widest">
                 {!returnModal.currentStatus ? "İade İşlemi Onayı" : "İade İptal Onayı"}
               </h2>
             </div>
@@ -667,9 +658,9 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
                   ? "Bu paketi fiziki olarak teslim aldığınızı ve sisteme iade olarak işleneceğini onaylıyor musunuz?" 
                   : "Bu paketin iade durumunu kaldırıp normal statüsüne almak istediğinize emin misiniz?"}
               </p>
-              <div className="flex gap-3 w-full mt-2">
-                <button onClick={() => setReturnModal({isOpen: false, id: "", currentStatus: false})} disabled={isReturning} className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold h-11 text-xs rounded-lg transition-all">İptal</button>
-                <button onClick={confirmReturnToggle} disabled={isReturning} className={`flex-1 text-white font-bold h-11 text-xs rounded-lg transition-all ${!returnModal.currentStatus ? "bg-orange-500 hover:bg-orange-600" : "bg-[#03DF95] hover:bg-[#02c784] text-slate-900"}`}>
+              <div className="flex gap-3 w-full mt-4">
+                <button onClick={() => setReturnModal({isOpen: false, id: "", currentStatus: false})} disabled={isReturning} className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold h-12 text-xs uppercase tracking-widest rounded-xl transition-all shadow-sm">İptal</button>
+                <button onClick={confirmReturnToggle} disabled={isReturning} className={`flex-1 text-white font-bold h-12 text-xs uppercase tracking-widest rounded-xl transition-all shadow-sm ${!returnModal.currentStatus ? "bg-orange-500 hover:bg-orange-600 border-orange-600" : "bg-[#03DF95] hover:bg-[#02c784] text-slate-900 border-[#03DF95]"}`}>
                   {isReturning ? "İşleniyor" : "Onayla"}
                 </button>
               </div>
@@ -680,21 +671,21 @@ export default function TrackingTable({ onTrackClick }: TableProps) {
 
       {/* SİLME ONAY MODALI */}
       {showDeleteModal && (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
-          <div className="bg-white border border-slate-200 shadow-xl w-full max-w-md flex flex-col rounded-2xl overflow-hidden">
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <div className="bg-white border border-slate-200 shadow-xl w-full max-w-md flex flex-col rounded-2xl overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="bg-red-500 p-5 flex items-center justify-center">
-              <h2 className="text-white font-bold text-sm text-center">Kalıcı Silme Onayı</h2>
+              <h2 className="text-white font-bold text-sm text-center uppercase tracking-widest">Kalıcı Silme Onayı</h2>
             </div>
             <div className="p-6 flex flex-col items-center gap-4">
               <div className="text-center w-full">
-                <h3 className="text-xl font-black text-red-600 mb-2">{selectedIds.length} Kayıt</h3>
+                <h3 className="text-2xl font-black text-red-600 mb-2">{selectedIds.length} Kayıt</h3>
                 <p className="text-sm font-medium text-slate-700 leading-relaxed bg-red-50 p-4 rounded-xl border border-red-100">
                   Seçili kayıtlar veritabanından kalıcı olarak silinecektir. Bu işlem geri alınamaz, onaylıyor musunuz?
                 </p>
               </div>
-              <div className="flex gap-3 w-full mt-2">
-                <button onClick={() => setShowDeleteModal(false)} disabled={isDeleting} className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold h-11 text-xs rounded-lg transition-all">İptal</button>
-                <button onClick={confirmDelete} disabled={isDeleting} className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold h-11 text-xs rounded-lg transition-all">
+              <div className="flex gap-3 w-full mt-4">
+                <button onClick={() => setShowDeleteModal(false)} disabled={isDeleting} className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold h-12 text-xs uppercase tracking-widest rounded-xl transition-all shadow-sm">İptal</button>
+                <button onClick={confirmDelete} disabled={isDeleting} className="flex-1 bg-red-500 hover:bg-red-600 text-white font-bold h-12 text-xs uppercase tracking-widest rounded-xl transition-all shadow-sm border-red-600">
                   {isDeleting ? "Siliniyor" : "Evet, Sil"}
                 </button>
               </div>
