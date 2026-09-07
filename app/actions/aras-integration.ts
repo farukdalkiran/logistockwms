@@ -219,3 +219,83 @@ export async function getExactOriginalExportData(fileId?: string) {
     return { success: false, error: "Sunucu hatası." };
   }
 }
+
+/**
+ * BARKOD PERFORMANS VE GRAFİK MOTORU (Tarih Aralığına Göre)
+ */
+export async function getPerformanceByDateRange(startDate: string, endDate: string) {
+  try {
+    // Supabase tarafında aralık sorgusu yapabilmek için başlangıç ve bitiş saatlerini belirliyoruz
+    const start = `${startDate}T00:00:00.000Z`;
+    const end = `${endDate}T23:59:59.999Z`;
+
+    const query = supabaseAdmin
+      .from("erp_raw_shipments")
+      .select("delivery_number, processed_at")
+      .eq("is_processed_aras", true)
+      .gte("processed_at", start)
+      .lte("processed_at", end);
+
+    // Limit engeline (1000 row) takılmamak için senin yazdığın kalkan delici motoru (pagination) kullanıyoruz
+    const data = await fetchAllRows(query);
+
+    if (!data || data.length === 0) {
+      return []; // Veri yoksa boş array döner, frontend "İşlem bulunamadı" uyarısını verir
+    }
+
+    // Gelen binlerce kaydı Gün bazlı (YYYY-MM-DD) gruplamak için JS Map kullanıyoruz
+    const dailyStats = new Map<string, {
+      deliveries: Set<string>;
+      first_time: string;
+      last_time: string;
+    }>();
+
+    data.forEach(row => {
+      if (!row.processed_at) return;
+
+      const dateObj = new Date(row.processed_at);
+
+      // Vercel server timezone farklarını ezip Türkiye (Istanbul) saatine göre işlem yapıyoruz
+      const dateFormatter = new Intl.DateTimeFormat('tr-TR', {
+        timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit'
+      });
+      const parts = dateFormatter.formatToParts(dateObj);
+      const day = parts.find(p => p.type === 'day')?.value;
+      const month = parts.find(p => p.type === 'month')?.value;
+      const year = parts.find(p => p.type === 'year')?.value;
+      const dateStr = `${year}-${month}-${day}`; // Frontend'in beklediği Dizi/Map Key Formatı
+
+      // Türkiye saatine göre Saati (HH:mm) alıyoruz
+      const timeFormatter = new Intl.DateTimeFormat('tr-TR', {
+        timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit', hour12: false
+      });
+      const timeStr = timeFormatter.format(dateObj);
+
+      // O gün için Map'te kayıt yoksa oluştur
+      if (!dailyStats.has(dateStr)) {
+        dailyStats.set(dateStr, { deliveries: new Set(), first_time: timeStr, last_time: timeStr });
+      }
+
+      const dayData = dailyStats.get(dateStr)!;
+      dayData.deliveries.add(row.delivery_number); // Unique (Benzersiz) sipariş sayımı için Set kullanıyoruz
+
+      // İlk ve Son işlem saatlerini kıyaslayıp güncelliyoruz
+      if (timeStr < dayData.first_time) dayData.first_time = timeStr;
+      if (timeStr > dayData.last_time) dayData.last_time = timeStr;
+    });
+
+    // Map'i frontend'in beklediği Dizi (Array) formatına çevirip tarihe göre sıralıyoruz
+    const result = Array.from(dailyStats.entries()).map(([date, stats]) => ({
+      date,
+      count: stats.deliveries.size,
+      first_time: stats.first_time,
+      last_time: stats.last_time
+    })).sort((a, b) => a.date.localeCompare(b.date));
+
+    return result;
+
+  } catch (e: any) {
+    console.error("Performans verisi çekme hatası:", e);
+    return [];
+  }
+}
