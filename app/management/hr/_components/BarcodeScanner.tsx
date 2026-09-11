@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { processAttendanceScan } from "@/app/actions/attendance";
 import { supabase } from "@/lib/supabase";
-import { QrCode, Check, AlertCircle } from "lucide-react";
+import { QrCode, Check, AlertCircle, ShieldAlert } from "lucide-react";
 
 interface BarcodeScannerProps {
   branchId: string | null;
@@ -28,14 +28,12 @@ export default function BarcodeScanner({
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    // Terminal açıldığında otomatik odaklan
     inputRef.current?.focus();
 
     // WMS Kiosk Lojiği: Ekranda nereye tıklanırsa tıklansın odak inputta kalsın
     const handleGlobalClick = () => inputRef.current?.focus();
     window.addEventListener("click", handleGlobalClick);
 
-    // Sadece Realtime tetikleyicisi olarak kullanıyoruz, ölü data fetch işlemi kaldırıldı
     const realtimeChannel = supabase
       .channel("attendance_realtime_sync")
       .on(
@@ -59,7 +57,6 @@ export default function BarcodeScanner({
     };
   }, [branchId, router]);
 
-  // Info kartını gösterir ve input odağını asla kaybetmez
   const triggerFeedback = (type: "success" | "error", msg: string) => {
     setFeedback({ type, msg });
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
@@ -68,7 +65,6 @@ export default function BarcodeScanner({
       setFeedback(null);
     }, 3500);
 
-    // Timeout veya render sonrası odağın kaybolmasını engellemek için mini gecikmeli focus
     setTimeout(() => {
       inputRef.current?.focus();
     }, 10);
@@ -77,24 +73,23 @@ export default function BarcodeScanner({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    const currentId = terminalId;
+    const currentId = terminalId.trim();
 
-    if (currentId.length !== 5) {
-      triggerFeedback("error", "GEÇERSİZ KOD (5 HANELİ OLMALI)");
+    // 🛡️ GÜÇLÜ KALKAN: Eski 5 haneli manuel girişler TAMAMEN YASAKLANDI.
+    // Barkod mutlaka "WMS-" ile başlamalı ve 4 parçadan oluşmalıdır. (WMS-ID-TIMESTAMP-SIGNATURE)
+    if (!currentId.startsWith("WMS-") || currentId.split("-").length !== 4) {
+      triggerFeedback("error", "GÜVENLİK İHLALİ: LÜTFEN SADECE MOBİL QR OKUTUNUZ!");
       setTerminalId("");
       return;
     }
 
-    // KESİNTİSİZ HIZ: İstek başlamadan inputu hemen boşalt ki arkadan okutma devam etsin!
     setTerminalId("");
     setLoading(true);
 
     try {
-      // 🚀 HIZ OPTİMİZASYONU: Double-trip kapatıldı. 
-      // Personel var mı? Şube yetkisi doğru mu? Aktif mi? 
-      // Bütün kontrolleri processAttendanceScan Server Action'ı yapıp bize result dönecek.
+      // Barkod direkt olarak Server Action'a gönderiliyor. Zaman (10sn) ve İmza (HMAC) kontrolü orada yapılacak.
       const result = await processAttendanceScan(
-        currentId,
+        currentId, 
         actionType,
         branchId
       );
@@ -102,7 +97,6 @@ export default function BarcodeScanner({
       triggerFeedback(result.success ? "success" : "error", result.message || "İŞLEM SONUCU ALINAMADI");
 
       if (result.success) {
-        // Await blokajı yok, arka planda UI yenilensin
         window.dispatchEvent(new CustomEvent("refresh-wms-attendance"));
         router.refresh();
       }
@@ -130,8 +124,8 @@ export default function BarcodeScanner({
           </span>
           <span className="text-sm font-black text-white flex items-center gap-2 uppercase tracking-wide">
             <span
-              className={`w-2.5 h-2.5 rounded-sm shadow-sm transition-colors duration-300 ${
-                isOut ? "bg-[#dc3545]" : "bg-[#3d870c] animate-pulse"
+              className={`w-2.5 h-2.5 rounded-sm shadow-[0_0_8px_currentColor] transition-colors duration-300 ${
+                isOut ? "bg-[#dc3545] text-[#dc3545]" : "bg-[#3d870c] text-[#3d870c] animate-pulse"
               }`}
             ></span>
             {branchName}
@@ -140,8 +134,9 @@ export default function BarcodeScanner({
       </div>
 
       <div className="p-6 flex flex-col items-center bg-slate-50">
+        
         {/* Endüstriyel Tarayıcı Görsel Alanı */}
-        <div className="w-48 h-48 border-2 border-slate-200 bg-white relative mb-6 flex items-center justify-center shadow-sm rounded-md overflow-hidden group">
+        <div className="w-48 h-48 border-2 border-slate-200 bg-white relative mb-4 flex items-center justify-center shadow-sm rounded-md overflow-hidden group">
           <div className="absolute top-4 left-4 w-8 h-8 border-t-[4px] border-l-[4px] transition-colors duration-500 rounded-tl-[3px] z-10" style={{ borderColor: activeColor }}></div>
           <div className="absolute top-4 right-4 w-8 h-8 border-t-[4px] border-r-[4px] transition-colors duration-500 rounded-tr-[3px] z-10" style={{ borderColor: activeColor }}></div>
           <div className="absolute bottom-4 left-4 w-8 h-8 border-b-[4px] border-l-[4px] transition-colors duration-500 rounded-bl-[3px] z-10" style={{ borderColor: activeColor }}></div>
@@ -156,8 +151,14 @@ export default function BarcodeScanner({
             size={160}
             className="z-10 transition-all duration-300 drop-shadow-md group-hover:scale-105"
             color={activeColor}
-            strokeWidth={2}
+            strokeWidth={1.5}
           />
+        </div>
+
+        {/* Uyarı Bandı */}
+        <div className="w-full flex items-center justify-center gap-1.5 text-slate-500 bg-slate-200/50 py-1.5 px-3 rounded-md mb-6 border border-slate-200">
+          <ShieldAlert size={14} className="text-amber-600" />
+          <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">Elle giriş yapılamaz</span>
         </div>
 
         {/* İşlem Tipi Seçici */}
@@ -198,7 +199,7 @@ export default function BarcodeScanner({
             className="text-[11px] font-black text-slate-500 uppercase tracking-wider transition-colors group-focus-within:text-slate-800"
             htmlFor="terminal-input"
           >
-            Çalışan ID Veya Barkodu Okutun
+            MOBİL TERMİNAL QR KODUNU OKUTUN
           </label>
           <form
             onSubmit={handleSubmit}
@@ -209,12 +210,10 @@ export default function BarcodeScanner({
               ref={inputRef}
               type="password"
               value={terminalId}
-              onChange={(e) => {
-                setTerminalId(e.target.value.replace(/[^0-9]/g, ""));
-              }}
-              maxLength={5}
+              onChange={(e) => setTerminalId(e.target.value)} // Regex kısıtlaması kaldırıldı
+              maxLength={80} // Dinamik uzun QR için artırıldı
               disabled={false} 
-              className={`h-16 w-full bg-white border-2 rounded-md pl-4 pr-16 font-mono text-center text-3xl font-black tracking-[0.3em] outline-none transition-all focus:bg-slate-50 focus:shadow-[0_0_0_4px_rgba(0,0,0,0.04)] ${
+              className={`h-16 w-full bg-white border-2 rounded-md pl-4 pr-16 font-mono text-center text-xl font-black tracking-widest outline-none transition-all focus:bg-slate-50 focus:shadow-[0_0_0_4px_rgba(0,0,0,0.04)] ${
                 isOut
                   ? "border-slate-300 focus:border-[#dc3545] text-[#dc3545]"
                   : "border-slate-300 focus:border-[#3d870c] text-[#3d870c]"
@@ -223,9 +222,9 @@ export default function BarcodeScanner({
             />
             <button
               type="submit"
-              disabled={loading || terminalId.length !== 5}
+              disabled={loading || !terminalId.startsWith("WMS-")}
               className={`absolute right-2 h-12 w-12 flex items-center justify-center rounded-md transition-all duration-200 active:scale-[0.92] ${
-                loading || terminalId.length !== 5
+                loading || !terminalId.startsWith("WMS-")
                   ? "opacity-40 cursor-not-allowed grayscale"
                   : "hover:scale-105 shadow-md"
               } ${isOut ? "bg-[#dc3545] text-white" : "bg-[#3d870c] text-white"}`}

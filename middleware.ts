@@ -49,8 +49,8 @@ export async function middleware(req: NextRequest) {
 
   // 1. HİÇ OTURUM YOKSA (Terminal cihazı henüz bir yönetici tarafından şubeye kilitlenmemişse)
   if (!session) {
-    // Güvenlik Duvarı: Cihaz yetkisizken Web Login (/login) hariç her yeri tamamen yasakla.
-    if (path !== "/login") {
+    // Güvenlik Duvarı: Cihaz yetkisizken Web Login (/login) ve Mobil Terminal (/mobile) hariç her yeri tamamen yasakla.
+    if (path !== "/login" && path !== "/mobile") {
       return NextResponse.redirect(new URL("/login", req.url));
     }
     return res;

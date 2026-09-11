@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/Button';
 import { Logo } from '@/components/ui/Logo';
-import { Lock, Mail, AlertCircle, KeyRound, ArrowLeft, ArrowRight, ShieldCheck, CheckCircle2,Globe, ShieldAlert } from 'lucide-react';
+import { Lock, Mail, AlertCircle, KeyRound, ArrowLeft, ArrowRight, ShieldCheck, CheckCircle2, Globe, ShieldAlert, Smartphone } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -166,9 +166,17 @@ export default function LoginPage() {
                 </Button>
               </form>
 
-              {/* Şifremi Unuttum Linki Alt Tarafa Alındı */}
-              <div className="mt-6 text-center border-t border-slate-100 pt-4">
-                <button type="button" onClick={() => { setError(''); setSuccessMsg(''); setCurrentView('forgot'); }} className="text-[11px] font-bold text-slate-400 hover:text-[#dc3545] transition-colors uppercase tracking-wider">
+              {/* Ekstra Menü ve Yönlendirmeler */}
+              <div className="mt-6 pt-6 border-t border-slate-100 flex flex-col gap-3">
+                <button 
+                  type="button" 
+                  onClick={() => router.push('/mobile')} 
+                  className="w-full h-12 bg-[#dc3545]/10 hover:bg-[#dc3545]/20 text-[#dc3545] border border-[#dc3545]/20 rounded-sm flex items-center justify-center gap-2 text-[12px] font-black tracking-wider uppercase transition-colors"
+                >
+                  <Smartphone size={18} /> Personel Mobil Terminali
+                </button>
+
+                <button type="button" onClick={() => { setError(''); setSuccessMsg(''); setCurrentView('forgot'); }} className="text-[11px] font-bold text-slate-400 hover:text-[#dc3545] transition-colors uppercase tracking-wider text-center mt-2">
                   Şifrenizi mi unuttunuz?
                 </button>
               </div>
