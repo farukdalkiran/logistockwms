@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { 
   Clock, ShieldAlert, CheckCircle2, AlertCircle, Save, 
   UserCheck, Calendar, Search, CalendarDays, Zap, 
@@ -87,7 +87,6 @@ export default function DeveloperAttendancePanel({ managerId, managerName, manag
     try {
       const res = await getAttendanceHistory(filterMonth, filterYear, filterEmpId || null);
       if (res.success && res.data) {
-        // Tabloda isim göstermek için employee tablosuyla eşleştirme
         const enrichedData = res.data.map(rec => {
           const emp = employees.find(e => e.id === rec.employee_id);
           return { ...rec, employee_name: emp ? emp.full_name : rec.employee_id };
@@ -95,10 +94,11 @@ export default function DeveloperAttendancePanel({ managerId, managerName, manag
         setHistoryRecords(enrichedData);
         if(enrichedData.length === 0) setFeedback({ type: "success", msg: "Kriterlere uygun kayıt bulunamadı." });
       } else {
-        setFeedback({ type: "error", msg: res.message });
+        setFeedback({ type: "error", msg: res.message || "Kayıtlar çekilirken bir hata oluştu." });
       }
     } catch (error) {
       console.error(error);
+      setFeedback({ type: "error", msg: "Sistemsel bir hata oluştu." });
     } finally {
       setFetchingHistory(false);
     }
@@ -125,10 +125,10 @@ export default function DeveloperAttendancePanel({ managerId, managerName, manag
     if (result.success) {
       setFeedback({ type: "success", msg: "KAYIT İZ BIRAKMADAN GÜNCELLENDİ." });
       setEditingRecord(null);
-      handleSearchHistory(); // Tabloyu yenile
+      handleSearchHistory(); 
       router.refresh();
     } else {
-      setFeedback({ type: "error", msg: result.message });
+      setFeedback({ type: "error", msg: result.message || "Güncelleme başarısız." });
     }
     setLoading(false);
   };
@@ -137,14 +137,15 @@ export default function DeveloperAttendancePanel({ managerId, managerName, manag
   const handleDeleteClick = async (recordId: string) => {
     if (!confirm("DİKKAT: Bu mesai kaydı tamamen silinecek ve LOG TUTULMAYACAK. Onaylıyor musun?")) return;
     setFetchingHistory(true);
-    const result = await deleteAttendance(recordId, managerId, true);
+    
+    const result = await deleteAttendance(recordId, managerId);
     
     if (result.success) {
       setFeedback({ type: "success", msg: "KAYIT SİSTEMDEN KAZINDI." });
       setHistoryRecords(prev => prev.filter(r => r.id !== recordId));
       router.refresh();
     } else {
-      setFeedback({ type: "error", msg: result.message });
+      setFeedback({ type: "error", msg: result.message || "Silme işlemi başarısız." });
     }
     setFetchingHistory(false);
   };
@@ -164,12 +165,12 @@ export default function DeveloperAttendancePanel({ managerId, managerName, manag
       setNewForm(prev => ({ ...prev, check_in: "08:00", check_out: "17:00", note: "DEV_OVERRIDE: Sıfırdan zorla eklendi." }));
       router.refresh();
     } else {
-      setFeedback({ type: "error", msg: result.message });
+      setFeedback({ type: "error", msg: result.message || "Kayıt işlemi başarısız." });
     }
     setLoading(false);
   };
 
-  // 5. AKILLI EKSİK TARAMA & TOPLU İŞLEM (Aynı Bırakıldı, Sadece Stil Düzenlendi)
+  // 5. AKILLI EKSİK TARAMA & TOPLU İŞLEM
   const handleAnalyzeGaps = async () => {
     if (selectedEmps.length === 0) return setFeedback({ type: "error", msg: "LÜTFEN PERSONEL SEÇİN." });
     setLoading(true); setFeedback(null);
@@ -180,7 +181,9 @@ export default function DeveloperAttendancePanel({ managerId, managerName, manag
       result.data.forEach(g => { initialConfig[g.date] = { isHoliday: false, checkIn: "08:00", checkOut: "17:00", breakMinutes: 60 }; });
       setGapConfig(initialConfig);
       if(result.data.length === 0) setFeedback({ type: "success", msg: "EKSİK KAYIT BULUNAMADI." });
-    } else { setFeedback({ type: "error", msg: result.message }); }
+    } else { 
+      setFeedback({ type: "error", msg: result.message || "Tarama başarısız oldu." }); 
+    }
     setLoading(false);
   };
 
@@ -189,11 +192,16 @@ export default function DeveloperAttendancePanel({ managerId, managerName, manag
     if (!window.confirm("Seçili eksik günleri, LOG TUTMADAN sisteme işlemek istediğinize emin misiniz?")) return;
     setLoading(true); setFeedback(null);
     const payloads = gaps.map(g => ({ date: g.date, employeeIds: g.employeeIds, ...gapConfig[g.date] }));
-    const result = await processBulkMissingAttendance(payloads, managerId, true);
+    
+    // ARGÜMAN HATASI ÇÖZÜMÜ: 'true' parametresi kaldırıldı, fonksiyon sadece 2 parametre bekliyor.
+    const result = await processBulkMissingAttendance(payloads, managerId);
+    
     if (result.success) {
       setFeedback({ type: "success", msg: "TÜM KAYITLAR İZ BIRAKMADAN İŞLENDİ." });
       setGaps([]); router.refresh();
-    } else { setFeedback({ type: "error", msg: result.message }); }
+    } else { 
+      setFeedback({ type: "error", msg: result.message || "Toplu işlem başarısız oldu." }); 
+    }
     setLoading(false);
   };
 
