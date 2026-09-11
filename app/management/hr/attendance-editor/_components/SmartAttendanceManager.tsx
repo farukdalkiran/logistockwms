@@ -37,14 +37,14 @@ interface Props {
   employees: Employee[];
 }
 
+// 🕒 UTC -> GMT+3 (İstanbul) Çevirici Fonksiyonlar
 const formatLocalTime = (isoString: string | null) => {
   if (!isoString) return "-";
   return new Date(isoString).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul', hour12: false });
 };
 
-// Form alanlarına saati atarken null ise boş bırakır, böylece "Zorunlu değil" hissini verir.
 const getLocalInputTime = (isoString: string | null) => {
-  if (!isoString) return ""; 
+  if (!isoString) return ""; // Eğer log boşsa forma 08:00 değil boşluk yansısın
   return new Date(isoString).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul', hour12: false });
 };
 
@@ -122,8 +122,9 @@ export default function DeveloperAttendancePanel({ managerId, managerName, manag
       record_id: editingRecord.id,
       employee_id: editingRecord.employee_id,
       target_date: editingRecord.target_date,
-      check_in: editForm.check_in || null, // Boş string yerine veritabanına NULL gönderiyoruz
-      check_out: editForm.check_out || null,
+      // TYPESCRIPT HATASI ÇÖZÜMÜ: null yerine formdan gelen string (veya boş string) doğrudan iletiliyor
+      check_in: editForm.check_in, 
+      check_out: editForm.check_out,
       break_minutes: editForm.break_minutes,
       manager_id: managerId,
       note: editForm.note,
@@ -166,8 +167,9 @@ export default function DeveloperAttendancePanel({ managerId, managerName, manag
     
     const result = await upsertDirectAttendance({ 
       ...newForm,
-      check_in: newForm.check_in || null, 
-      check_out: newForm.check_out || null, 
+      // TYPESCRIPT HATASI ÇÖZÜMÜ: null yerine formdan gelen string doğrudan iletiliyor
+      check_in: newForm.check_in, 
+      check_out: newForm.check_out, 
       manager_id: managerId, 
       is_developer_override: true 
     });
@@ -203,9 +205,7 @@ export default function DeveloperAttendancePanel({ managerId, managerName, manag
     if (!window.confirm("Seçili eksik günleri, LOG TUTMADAN sisteme işlemek istediğinize emin misiniz?")) return;
     setLoading(true); setFeedback(null);
     const payloads = gaps.map(g => ({ date: g.date, employeeIds: g.employeeIds, ...gapConfig[g.date] }));
-    
     const result = await processBulkMissingAttendance(payloads, managerId);
-    
     if (result.success) {
       setFeedback({ type: "success", msg: "TÜM KAYITLAR İZ BIRAKMADAN İŞLENDİ." });
       setGaps([]); router.refresh();
@@ -386,7 +386,7 @@ export default function DeveloperAttendancePanel({ managerId, managerName, manag
       )}
 
       {/* =========================================
-          TAB 2: SIFIRDAN YENİ KAYIT ZORLA (Sadece Giriş veya Çıkış Olabilir)
+          TAB 2: SIFIRDAN YENİ KAYIT ZORLA (Padding Ayarlı ve Null Serbestisi)
           ========================================= */}
       {activeTab === "NEW_RECORD" && (
         <form onSubmit={handleNewRecordSubmit} className="p-8 md:p-10 flex flex-col gap-7 bg-white min-h-[500px] animate-in fade-in max-w-4xl mx-auto w-full">
