@@ -12,7 +12,8 @@ import {
   CheckCircle2,
   Calendar,
   AlertCircle,
-  Code2
+  Code2,
+  Smartphone
 } from "lucide-react";
 
 interface AttendanceTableProps {
@@ -55,7 +56,7 @@ export default function AttendanceTable({
           break_hours,
           working_hours,
           status,
-          employees!attendance_employee_id_fkey ( full_name, position_title )
+          employees!attendance_employee_id_fkey ( full_name, position_title, device_token ) 
         `)
         .gte("check_in_time", todayStart)
         .lte("check_in_time", todayEnd)
@@ -185,20 +186,16 @@ export default function AttendanceTable({
     return `${finalHours}s ${finalMinutes}dk`;
   };
 
-  // KİŞİSELLEŞTİRİLMİŞ ROL MOTORU
   const getRoleType = (title?: string) => {
     if (!title) return "PERSONNEL";
     const lower = title.toLocaleLowerCase("tr-TR");
     
-    // Developer (RGB) Kontrolü
     if (lower.includes("developer") || lower.includes("geliştirici")) {
       return "DEVELOPER";
     }
-    // Yönetici Kontrolü
     if (["yönetici", "müdür", "şef", "admin", "lider","uzman"].some((k) => lower.includes(k))) {
       return "MANAGER";
     }
-    // Standart Personel
     return "PERSONNEL";
   };
 
@@ -218,7 +215,7 @@ export default function AttendanceTable({
     return <span className="w-2.5 h-2.5 rounded-full bg-[#0b9c2d] shrink-0 shadow-[0_0_6px_#0b9c2d]" title="Zamanında Giriş"></span>;
   };
 
-  // DÖNEN BORDER (SPINNING BORDER) İHLAL ROZETİ
+  // GELİŞMİŞ İHLAL ROZETİ (ŞİDDET SEVİYELERİNE GÖRE ANIMASYON)
   const getLateBadge = (lateCount: number) => {
     if (lateCount === 0) {
       return (
@@ -228,22 +225,30 @@ export default function AttendanceTable({
       );
     }
 
-    const isCritical = lateCount > 3;
+    let gradientClass = "";
+    let boxClass = "";
+    let wrapperClass = "relative inline-flex p-[2px] rounded-sm overflow-hidden group shadow-sm";
+
+    if (lateCount <= 3) {
+      // GÜVENLİ BÖLGE (Yeşil tonları, yavaş animasyon)
+      gradientClass = "bg-[conic-gradient(from_90deg_at_50%_50%,#ecfdf5_0%,#10b981_50%,#ecfdf5_100%)] animate-[spin_4s_linear_infinite]";
+      boxClass = "bg-emerald-50 text-emerald-700";
+    } else if (lateCount === 4) {
+      // UYARI BÖLGESİ (Sarı tonları, normal hız)
+      gradientClass = "bg-[conic-gradient(from_90deg_at_50%_50%,#fffbeb_0%,#f59e0b_50%,#fffbeb_100%)] animate-[spin_2s_linear_infinite]";
+      boxClass = "bg-amber-100 text-amber-800";
+    } else {
+      // KRİTİK BÖLGE (Kırmızı tonları, HIZLI DÖNÜŞ VE SALLANMA)
+      wrapperClass += " animate-pulse shadow-[0_0_8px_rgba(220,53,69,0.5)]";
+      gradientClass = "bg-[conic-gradient(from_90deg_at_50%_50%,#000000_0%,#dc3545_50%,#000000_100%)] animate-[spin_1s_linear_infinite]";
+      boxClass = "bg-red-600 text-white shadow-inner";
+    }
 
     return (
       <div className="flex justify-center">
-        {/* Dönen Border Wrapper */}
-        <div className="relative inline-flex p-[2px] rounded-sm overflow-hidden group shadow-sm">
-          <span className={`absolute inset-[-1000%] animate-[spin_3s_linear_infinite] ${
-            isCritical 
-              ? 'bg-[conic-gradient(from_90deg_at_50%_50%,#fef2f2_0%,#ef4444_50%,#fef2f2_100%)]' 
-              : 'bg-[conic-gradient(from_90deg_at_50%_50%,#fffbeb_0%,#f59e0b_50%,#fffbeb_100%)]'
-          }`} />
-          
-          {/* İçerik Kutusu (Minimal) */}
-          <span className={`relative inline-flex items-center justify-center min-w-[20px] h-[20px] px-1 text-[10px] font-black tabular-nums rounded-sm ${
-            isCritical ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'
-          }`}>
+        <div className={wrapperClass}>
+          <span className={`absolute inset-[-1000%] ${gradientClass}`} />
+          <span className={`relative inline-flex items-center justify-center min-w-[20px] h-[20px] px-1 text-[10px] font-black tabular-nums rounded-[3px] ${boxClass}`}>
             {lateCount}
           </span>
         </div>
@@ -310,12 +315,14 @@ export default function AttendanceTable({
         </div>
       </div>
 
-      {/* TABLO ALANI (Kompakt ve Endüstriyel Yapı) */}
       <div className="flex-1 overflow-auto bg-white">
         <table className="w-full text-xs text-left whitespace-nowrap">
           <thead className="bg-slate-50 border-b border-slate-200 text-[9px] font-black text-slate-500 uppercase tracking-widest sticky top-0 z-10 shadow-sm">
             <tr>
               <th className="px-5 py-3">Personel Bilgisi</th>
+              <th className="px-2 py-3 text-center w-[60px] text-slate-400" title="Cihaz Kaydı">
+                <div className="flex items-center justify-center"><Smartphone className="w-3.5 h-3.5" /></div>
+              </th>
               <th className="px-2 py-3 text-center w-[100px]">Giriş Saati</th>
               <th className="px-2 py-3 text-center w-[100px]">Çıkış Saati</th>
               <th className="px-2 py-3 text-center text-amber-600 w-[90px]">
@@ -337,7 +344,7 @@ export default function AttendanceTable({
           <tbody className="divide-y divide-slate-100">
             {loading && sortedRecords.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-3 py-20 text-center bg-white">
+                <td colSpan={9} className="px-3 py-20 text-center bg-white">
                   <div className="flex flex-col items-center justify-center gap-3 text-slate-400">
                     <div className="w-8 h-8 border-4 border-slate-100 border-t-[#dc3545] rounded-full animate-spin"></div>
                     <span className="text-[10px] font-bold uppercase tracking-widest">Kayıtlar Hesaplanıyor...</span>
@@ -347,7 +354,6 @@ export default function AttendanceTable({
             ) : sortedRecords && sortedRecords.length > 0 ? (
               sortedRecords.map((record: any, index: number) => {
                 
-                // Roller ve İstatistikler
                 const roleType = getRoleType(record.employees?.position_title);
                 const employeeId = record.employee_id;
                 const monthlyTotal = monthlyTotals[employeeId] || 0;
@@ -356,21 +362,18 @@ export default function AttendanceTable({
                 const isLeave = record.status && record.status.startsWith('LEAVE_');
                 const leaveText = isLeave ? record.status.replace('LEAVE_', '').replace(/_/g, ' ') : '';
                 
-                // Zebra Listeleme (Daha Soluk/Kompakt)
                 const isEven = index % 2 === 0;
+                const hasDeviceToken = record.employees?.device_token ? true : false;
 
                 return (
-                  <tr key={record.id} className={`transition-colors duration-150 hover:bg-slate-50 ${isEven ? 'bg-white' : 'bg-slate-50/30'} ${isLeave ? 'bg-blue-50/20' : ''}`}>
+                  <tr key={record.id} className={`transition-all duration-200 hover:bg-slate-100 ${isEven ? 'bg-white' : 'bg-[#f8fafc]'} ${isLeave ? 'bg-blue-50/20' : ''}`}>
                     
-                    {/* PERSONEL BİLGİSİ - RGB DEVELOPER KUTUSU EKLENDİ */}
                     <td className="px-5 py-2 font-bold text-slate-800 flex items-center gap-3 min-w-[200px]">
-                      
                       {roleType === "DEVELOPER" ? (
-                        // YALNIZCA DEVELOPER İÇİN ANİMASYONLU RGB ÇERÇEVE
                         <div className="relative inline-flex p-[2px] rounded-md overflow-hidden group shrink-0">
                           <span className="absolute inset-[-1000%] animate-[spin_4s_linear_infinite] bg-[conic-gradient(from_90deg_at_50%_50%,#33cc00_0%,#9333ea_50%,#eb9100_100%)]" />
-                          <div className="relative flex items-center justify-center w-7 h-7 rounded-sm bg-purple-700 text-white">
-    <Code2 className="w-4 h-4" strokeWidth={2.5} />
+                          <div className="relative flex items-center justify-center w-7 h-7 rounded-sm bg-[#a600cf] text-white">
+                            <Code2 className="w-4 h-4" strokeWidth={2.5} />
                           </div>
                         </div>
                       ) : roleType === "MANAGER" ? (
@@ -391,9 +394,9 @@ export default function AttendanceTable({
                       </div>
                     </td>
 
-                    {/* DİNAMİK ORTA SÜTUNLAR */}
+                    {/* CİHAZ (PHONE) SÜTUNU & ANİMASYONU */}
                     {isLeave ? (
-                      <td colSpan={5} className="px-2 py-2 text-center">
+                      <td colSpan={6} className="px-2 py-2 text-center">
                         <span className={`inline-flex items-center justify-center gap-2 w-full max-w-[300px] px-3 py-1.5 rounded-sm border text-[9px] font-black uppercase tracking-widest shadow-sm ${
                           leaveText === 'SAGLIK RAPORU' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-blue-50 text-blue-700 border-blue-200'
                         }`}>
@@ -403,6 +406,16 @@ export default function AttendanceTable({
                       </td>
                     ) : (
                       <>
+                        <td className="px-2 py-2 text-center">
+                          {hasDeviceToken ? (
+                            <div className="mx-auto flex items-center justify-center w-6 h-6 bg-amber-50 border border-amber-200 rounded-full relative" title="Cihaz Sisteme Mühürlü">
+                               <span className="absolute inset-0 rounded-full bg-amber-400 animate-ping opacity-20"></span>
+                               <Smartphone size={12} className="text-amber-600 relative z-10" strokeWidth={2.5} />
+                            </div>
+                          ) : (
+                            <span className="text-slate-300 font-bold opacity-50">-</span>
+                          )}
+                        </td>
                         <td className="px-2 py-2 text-center font-black text-slate-700 tabular-nums text-[12px]">
                           <div className="flex items-center justify-center gap-2">
                             {getEntryStatusDot(record.check_in_time)}
@@ -415,7 +428,6 @@ export default function AttendanceTable({
                           <span className="bg-slate-50 border border-slate-200 px-2 py-1 rounded-sm">{record.working_hours ? formatHours(record.working_hours) : "--"}</span>
                         </td>
                         <td className="px-2 py-2 text-center">
-                          {/* DÖNEN BORDER ANIMASYONLU BADGE */}
                           {getLateBadge(monthlyLate)}
                         </td>
                       </>
@@ -431,12 +443,14 @@ export default function AttendanceTable({
                           <CheckCircle2 className="w-3.5 h-3.5" strokeWidth={3} /> Onaylandı
                         </span>
                       ) : !record.check_out_time ? (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-1.5 text-amber-800 bg-amber-50 rounded-sm border border-amber-200 text-[9px] font-black uppercase tracking-widest">
-                          <Clock className="w-3.5 h-3.5 text-amber-600" strokeWidth={3} /> İÇERİDE
+                        /* YENİ: İÇERİDE - Açık Yeşil Yapı */
+                        <span className="inline-flex items-center gap-1.5 px-2 py-1.5 text-emerald-600 bg-emerald-50 rounded-sm border border-emerald-200 text-[9px] font-black uppercase tracking-widest">
+                          <Clock className="w-3.5 h-3.5 text-emerald-500" strokeWidth={3} /> İÇERİDE
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-1.5 text-emerald-800 bg-emerald-50 rounded-sm border border-emerald-200 text-[9px] font-black uppercase tracking-widest">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" strokeWidth={3} /> TAMAMLANDI
+                        /* YENİ: TAMAMLANDI - Koyu Yeşil Yapı */
+                        <span className="inline-flex items-center gap-1.5 px-2 py-1.5 text-white bg-emerald-700 rounded-sm border border-emerald-800 text-[9px] font-black uppercase tracking-widest shadow-sm">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-white" strokeWidth={3} /> TAMAMLANDI
                         </span>
                       )} 
                     </td>
@@ -445,7 +459,7 @@ export default function AttendanceTable({
               })
             ) : (
               <tr>
-                <td colSpan={8} className="px-3 py-16 text-center bg-white">
+                <td colSpan={9} className="px-3 py-16 text-center bg-white">
                   <div className="flex flex-col items-center justify-center gap-2 text-slate-400">
                     <Clock size={28} className="opacity-20 mb-1" />
                     <span className="text-[10px] font-bold uppercase tracking-widest">
