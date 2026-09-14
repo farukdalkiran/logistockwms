@@ -2,6 +2,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 
+// RLS kısıtlamalarını by-pass eden Master Admin İstemcisi
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -9,36 +10,43 @@ const supabaseAdmin = createClient(
 
 export async function analyzeAttendanceGaps(
   employeeIds: string[], 
-  year: number, 
-  month: number,
-  excludedDates: string[] = [] // 🛡️ İstenmeyen veya hariç tutulan günler (YYYY-MM-DD)
+  startDateStr: string, // YENİ: Başlangıç Tarihi (YYYY-MM-DD)
+  endDateStr: string,   // YENİ: Bitiş Tarihi (YYYY-MM-DD)
+  excludedDates: string[] = [] // İstenmeyen veya hariç tutulan günler (YYYY-MM-DD)
 ) {
   try {
     if (employeeIds.length === 0) return { success: false, message: "Personel seçilmedi." };
 
-    const daysInMonth = new Date(year, month, 0).getDate();
-    const weekdays: string[] = [];
-    
-    for (let i = 1; i <= daysInMonth; i++) {
-      const d = new Date(year, month - 1, i, 12, 0, 0);
-      const dateStr = d.toISOString().split("T")[0];
+    const start = new Date(`${startDateStr}T12:00:00`);
+    const end = new Date(`${endDateStr}T12:00:00`);
 
-      // Hafta sonları ve kullanıcı tarafından hariç tutulan günleri atla
-      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-      if (!isWeekend && !excludedDates.includes(dateStr)) {
+    if (start > end) return { success: false, message: "Başlangıç tarihi bitiş tarihinden büyük olamaz." };
+
+    const weekdays: string[] = [];
+    const currentDate = new Date(start);
+
+    // Tarih aralığında döngü yap ve hafta sonlarını/hariç tutulanları ayıkla
+    while (currentDate <= end) {
+      const dateStr = currentDate.toISOString().split("T")[0];
+      const day = currentDate.getDay();
+
+      // Hafta sonları (0 = Pazar, 6 = Cumartesi) ve hariç tutulan günleri atla
+      if (day !== 0 && day !== 6 && !excludedDates.includes(dateStr)) {
         weekdays.push(dateStr);
       }
+      currentDate.setDate(currentDate.getDate() + 1);
     }
 
-    const startDate = `${year}-${String(month).padStart(2, '0')}-01T00:00:00Z`;
-    const endDate = `${year}-${String(month).padStart(2, '0')}-${daysInMonth}T23:59:59Z`;
+    // Veritabanı sorgusu için sınırları belirle
+    const startQuery = `${startDateStr}T00:00:00Z`;
+    const endQuery = `${endDateStr}T23:59:59Z`;
 
     const { data: attendanceData } = await supabaseAdmin
       .from("attendance")
       .select("employee_id, check_in_time")
       .in("employee_id", employeeIds)
-      .gte("check_in_time", startDate)
-      .lte("check_in_time", endDate);
+      .gte("check_in_time", startQuery)
+      .lte("check_in_time", endQuery);
 
     const { data: leaveData } = await supabaseAdmin
       .from("leave_requests")
