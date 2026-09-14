@@ -32,9 +32,11 @@ export async function middleware(req: NextRequest) {
     }
   );
 
+  // KRİTİK DEĞİŞİKLİK: getSession yerine getUser kullanıyoruz.
+  // Bu sayede token'ın Supabase sunucusunda başka bir cihaz tarafından ezilip ezilmediğini anlıyoruz.
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const path = req.nextUrl.pathname;
 
@@ -47,17 +49,20 @@ export async function middleware(req: NextRequest) {
     return res;
   }
 
-  // 1. HİÇ OTURUM YOKSA (Terminal cihazı henüz bir yönetici tarafından şubeye kilitlenmemişse)
-  if (!session) {
+  // 1. HİÇ OTURUM YOKSA VEYA TOKEN BAŞKA CİHAZ YÜZÜNDEN GEÇERSİZ KALMIŞSA (!user)
+  if (!user) {
     // Güvenlik Duvarı: Cihaz yetkisizken Web Login (/login) ve Mobil Terminal (/mobile) hariç her yeri tamamen yasakla.
     if (path !== "/login" && path !== "/mobile") {
-      return NextResponse.redirect(new URL("/login", req.url));
+      // 404 yemek yerine, anlaşılır bir parametre ile login'e fırlatıyoruz
+      const loginUrl = new URL("/login", req.url);
+      loginUrl.searchParams.set("reason", "session_expired"); 
+      return NextResponse.redirect(loginUrl);
     }
     return res;
   }
 
-  // 2. YÖNETİCİ OTURUMU VARSA (Cihaz bir şubeye kilitliyse)
-  if (session) {
+  // 2. YÖNETİCİ OTURUMU VARSA VE GEÇERLİYSE (user)
+  if (user) {
     const authTimeCookie = req.cookies.get("wms_session_timestamp");
     const MAX_SESSION_AGE = 72 * 60 * 60 * 1000; // 3 Gün
 
@@ -80,7 +85,7 @@ export async function middleware(req: NextRequest) {
     // A. Web Login Kalkanı
     // Giriş yapmış cihaz manuel olarak /login rotasına giderse onu Management paneline it.
     if (path === "/login") {
-      return NextResponse.redirect(new URL("/management", req.url));
+      return NextResponse.redirect(new URL("/", req.url));
     }
 
     // B. Terminal Zırhı ve Çapraz Geçiş Denetimi

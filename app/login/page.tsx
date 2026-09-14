@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/Button';
 import { Logo } from '@/components/ui/Logo';
+import SessionAlert from './_components/SessionAlert'
 import { Lock, Mail, AlertCircle, KeyRound, ArrowLeft, ArrowRight, ShieldCheck, CheckCircle2, Globe, ShieldAlert, Smartphone } from 'lucide-react';
 
 export default function LoginPage() {
@@ -95,7 +96,7 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-900 p-4 font-['Quicksand'] relative overflow-hidden">
-      
+
       {/* Endüstriyel Arka Plan Deseni */}
       <div className="absolute inset-0 opacity-10 bg-[repeating-linear-gradient(45deg,#fff,#fff_1px,transparent_1px,transparent_20px)] pointer-events-none"></div>
       <div className="absolute top-1/4 -left-32 w-96 h-96 bg-[#dc3545]/20 rounded-full blur-[100px] pointer-events-none"></div>
@@ -132,7 +133,8 @@ export default function LoginPage() {
               <span className="leading-relaxed">{successMsg}</span>
             </div>
           )}
-
+      {/* URL'den gelen oturum düşme hatasını burada gösteriyoruz */}
+        <SessionAlert />
           {/* === GÖRÜNÜM: NORMAL GİRİŞ === */}
           {!showForceReset && currentView === 'login' && (
             <div className="animate-in fade-in zoom-in-95 duration-300">
