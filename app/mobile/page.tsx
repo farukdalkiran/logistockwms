@@ -12,6 +12,48 @@ import {
   getMonthlyAttendanceStats, getEmployeeAttendanceHistory, getMissingAttendanceDays, getActiveBranches
 } from "../actions/mobile";
 
+// --- GÜÇLENDİRİLMİŞ KALICI HAFIZA MOTORU (DOUBLE PERSISTENCE) ---
+// Telefonun önbelleği temizlense bile veriyi kurtarmak için LocalStorage + Cookie kombinasyonu kullanılır.
+const setPersistentData = (key: string, value: string) => {
+  if (typeof window !== "undefined") {
+    localStorage.setItem(key, value);
+    const d = new Date();
+    d.setTime(d.getTime() + (10 * 365 * 24 * 60 * 60 * 1000)); // 10 Yıl
+    document.cookie = `${key}=${value};expires=${d.toUTCString()};path=/`;
+  }
+};
+
+const getPersistentData = (key: string) => {
+  if (typeof window === "undefined") return null;
+  
+  // 1. Önce LocalStorage'a bak (Çalışanları bozmamak için)
+  let val = localStorage.getItem(key);
+  
+  // 2. Eğer LocalStorage silinmişse Cookie'den kurtarmayı dene
+  if (!val) {
+    const match = document.cookie.match(new RegExp('(^| )' + key + '=([^;]+)'));
+    if (match) {
+      val = match[2];
+      localStorage.setItem(key, val); // Kurtarıldı, LocalStorage'a geri mühürle
+    }
+  }
+  return val;
+};
+
+const clearPersistentData = () => {
+  if (typeof window !== "undefined") {
+    localStorage.clear();
+    const cookies = document.cookie.split(";");
+    for (let i = 0; i < cookies.length; i++) {
+      const cookie = cookies[i];
+      const eqPos = cookie.indexOf("=");
+      const name = eqPos > -1 ? cookie.substring(0, eqPos) : cookie;
+      document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
+    }
+  }
+};
+// ---------------------------------------------------------------
+
 export default function MobileEmployeePanel() {
   const router = useRouter();
 
@@ -63,11 +105,16 @@ export default function MobileEmployeePanel() {
 
   useEffect(() => {
     const checkLocalSession = async () => {
-      const savedEmpId = localStorage.getItem("wms_mobile_emp_id");
-      const savedTerminal = localStorage.getItem("wms_mobile_terminal_code");
-      const savedName = localStorage.getItem("wms_mobile_emp_name") || "Personel";
+      // YENİ MOTORU KULLANARAK VERİLERİ ÇEK
+      const savedEmpId = getPersistentData("wms_mobile_emp_id");
+      const savedTerminal = getPersistentData("wms_mobile_terminal_code");
+      const savedName = getPersistentData("wms_mobile_emp_name") || "Personel";
       
       if (savedEmpId && savedTerminal) {
+        // Eğer veriler bulunduysa sağlamlaştırmak adına tekrar mühürle
+        setPersistentData("wms_mobile_emp_id", savedEmpId);
+        setPersistentData("wms_mobile_terminal_code", savedTerminal);
+        
         await loadDashboardData(savedEmpId, savedTerminal, savedName);
       } else {
         const branchList = await getActiveBranches();
@@ -83,7 +130,7 @@ export default function MobileEmployeePanel() {
     if (selectedBranchId) {
       getActiveEmployeesList(selectedBranchId).then(list => {
         setEmployees(list);
-        setSelectedEmpId(""); // Şube değiştiğinde personeli sıfırla
+        setSelectedEmpId(""); 
       });
     } else {
       setEmployees([]);
@@ -91,10 +138,10 @@ export default function MobileEmployeePanel() {
   }, [selectedBranchId]);
 
   const getDeviceToken = () => {
-    let token = localStorage.getItem("wms_device_token");
+    let token = getPersistentData("wms_device_token");
     if (!token) {
       token = crypto.randomUUID();
-      localStorage.setItem("wms_device_token", token);
+      setPersistentData("wms_device_token", token);
     }
     return token;
   };
@@ -122,9 +169,9 @@ export default function MobileEmployeePanel() {
     const res = await registerMobileDevice(selectedEmpId, logistockId, token);
 
     if (res.success && res.terminalCode) {
-      localStorage.setItem("wms_mobile_emp_id", selectedEmpId);
-      localStorage.setItem("wms_mobile_terminal_code", res.terminalCode);
-      localStorage.setItem("wms_mobile_emp_name", res.fullName || "");
+      setPersistentData("wms_mobile_emp_id", selectedEmpId);
+      setPersistentData("wms_mobile_terminal_code", res.terminalCode);
+      setPersistentData("wms_mobile_emp_name", res.fullName || "");
       await loadDashboardData(selectedEmpId, res.terminalCode, res.fullName || "");
     } else {
       setError(res.message || "İşlem başarısız. Bilgilerinizi kontrol edin.");
@@ -140,10 +187,10 @@ export default function MobileEmployeePanel() {
     const token = getDeviceToken();
     const res = await getDynamicQrPayload(terminalCode, token);
     
-    // EĞER YÖNETİCİ CİHAZI VERİTABANINDAN SİLMİŞSE (NULL YAPMIŞSA)
+    // EĞER YÖNETİCİ CİHAZI VERİTABANINDAN SİLMİŞSE
     if (!res.success && res.reason === "REVOKED") {
        alert("GÜVENLİK UYARISI: Cihazınızın sistem bağlantısı yönetici tarafından kesilmiştir.");
-       localStorage.clear();
+       clearPersistentData();
        window.location.reload();
        return;
     }
@@ -329,7 +376,13 @@ export default function MobileEmployeePanel() {
           <div className="bg-[#dc3545] px-6 py-8 rounded-b-[2rem] shadow-lg mb-6 sticky top-0 z-30 flex justify-between items-start">
             <div className="text-white">
               <p className="text-[10px] font-black text-red-200 uppercase tracking-widest mb-1 opacity-90">{getGreeting()}</p>
-              <h1 className="text-2xl font-black tracking-tight">{employeeName || "Personel"}</h1>
+              <h1 className="text-2xl font-black tracking-tight flex items-center gap-2.5">
+                {employeeName || "Personel"}
+                {/* YENİ: MOBİL İKON EKLENDİ */}
+                <div className="bg-white/20 p-1.5 rounded-full border border-white/30 shadow-inner flex items-center justify-center" title="Bu Mobil Cihaz Size Mühürlendi">
+                  <Smartphone size={16} className="text-white" strokeWidth={2.5} />
+                </div>
+              </h1>
             </div>
             
             <div className="flex gap-2 relative">
