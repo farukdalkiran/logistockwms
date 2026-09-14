@@ -1,13 +1,12 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import * as XLSX from "xlsx";
 import {
   FileSpreadsheet,
   ChevronLeft,
-  ChevronRight,
   CheckCircle,
   AlertTriangle,
   Plus,
@@ -21,6 +20,7 @@ import {
   Building2,
   Info,
   QrCode,
+  ArrowRightLeft
 } from "lucide-react";
 
 type Branch = {
@@ -43,24 +43,17 @@ export default function ExcelTransferCreatePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // Oturum verileri (URL parametrelerinden)
+  // Oturum verileri
   const empId = searchParams.get("empId") || "BİLİNMİYOR";
   const empName = searchParams.get("empName") || "Personel";
   const sessionBranchName = searchParams.get("branch") || "Şube Terminali";
 
   // State Yönetimi
   const [branches, setBranches] = useState<Branch[]>([]);
-
-  // Şube Seçimleri
   const [fromBranchId, setFromBranchId] = useState<string>("");
-  const [isCustomFrom, setIsCustomFrom] = useState(false);
-  const [customFromBranch, setCustomFromBranch] = useState("");
-
   const [toBranchId, setToBranchId] = useState<string>("");
-  const [isCustomTo, setIsCustomTo] = useState(false);
-  const [customToBranch, setCustomToBranch] = useState("");
-
   const [file, setFile] = useState<File | null>(null);
+  
   const [isProcessing, setIsProcessing] = useState(false);
   const [isReviewOpen, setIsReviewOpen] = useState(false);
   const [extractedItems, setExtractedItems] = useState<ExtractedItem[]>([]);
@@ -71,11 +64,11 @@ export default function ExcelTransferCreatePage() {
   const [newBarcode, setNewBarcode] = useState("");
   const [newQty, setNewQty] = useState("");
 
-  // Sayfalama (Pagination) State'leri
+  // Sayfalama (Pagination)
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
 
-  // Başlangıç verilerini çek (Şubeler ve aktif personelin şubesi)
+  // Başlangıç verileri
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
@@ -134,25 +127,12 @@ export default function ExcelTransferCreatePage() {
     }
   };
 
-  // --- EXCEL İŞLEME VE VERİTABANI ÇAPRAZ KONTROLÜ (KESİN EŞLEŞTİRME VE 20'Lİ BÖLÜM) ---
+  // --- EXCEL İŞLEME VE VERİTABANI ÇAPRAZ KONTROLÜ ---
   const processExcelFile = async () => {
     if (!file) return alert("Lütfen bir excel dosyası seçin.");
-
-    // Şube Kontrolleri
-    if (!isCustomFrom && !fromBranchId)
-      return alert("Lütfen çıkış şubesini seçin.");
-    if (isCustomFrom && !customFromBranch.trim())
-      return alert("Lütfen çıkış şubesi adını manuel girin.");
-
-    if (!isCustomTo && !toBranchId)
-      return alert("Lütfen varış şubesini seçin.");
-    if (isCustomTo && !customToBranch.trim())
-      return alert("Lütfen varış şubesi adını manuel girin.");
-
-    const finalFromStr = isCustomFrom ? customFromBranch.trim() : fromBranchId;
-    const finalToStr = isCustomTo ? customToBranch.trim() : toBranchId;
-    if (finalFromStr === finalToStr)
-      return alert("Çıkış ve varış şubesi aynı olamaz!");
+    if (!fromBranchId) return alert("Lütfen çıkış şubesini seçin.");
+    if (!toBranchId) return alert("Lütfen varış şubesini seçin.");
+    if (fromBranchId === toBranchId) return alert("Çıkış ve varış şubesi aynı olamaz!");
 
     setIsProcessing(true);
     await generateNextLgsCodePreview();
@@ -162,7 +142,6 @@ export default function ExcelTransferCreatePage() {
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data, { type: "array" });
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      
       const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" }) as any[][];
 
       if (rows.length < 2) throw new Error("Yüklenen Excel dosyası boş veya okunamadı.");
@@ -171,14 +150,12 @@ export default function ExcelTransferCreatePage() {
       let qtyIdx = -1;
       let startRow = -1;
 
-      // Başlıkları ilk 20 satır içinde KESİN EŞLEŞME (Exact Match) ile arıyoruz
       for (let i = 0; i < Math.min(20, rows.length); i++) {
         const rowHeaders = rows[i].map(h => String(h).trim().toLowerCase());
         
         let bIdx = rowHeaders.indexOf("barkod");
         if (bIdx === -1) bIdx = rowHeaders.indexOf("barcode");
         
-        // DİKKAT: Diğer "Adet" sütunlarını almaması için KESİN (Exact) Net Adet eşleşmesi arıyoruz
         let qIdx = rowHeaders.indexOf("net adet");
         if (qIdx === -1) qIdx = rowHeaders.indexOf("miktar");
         if (qIdx === -1) qIdx = rowHeaders.indexOf("adet");
@@ -186,7 +163,7 @@ export default function ExcelTransferCreatePage() {
         if (bIdx !== -1 && qIdx !== -1) {
           barcodeIdx = bIdx;
           qtyIdx = qIdx;
-          startRow = i + 1; // Verilerin başladığı satır
+          startRow = i + 1;
           break;
         }
       }
@@ -195,7 +172,6 @@ export default function ExcelTransferCreatePage() {
         throw new Error("Lütfen Excel'de tam olarak 'Barkod' ve 'Net Adet' sütunlarının var olduğundan emin olun.");
       }
 
-      // 1. KÜMELEME (Aggregation) Motoru
       const aggregatedMap = new Map<string, number>();
 
       for (let i = startRow; i < rows.length; i++) {
@@ -227,7 +203,6 @@ export default function ExcelTransferCreatePage() {
       const uniqueBarcodes = Array.from(aggregatedMap.keys());
       if (uniqueBarcodes.length === 0) throw new Error("Sistem geçerli barkod veya miktar verisi tespit edemedi.");
 
-      // 2. PARÇALAMA (Chunking) - Kullanıcının İstediği 20'şerli Bölme ve Gecikme (Animasyonlu İşleme Hissi)
       const CHUNK_SIZE = 20; 
       let allProductsData: any[] = [];
       const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
@@ -242,10 +217,9 @@ export default function ExcelTransferCreatePage() {
         if (dbError) throw dbError;
         if (dbChunk) allProductsData = [...allProductsData, ...dbChunk];
         
-        await delay(50); // Tarayıcı kitlenmesini engelleyen animasyonlu işleme süresi
+        await delay(50);
       }
 
-      // Final Eşleştirme Modülü
       const validated = Array.from(aggregatedMap.entries()).map(([barcode, quantity]) => {
         const dbMatch = allProductsData.find((p) => p.barcode === barcode);
         if (dbMatch) {
@@ -323,38 +297,6 @@ export default function ExcelTransferCreatePage() {
     setCurrentPage(1); 
   };
 
-  // --- AKILLI ŞUBE ÇÖZÜMLEYİCİ (SMART BRANCH RESOLVER) ---
-  const resolveBranchId = async (
-    isCustom: boolean,
-    customName: string,
-    selectedId: string,
-  ) => {
-    if (!isCustom) return selectedId;
-    const cleanName = customName.trim();
-    if (!cleanName) throw new Error("Manuel şube adı boş olamaz.");
-
-    const { data: existingBranch } = await supabase
-      .from("branches")
-      .select("id")
-      .ilike("name", cleanName)
-      .maybeSingle();
-
-    if (existingBranch?.id) return existingBranch.id;
-
-    const { data: newBranch, error } = await supabase
-      .from("branches")
-      .insert({ name: cleanName, type: "Mağaza" })
-      .select("id")
-      .single();
-
-    if (error) {
-      console.error("Şube çözümleme hatası:", error);
-      throw new Error(`'${cleanName}' lokasyonu sisteme eklenemedi.`);
-    }
-
-    return newBranch.id;
-  };
-
   // --- NİHAİ KAYIT (LGS CODE & TRANSFER) ---
   const saveToDatabase = async () => {
     const validItems = extractedItems.filter(
@@ -365,17 +307,6 @@ export default function ExcelTransferCreatePage() {
 
     setIsSaving(true);
     try {
-      const finalFromBranchId = await resolveBranchId(
-        isCustomFrom,
-        customFromBranch,
-        fromBranchId,
-      );
-      const finalToBranchId = await resolveBranchId(
-        isCustomTo,
-        customToBranch,
-        toBranchId,
-      );
-
       const { data: lastTransfer } = await supabase
         .from("transfers")
         .select("transfer_code")
@@ -396,8 +327,8 @@ export default function ExcelTransferCreatePage() {
         .insert({
           transfer_code: finalTransferCode,
           status: "Bekliyor",
-          from_branch_id: finalFromBranchId,
-          to_branch_id: finalToBranchId,
+          from_branch_id: fromBranchId,
+          to_branch_id: toBranchId,
           picker_employee_id: empId,
         })
         .select("id")
@@ -422,15 +353,13 @@ export default function ExcelTransferCreatePage() {
 
       await supabase.from("transaction_logs").insert({
         employee_id: empId,
-        branch_id: finalFromBranchId,
+        branch_id: fromBranchId,
         action_type: "EXCEL_TRANSFER_CREATED",
         description: `${finalTransferCode} numaralı sevkiyat/sayım listesi Excel ile oluşturuldu.`,
         new_value: `${validItems.length} Çeşit (SKU)`,
       });
 
-      alert(
-        `BAŞARILI! ${finalTransferCode} kodlu sevkiyat/sayım fişi oluşturuldu.`,
-      );
+      alert(`BAŞARILI! ${finalTransferCode} kodlu sevkiyat/sayım fişi oluşturuldu.`);
       router.push(
         `/terminal/menu?empId=${empId}&empName=${encodeURIComponent(empName)}&branch=${encodeURIComponent(sessionBranchName)}`,
       );
@@ -447,12 +376,8 @@ export default function ExcelTransferCreatePage() {
     .filter((i) => i.isValid)
     .reduce((acc, curr) => acc + (curr.quantity || 0), 0);
 
-  const fromBranchObj = isCustomFrom
-    ? { name: customFromBranch }
-    : branches.find((b) => b.id === fromBranchId);
-  const toBranchObj = isCustomTo
-    ? { name: customToBranch }
-    : branches.find((b) => b.id === toBranchId);
+  const fromBranchObj = branches.find((b) => b.id === fromBranchId);
+  const toBranchObj = branches.find((b) => b.id === toBranchId);
 
   // Sayfalama (Pagination) Veri Hesaplaması
   const totalPages = Math.ceil(extractedItems.length / itemsPerPage);
@@ -472,8 +397,8 @@ export default function ExcelTransferCreatePage() {
       />
 
       {/* --- DARK HEADING KOKPİT --- */}
-      <div className="bg-[#0f172b] flex flex-col shrink-0 shadow-md">
-        <div className="flex items-center justify-between p-4 border-b border-slate-800">
+      <div className="bg-[#0f172b] flex flex-col shrink-0 shadow-md border-b-4 border-[#dc3545]">
+        <div className="flex items-center justify-between p-4 border-b border-slate-800/50">
           <button
             onClick={() => router.back()}
             className="text-slate-300 hover:text-white transition-colors active:scale-95 p-1 bg-slate-800/50 rounded-sm"
@@ -483,19 +408,19 @@ export default function ExcelTransferCreatePage() {
           <div className="flex items-center gap-2">
             <TerminalSquare size={20} className="text-[#dc3545]" />
             <span className="text-white text-[14px] md:text-[16px] font-black uppercase tracking-widest">
-              Excel Sayım Planlama
+              Excel Sayım & Transfer
             </span>
           </div>
           <div className="w-8" />
         </div>
 
-        <div className="bg-slate-900/80 py-2.5 px-6 flex justify-between items-center text-[11px] md:text-[12px] font-bold uppercase tracking-widest border-b-2 border-[#dc3545]">
+        <div className="bg-slate-900 py-2.5 px-6 flex justify-between items-center text-[11px] md:text-[12px] font-bold uppercase tracking-widest">
           <span className="text-slate-300 flex items-center gap-1.5 truncate">
-            <UserCircle size={15} className="shrink-0" /> {empName}{" "}
+            <UserCircle size={15} className="shrink-0 text-[#dc3545]" /> {empName}{" "}
             <span className="text-slate-500">({empId})</span>
           </span>
           <span className="text-slate-300 flex items-center gap-1.5 truncate">
-            <MapPin size={15} className="shrink-0" /> {sessionBranchName}
+            <MapPin size={15} className="shrink-0 text-[#dc3545]" /> {sessionBranchName}
           </span>
         </div>
       </div>
@@ -504,8 +429,8 @@ export default function ExcelTransferCreatePage() {
       <div className="flex-1 p-4 lg:p-8 w-full max-w-7xl mx-auto flex flex-col gap-6">
         {/* Bilgi Kartları (Readouts) */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-white border-l-4 border-blue-500 p-4 rounded-sm shadow-sm flex items-start gap-4">
-            <div className="bg-blue-50 p-2 rounded-sm text-blue-600 shrink-0">
+          <div className="bg-white border-l-4 border-slate-800 p-4 rounded-sm shadow-sm flex items-start gap-4">
+            <div className="bg-slate-100 p-2 rounded-sm text-slate-800 shrink-0">
               <Info size={24} />
             </div>
             <div className="min-w-0">
@@ -513,12 +438,12 @@ export default function ExcelTransferCreatePage() {
                 İşlem Tipi
               </h4>
               <p className="text-[14px] font-bold text-slate-700 mt-1 truncate">
-                Giden Transfer / Mal Kabul
+                Toplu Envanter Hareketi
               </p>
             </div>
           </div>
-          <div className="bg-white border-l-4 border-emerald-500 p-4 rounded-sm shadow-sm flex items-start gap-4">
-            <div className="bg-emerald-50 p-2 rounded-sm text-emerald-600 shrink-0">
+          <div className="bg-white border-l-4 border-slate-800 p-4 rounded-sm shadow-sm flex items-start gap-4">
+            <div className="bg-slate-100 p-2 rounded-sm text-slate-800 shrink-0">
               <CalendarClock size={24} />
             </div>
             <div className="min-w-0">
@@ -534,13 +459,13 @@ export default function ExcelTransferCreatePage() {
               </p>
             </div>
           </div>
-          <div className="bg-white border-l-4 border-purple-500 p-4 rounded-sm shadow-sm flex items-start gap-4">
-            <div className="bg-purple-50 p-2 rounded-sm text-purple-600 shrink-0">
+          <div className="bg-white border-l-4 border-[#dc3545] p-4 rounded-sm shadow-sm flex items-start gap-4">
+            <div className="bg-red-50 p-2 rounded-sm text-[#dc3545] shrink-0">
               <Building2 size={24} />
             </div>
             <div className="min-w-0">
               <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                Aktif Veritabanı
+                Aktif Sistem
               </h4>
               <p className="text-[14px] font-bold text-slate-700 mt-1 truncate">
                 LogiStock WMS
@@ -552,122 +477,86 @@ export default function ExcelTransferCreatePage() {
         <div className="flex flex-col lg:flex-row gap-6">
           {/* SOL KOLON: Şube Seçimi ve Dosya Yükleme */}
           <div className="flex-1 flex flex-col gap-5 min-w-0">
-            <div className="bg-white p-6 border border-slate-200 rounded-sm shadow-sm flex flex-col gap-5">
-              <h3 className="text-[13px] font-black text-slate-800 uppercase tracking-widest border-b border-slate-100 pb-3">
-                Rota ve Lokasyon Bilgileri
-              </h3>
+            <div className="bg-white p-6 border border-slate-200 rounded-sm shadow-sm flex flex-col gap-6">
+              <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
+                <ArrowRightLeft className="text-[#dc3545]" size={20} />
+                <h3 className="text-[14px] font-black text-slate-800 uppercase tracking-widest">
+                  Rota ve Lokasyon Belirleme
+                </h3>
+              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Gönderen Şube */}
                 <div className="flex flex-col gap-2">
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
-                    Çıkış Şubesi (Gönderen)
+                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">
+                    Çıkış Şubesi (Kaynak)
                   </label>
                   <select
-                    value={isCustomFrom ? "other" : fromBranchId}
-                    onChange={(e) => {
-                      if (e.target.value === "other") setIsCustomFrom(true);
-                      else {
-                        setIsCustomFrom(false);
-                        setFromBranchId(e.target.value);
-                      }
-                    }}
-                    className="w-full bg-slate-50 border border-slate-300 text-slate-800 text-[14px] font-bold p-3 rounded-sm focus:outline-none focus:border-[#dc3545] transition-colors min-h-[44px]"
+                    value={fromBranchId}
+                    onChange={(e) => setFromBranchId(e.target.value)}
+                    className="w-full bg-slate-50 border-2 border-slate-200 text-slate-800 text-[14px] font-bold p-3 rounded-sm focus:outline-none focus:border-[#dc3545] focus:ring-4 focus:ring-red-50 transition-all min-h-[48px]"
                   >
-                    <option value="" disabled>
-                      Şube Seçiniz...
-                    </option>
+                    <option value="" disabled>Şube Seçiniz...</option>
                     {branches.map((b) => (
                       <option key={b.id} value={b.id}>
                         {b.name} ({b.type})
                       </option>
                     ))}
-                    <option value="other" className="font-black text-[#dc3545]">
-                      + Diğer (Manuel Yaz)
-                    </option>
                   </select>
-                  {isCustomFrom && (
-                    <input
-                      type="text"
-                      placeholder="Örn: Müşteri Siparişi A"
-                      value={customFromBranch}
-                      onChange={(e) => setCustomFromBranch(e.target.value)}
-                      className="w-full mt-2 bg-white border border-[#dc3545] text-slate-800 text-[13px] font-bold p-3 rounded-sm focus:outline-none shadow-[0_0_0_2px_rgba(220,53,69,0.1)] min-h-[44px]"
-                      autoFocus
-                    />
-                  )}
                 </div>
 
                 {/* Alıcı Şube */}
                 <div className="flex flex-col gap-2">
-                  <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
-                    Varış Şubesi (Alıcı)
+                  <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">
+                    Varış Şubesi (Hedef)
                   </label>
                   <select
-                    value={isCustomTo ? "other" : toBranchId}
-                    onChange={(e) => {
-                      if (e.target.value === "other") setIsCustomTo(true);
-                      else {
-                        setIsCustomTo(false);
-                        setToBranchId(e.target.value);
-                      }
-                    }}
-                    className="w-full bg-slate-50 border border-slate-300 text-slate-800 text-[14px] font-bold p-3 rounded-sm focus:outline-none focus:border-[#dc3545] transition-colors min-h-[44px]"
+                    value={toBranchId}
+                    onChange={(e) => setToBranchId(e.target.value)}
+                    className="w-full bg-slate-50 border-2 border-slate-200 text-slate-800 text-[14px] font-bold p-3 rounded-sm focus:outline-none focus:border-[#dc3545] focus:ring-4 focus:ring-red-50 transition-all min-h-[48px]"
                   >
-                    <option value="" disabled>
-                      Şube Seçiniz...
-                    </option>
+                    <option value="" disabled>Şube Seçiniz...</option>
                     {branches.map((b) => (
                       <option key={b.id} value={b.id}>
                         {b.name} ({b.type})
                       </option>
                     ))}
-                    <option value="other" className="font-black text-[#dc3545]">
-                      + Diğer (Manuel Yaz)
-                    </option>
                   </select>
-                  {isCustomTo && (
-                    <input
-                      type="text"
-                      placeholder="Örn: Y Lojistik Deposu"
-                      value={customToBranch}
-                      onChange={(e) => setCustomToBranch(e.target.value)}
-                      className="w-full mt-2 bg-white border border-[#dc3545] text-slate-800 text-[13px] font-bold p-3 rounded-sm focus:outline-none shadow-[0_0_0_2px_rgba(220,53,69,0.1)] min-h-[44px]"
-                    />
-                  )}
                 </div>
               </div>
             </div>
 
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="w-full h-40 bg-white border border-slate-300 rounded-sm flex flex-col items-center justify-center gap-3 text-slate-500 hover:border-[#dc3545] hover:text-[#dc3545] hover:bg-red-50 transition-all active:scale-95 shadow-sm"
+              className="w-full h-44 bg-slate-50 border-2 border-dashed border-slate-300 rounded-sm flex flex-col items-center justify-center gap-4 text-slate-500 hover:border-[#dc3545] hover:text-[#dc3545] hover:bg-red-50 transition-all active:scale-[0.98] shadow-sm group"
             >
-              <FileSpreadsheet size={40} strokeWidth={1.5} />
+              <div className="p-4 rounded-full bg-white shadow-sm border border-slate-200 group-hover:border-red-200 group-hover:bg-red-100 transition-colors">
+                <FileSpreadsheet size={32} strokeWidth={2} />
+              </div>
               <div className="text-center">
-                <span className="block text-[14px] font-black uppercase tracking-wider mb-1">
-                  İrsaliye Dosyasını Yükle
+                <span className="block text-[15px] font-black uppercase tracking-wider mb-1 text-slate-700 group-hover:text-[#dc3545]">
+                  Excel Şablonunu Yükle (.xlsx)
                 </span>
-                <span className="block text-[11px] font-bold tracking-widest text-slate-400">
-                  Sütunlar: "Barkod" ve "Net Adet" (.xlsx)
+                <span className="block text-[12px] font-bold tracking-widest text-slate-400">
+                  Gerekli Sütunlar: "Barkod" ve "Net Adet"
                 </span>
               </div>
             </button>
 
             {file && (
-              <div className="w-full bg-slate-800 border border-slate-700 p-4 rounded-sm flex justify-between items-center shadow-inner">
+              <div className="w-full bg-[#0f172b] p-4 rounded-sm flex justify-between items-center shadow-md">
                 <div className="flex items-center gap-3 overflow-hidden text-white">
-                  <FileSpreadsheet
-                    size={24}
-                    className="text-[#dc3545] shrink-0"
-                  />
-                  <span className="text-[14px] font-bold truncate">
-                    {file.name}
-                  </span>
+                  <div className="bg-red-500/20 p-2 rounded-sm">
+                    <FileSpreadsheet size={24} className="text-[#dc3545] shrink-0" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[14px] font-bold truncate">{file.name}</span>
+                    <span className="text-[11px] text-slate-400 font-bold uppercase tracking-widest">{(file.size / 1024).toFixed(1)} KB</span>
+                  </div>
                 </div>
                 <button
                   onClick={() => setFile(null)}
-                  className="text-slate-400 hover:text-[#dc3545] p-2 active:scale-90 transition-transform bg-slate-900 rounded-sm min-h-[44px] min-w-[44px] flex items-center justify-center"
+                  className="text-slate-400 hover:text-white hover:bg-[#dc3545] p-2.5 active:scale-90 transition-all bg-slate-800 rounded-sm flex items-center justify-center"
                 >
                   <Trash2 size={18} strokeWidth={2.5} />
                 </button>
@@ -677,48 +566,44 @@ export default function ExcelTransferCreatePage() {
 
           {/* SAĞ KOLON: Aksiyon ve Kurallar */}
           <div className="w-full lg:w-96 flex flex-col gap-5 justify-between shrink-0">
-            <div className="bg-white p-6 border border-slate-200 rounded-sm shadow-sm flex flex-col gap-4 flex-1">
+            <div className="bg-white p-6 border border-slate-200 rounded-sm shadow-sm flex flex-col gap-5 flex-1">
               <h3 className="text-[13px] font-black text-slate-800 uppercase tracking-widest border-b border-slate-100 pb-3">
-                Sistem Notları
+                Sistem İşleyiş Kuralları
               </h3>
-              <ul className="text-[12px] font-bold text-slate-500 flex flex-col gap-4 leading-relaxed">
-                <li className="flex gap-2.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-[#dc3545] mt-1.5 shrink-0" />{" "}
-                  Dosyadaki "Barkod" sütunu ürün tablosuyla eşleştirilir.
+              <ul className="text-[13px] font-bold text-slate-500 flex flex-col gap-5 leading-relaxed">
+                <li className="flex gap-3">
+                  <div className="w-2 h-2 rounded-full bg-[#dc3545] mt-1.5 shrink-0" />
+                  Sadece sisteme kayıtlı olan güncel şubeler arasında transfer planlanabilir.
                 </li>
-                <li className="flex gap-2.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-[#dc3545] mt-1.5 shrink-0" />{" "}
-                  Manuel girilen şubeler, benzersizlik kontrolünden (çakışma
-                  engellemesi) geçerek sisteme dahil edilir.
+                <li className="flex gap-3">
+                  <div className="w-2 h-2 rounded-full bg-[#dc3545] mt-1.5 shrink-0" />
+                  Yüklenen dosyadaki barkodlar ana ürün veritabanı ile eşleştirilir; sistemde olmayan ürünler hata logu üretir.
                 </li>
-                <li className="flex gap-2.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-[#dc3545] mt-1.5 shrink-0" />{" "}
-                  İşlem sonunda eşleşmeleri inceleyeceğiniz onay ekranı
-                  açılacaktır.
+                <li className="flex gap-3">
+                  <div className="w-2 h-2 rounded-full bg-[#dc3545] mt-1.5 shrink-0" />
+                  İşlem sonunda açılacak onay ekranında miktarları revize edebilir veya ek barkod okutabilirsiniz.
                 </li>
               </ul>
             </div>
 
-            <div className="flex justify-end mt-2">
-              <button
-                onClick={processExcelFile}
-                disabled={!file || isProcessing}
-                className={`w-full lg:w-auto min-w-[240px] py-4 px-8 rounded-sm font-black text-[14px] uppercase tracking-widest shadow-md flex items-center justify-center gap-3 transition-all active:scale-[0.98] min-h-[56px] ${
-                  !file
-                    ? "bg-slate-300 text-slate-500 cursor-not-allowed"
-                    : "bg-[#dc3545] text-white hover:bg-[#c82333]"
-                }`}
-              >
-                {isProcessing ? (
-                  <>
-                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    İŞLENİYOR
-                  </>
-                ) : (
-                  <>İLERİ: ONAY EKRANI</>
-                )}
-              </button>
-            </div>
+            <button
+              onClick={processExcelFile}
+              disabled={!file || isProcessing}
+              className={`w-full py-5 rounded-sm font-black text-[15px] uppercase tracking-widest shadow-md flex items-center justify-center gap-3 transition-all active:scale-[0.98] ${
+                !file
+                  ? "bg-slate-200 text-slate-400 cursor-not-allowed"
+                  : "bg-[#0f172b] text-white hover:bg-slate-800"
+              }`}
+            >
+              {isProcessing ? (
+                <>
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  VERİLER İŞLENİYOR
+                </>
+              ) : (
+                <>İLERİ: ONAY EKRANI</>
+              )}
+            </button>
           </div>
         </div>
       </div>
@@ -738,8 +623,7 @@ export default function ExcelTransferCreatePage() {
                 Tablo Onay & Eşleştirme
               </h2>
               <span className="text-emerald-400 text-[10px] sm:text-[11px] font-bold tracking-widest uppercase mt-0.5 truncate">
-                Eşleşen: {validSKUCount} | Hatalı:{" "}
-                {extractedItems.length - validSKUCount}
+                Eşleşen: {validSKUCount} | Hatalı: {extractedItems.length - validSKUCount}
               </span>
             </div>
             <div className="w-11 shrink-0" />
@@ -748,7 +632,7 @@ export default function ExcelTransferCreatePage() {
           <div className="bg-white border-b border-slate-300 p-4 md:p-6 grid grid-cols-2 lg:grid-cols-5 gap-4 md:gap-6 shrink-0 shadow-sm text-[11px] sm:text-[12px] font-bold uppercase tracking-widest">
             <div className="flex flex-col gap-1.5 border-r border-slate-200 pr-2 sm:pr-4 min-w-0">
               <span className="text-slate-400 flex items-center gap-1">
-                <Hash size={14} className="shrink-0" /> Üretilecek Kod
+                <Hash size={14} className="shrink-0" /> Transfer Kodu
               </span>
               <span className="text-[15px] sm:text-[18px] font-black text-[#dc3545] truncate">
                 {generatedCode}
@@ -756,19 +640,13 @@ export default function ExcelTransferCreatePage() {
             </div>
             <div className="flex flex-col gap-1.5 lg:border-r border-slate-200 pr-2 sm:pr-4 min-w-0">
               <span className="text-slate-400 truncate">Çıkış Şubesi</span>
-              <span
-                className="text-[13px] sm:text-[14px] font-black text-slate-800 truncate"
-                title={fromBranchObj?.name}
-              >
+              <span className="text-[13px] sm:text-[14px] font-black text-slate-800 truncate" title={fromBranchObj?.name}>
                 {fromBranchObj?.name || "-"}
               </span>
             </div>
             <div className="flex flex-col gap-1.5 border-r border-slate-200 pr-2 sm:pr-4 min-w-0">
               <span className="text-slate-400 truncate">Varış Şubesi</span>
-              <span
-                className="text-[13px] sm:text-[14px] font-black text-slate-800 truncate"
-                title={toBranchObj?.name}
-              >
+              <span className="text-[13px] sm:text-[14px] font-black text-slate-800 truncate" title={toBranchObj?.name}>
                 {toBranchObj?.name || "-"}
               </span>
             </div>
@@ -779,37 +657,34 @@ export default function ExcelTransferCreatePage() {
               </span>
             </div>
             <div className="flex flex-col gap-1.5 min-w-0 col-span-2 lg:col-span-1 pt-2 border-t border-slate-200 lg:border-t-0 lg:pt-0">
-              <span className="text-emerald-600 flex items-center gap-1">
-                <Layers size={14} className="shrink-0" /> Toplam Miktar
+              <span className="text-slate-400 flex items-center gap-1">
+                <Layers size={14} className="shrink-0" /> Toplam Adet
               </span>
-              <span className="text-[16px] sm:text-[18px] font-black text-emerald-700 truncate">
-                {totalQuantity} Adet
+              <span className="text-[16px] sm:text-[18px] font-black text-slate-800 truncate">
+                {totalQuantity} <span className="text-[12px] text-slate-400">ADET</span>
               </span>
             </div>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 lg:p-8 w-full max-w-7xl mx-auto flex flex-col gap-5">
-            <div className="bg-white border border-slate-300 rounded-sm p-4 shadow-sm flex flex-col md:flex-row gap-4 shrink-0 items-end">
+            <div className="bg-white border border-slate-200 rounded-sm p-4 shadow-sm flex flex-col md:flex-row gap-4 shrink-0 items-end">
               <div className="flex-1 w-full flex flex-col gap-2">
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
+                <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">
                   Manuel Barkod Ekle
                 </label>
                 <div className="relative">
-                  <QrCode
-                    size={18}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-                  />
+                  <QrCode size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text"
                     placeholder="Barkodu okutun veya yazın..."
                     value={newBarcode}
                     onChange={(e) => setNewBarcode(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-[14px] font-bold p-3.5 pl-10 rounded-sm focus:outline-none focus:border-[#dc3545] min-h-[52px]"
+                    className="w-full bg-slate-50 border-2 border-slate-200 text-slate-900 text-[14px] font-bold p-3.5 pl-10 rounded-sm focus:outline-none focus:border-[#dc3545] focus:ring-4 focus:ring-red-50 transition-all min-h-[52px]"
                   />
                 </div>
               </div>
               <div className="w-full md:w-32 flex flex-col gap-2">
-                <label className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
+                <label className="text-[11px] font-black text-slate-500 uppercase tracking-widest">
                   Adet
                 </label>
                 <input
@@ -817,69 +692,51 @@ export default function ExcelTransferCreatePage() {
                   placeholder="Miktar"
                   value={newQty}
                   onChange={(e) => setNewQty(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 text-slate-900 text-[14px] font-bold p-3.5 text-center rounded-sm focus:outline-none focus:border-[#dc3545] min-h-[52px]"
+                  className="w-full bg-slate-50 border-2 border-slate-200 text-slate-900 text-[14px] font-bold p-3.5 text-center rounded-sm focus:outline-none focus:border-[#dc3545] focus:ring-4 focus:ring-red-50 transition-all min-h-[52px]"
                 />
               </div>
               <button
                 onClick={handleManualAdd}
-                className="w-full md:w-auto h-[52px] px-8 bg-slate-800 text-white rounded-sm active:scale-95 font-black text-[13px] tracking-widest uppercase flex items-center justify-center gap-2 hover:bg-slate-700 transition-colors"
+                className="w-full md:w-auto h-[52px] px-8 bg-slate-800 text-white rounded-sm active:scale-95 font-black text-[13px] tracking-widest uppercase flex items-center justify-center gap-2 hover:bg-[#dc3545] transition-colors"
               >
-                <Plus size={18} strokeWidth={2.5} /> EKLE
+                <Plus size={18} strokeWidth={3} /> EKLE
               </button>
             </div>
 
-            <div className="bg-white border border-slate-300 rounded-sm shadow-sm overflow-hidden flex-1 flex flex-col">
+            <div className="bg-white border border-slate-200 rounded-sm shadow-sm overflow-hidden flex-1 flex flex-col">
               <div className="overflow-x-auto flex-1">
                 <table className="w-full text-left border-collapse table-fixed min-w-[700px]">
-                  <thead className="bg-slate-100 border-b border-slate-300 text-[11px] font-black text-slate-500 uppercase tracking-widest">
+                  <thead className="bg-[#0f172b] border-b border-slate-300 text-[11px] font-black text-white uppercase tracking-widest">
                     <tr>
                       <th className="p-4 w-16 text-center">Durum</th>
                       <th className="p-4 w-48">SKU / Barkod</th>
                       <th className="p-4 w-auto">Ürün Adı</th>
                       <th className="p-4 w-32 text-center">Net Adet</th>
-                      <th className="p-4 w-20 text-center">Sil</th>
+                      <th className="p-4 w-20 text-center">İşlem</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-[13px] font-bold text-slate-700">
                     {paginatedItems.map((item) => (
-                      <tr
-                        key={item.id}
-                        className={`hover:bg-slate-50 transition-colors ${!item.isValid ? "bg-red-50/40" : ""}`}
-                      >
+                      <tr key={item.id} className={`hover:bg-slate-50 transition-colors ${!item.isValid ? "bg-red-50/40" : ""}`}>
                         <td className="p-4 text-center align-middle">
                           {item.isValid ? (
-                            <CheckCircle
-                              size={20}
-                              className="text-emerald-500 mx-auto"
-                            />
+                            <CheckCircle size={20} className="text-emerald-500 mx-auto" />
                           ) : (
-                            <AlertTriangle
-                              size={20}
-                              className="text-[#dc3545] mx-auto"
-                            />
+                            <AlertTriangle size={20} className="text-[#dc3545] mx-auto" />
                           )}
                         </td>
                         <td className="p-4 align-middle overflow-hidden">
-                          <div
-                            className={`font-black text-[14px] truncate ${!item.isValid ? "text-[#dc3545]" : "text-slate-800"}`}
-                            title={item.barcode}
-                          >
+                          <div className={`font-black text-[14px] truncate ${!item.isValid ? "text-[#dc3545]" : "text-slate-800"}`} title={item.barcode}>
                             {item.barcode}
                           </div>
                           {item.sku && (
-                            <div
-                              className="text-[11px] text-slate-400 tracking-widest uppercase mt-1 truncate"
-                              title={item.sku}
-                            >
+                            <div className="text-[10px] text-slate-400 font-black tracking-widest uppercase mt-1 truncate" title={item.sku}>
                               SKU: {item.sku}
                             </div>
                           )}
                         </td>
                         <td className="p-4 align-middle uppercase tracking-wide">
-                          <div
-                            className="line-clamp-2"
-                            title={item.productName}
-                          >
+                          <div className="line-clamp-2" title={item.productName}>
                             {item.productName}
                           </div>
                         </td>
@@ -887,16 +744,14 @@ export default function ExcelTransferCreatePage() {
                           <input
                             type="number"
                             value={item.quantity || ""}
-                            onChange={(e) =>
-                              updateItemQty(item.id, e.target.value)
-                            }
-                            className={`w-full h-[44px] border rounded-sm text-center font-black text-[15px] focus:outline-none ${item.isValid ? "border-slate-300 focus:border-emerald-500 text-slate-800 bg-white" : "border-red-300 focus:border-[#dc3545] text-[#dc3545] bg-red-50"}`}
+                            onChange={(e) => updateItemQty(item.id, e.target.value)}
+                            className={`w-full h-[44px] border-2 rounded-sm text-center font-black text-[15px] focus:outline-none transition-colors ${item.isValid ? "border-slate-200 focus:border-slate-800 text-slate-800 bg-white" : "border-red-200 focus:border-[#dc3545] text-[#dc3545] bg-white"}`}
                           />
                         </td>
                         <td className="p-4 text-center align-middle">
                           <button
                             onClick={() => removeItem(item.id)}
-                            className="w-[44px] h-[44px] flex items-center justify-center text-slate-400 hover:bg-red-100 hover:text-[#dc3545] rounded-sm transition-colors mx-auto active:scale-90"
+                            className="w-[44px] h-[44px] flex items-center justify-center text-slate-400 hover:bg-[#dc3545] hover:text-white rounded-sm transition-colors mx-auto active:scale-90"
                           >
                             <Trash2 size={18} strokeWidth={2.5} />
                           </button>
@@ -905,11 +760,8 @@ export default function ExcelTransferCreatePage() {
                     ))}
                     {extractedItems.length === 0 && (
                       <tr>
-                        <td
-                          colSpan={5}
-                          className="p-10 text-center text-slate-400 text-[13px] font-bold tracking-widest uppercase"
-                        >
-                          Listede hiç ürün kalmadı.
+                        <td colSpan={5} className="p-10 text-center text-slate-400 text-[13px] font-bold tracking-widest uppercase">
+                          Listede işlem görecek ürün bulunmuyor.
                         </td>
                       </tr>
                     )}
@@ -920,21 +772,21 @@ export default function ExcelTransferCreatePage() {
               {/* SAYFALAMA KONTROLLERİ */}
               {totalPages > 1 && (
                 <div className="bg-slate-50 border-t border-slate-200 p-4 flex items-center justify-between shrink-0">
-                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
+                  <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">
                     Sayfa {currentPage} / {totalPages} (Toplam {extractedItems.length} Çeşit)
                   </span>
                   <div className="flex gap-2">
                     <button
                       onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                       disabled={currentPage === 1}
-                      className="px-3 py-1.5 bg-white border border-slate-300 rounded-sm text-slate-600 disabled:opacity-50 hover:bg-slate-100 text-[11px] font-bold uppercase"
+                      className="px-4 py-2 bg-white border border-slate-300 rounded-sm text-slate-600 disabled:opacity-50 hover:bg-slate-100 text-[11px] font-black uppercase tracking-widest transition-colors"
                     >
                       Önceki
                     </button>
                     <button
                       onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                       disabled={currentPage === totalPages}
-                      className="px-3 py-1.5 bg-white border border-slate-300 rounded-sm text-slate-600 disabled:opacity-50 hover:bg-slate-100 text-[11px] font-bold uppercase"
+                      className="px-4 py-2 bg-white border border-slate-300 rounded-sm text-slate-600 disabled:opacity-50 hover:bg-slate-100 text-[11px] font-black uppercase tracking-widest transition-colors"
                     >
                       Sonraki
                     </button>
@@ -957,7 +809,7 @@ export default function ExcelTransferCreatePage() {
                 ) : (
                   <>
                     <CheckCircle size={22} strokeWidth={2.5} />
-                    FİŞİ OLUŞTUR ({generatedCode})
+                    SİSTEME İŞLE ({generatedCode})
                   </>
                 )}
               </button>
