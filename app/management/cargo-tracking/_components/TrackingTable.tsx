@@ -4,7 +4,7 @@ import { useEffect, useState, FormEvent } from "react";
 import { supabase } from "@/lib/supabase"; 
 import * as XLSX from "xlsx"; 
 import toast, { Toaster } from "react-hot-toast";
-import { Truck, Undo2, Search, AlertTriangle, RefreshCw, Trash2, CheckCircle2 } from 'lucide-react';
+import { Truck, Undo2, Search, AlertTriangle, RefreshCw, Trash2, CheckCircle2, FileText } from 'lucide-react';
 
 interface ShipmentRecord {
   id: string;
@@ -17,7 +17,8 @@ interface ShipmentRecord {
   is_returned: boolean;
   item_count: number;
   created_at: string;
-  missing_address: boolean; // Veritabanındaki kolon
+  missing_address: boolean;
+  note?: string; // YENİ EKLENEN KOLON
 }
 
 type SortKey = keyof ShipmentRecord;
@@ -54,13 +55,18 @@ export default function TrackingTable() {
   });
   const [isReturning, setIsReturning] = useState(false);
 
-  // VERİTABANINDAN VERİ ÇEKME FONKSİYONU (KUSURSUZ SAYFALAMA)
+  // YENİ: NOT MODALI STATE
+  const [noteModal, setNoteModal] = useState<{isOpen: boolean, id: string, note: string}>({
+    isOpen: false, id: "", note: ""
+  });
+  const [isSavingNote, setIsSavingNote] = useState(false);
+
+  // VERİTABANINDAN VERİ ÇEKME FONKSİYONU
   const fetchRecords = async () => {
     setLoading(true);
     try {
       let query = supabase.from("cargo_records").select("*", { count: "exact" });
 
-      // 1. ARAMA FİLTRESİ
       if (searchQuery) {
         if (specificField === "SD") query = query.ilike("sd_document", `%${searchQuery}%`);
         else if (specificField === "DELIVERY") query = query.ilike("delivery_number", `%${searchQuery}%`);
@@ -72,24 +78,20 @@ export default function TrackingTable() {
         }
       }
 
-      // 2. DURUM FİLTRESİ (GÜNCELLENMİŞ MANTIK)
       if (filterType === "RETURN") {
         query = query.eq("is_returned", true);
       } else if (filterType === "ERROR") {
         query = query.eq("missing_address", true);
       } else if (filterType === "NORMAL") {
-        // Eski kayıtlardaki 'null' durumunu ve yeni kayıtlardaki 'false' durumunu yakalar
         query = query.eq("is_returned", false).or('missing_address.eq.false,missing_address.is.null');
       }
 
-      // 3. TARİH FİLTRESİ
       if (startDate) query = query.gte("created_at", `${startDate}T00:00:00Z`);
       if (endDate) query = query.lte("created_at", `${endDate}T23:59:59Z`);
 
-      // 4. SIRALAMA VE SAYFALAMA (AYNI VERİLERİN GELMEMESİ İÇİN İKİNCİL SIRALAMA EKLENDİ)
       query = query
         .order(sortConfig.key, { ascending: sortConfig.direction === "asc" })
-        .order("id", { ascending: true }); // Pagination kaymasını önleyen kritik satır!
+        .order("id", { ascending: true }); 
 
       const from = (currentPage - 1) * rowsPerPage;
       const to = from + rowsPerPage - 1;
@@ -210,6 +212,29 @@ export default function TrackingTable() {
     }
   };
 
+  // YENİ: NOT KAYDETME FONKSİYONU
+  const saveNote = async () => {
+    setIsSavingNote(true);
+    try {
+      const { error } = await supabase
+        .from("cargo_records")
+        .update({ note: noteModal.note })
+        .eq("id", noteModal.id);
+
+      if (error) throw error;
+
+      setRecords(prev => prev.map(r => r.id === noteModal.id ? { ...r, note: noteModal.note } : r));
+      toast.success("Not başarıyla kaydedildi.", {
+        style: { border: '1px solid #03DF95', background: '#0f172a', color: '#03DF95' }
+      });
+      setNoteModal({ isOpen: false, id: "", note: "" });
+    } catch (err: any) {
+      toast.error("Not kaydedilemedi: " + err.message);
+    } finally {
+      setIsSavingNote(false);
+    }
+  };
+
   const exportToExcel = async () => {
     toast.success("Mevcut sayfa Excel'e aktarılıyor...");
     const exportData = records.map(r => ({
@@ -221,7 +246,8 @@ export default function TrackingTable() {
       "Aras Shipment No": r.aras_shipment_number,
       "Takip No": r.aras_tracking_number,
       "Kalem": r.item_count || 1,
-      "Durum": r.is_returned ? "İADE" : (r.missing_address ? "EKSİK/HATALI ADRES" : "NORMAL")
+      "Durum": r.is_returned ? "İADE" : (r.missing_address ? "EKSİK/HATALI ADRES" : "NORMAL"),
+      "Ek Notlar": r.note || "-" // YENİ: NOTLAR EXCEL'E EKLENDİ
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -484,6 +510,20 @@ export default function TrackingTable() {
 
                     <td className="px-4 py-3 text-right pr-6 whitespace-nowrap">
                       <div className="flex items-center justify-end gap-2">
+                        {/* YENİ: NOT BUTONU */}
+                        <button 
+                          onClick={() => setNoteModal({ isOpen: true, id: rec.id, note: rec.note || "" })}
+                          className={`px-3 py-2 rounded text-[11px] font-bold flex items-center gap-1.5 transition-colors border ${
+                            rec.note 
+                              ? "bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 hover:text-blue-700" 
+                              : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-700"
+                          }`}
+                          title={rec.note ? "Notu Düzenle" : "Not Ekle"}
+                        >
+                          <FileText className="w-4 h-4" />
+                          {rec.note ? "NOT (1)" : "NOT EKLE"}
+                        </button>
+
                         <button 
                           onClick={() => triggerReturnToggle(rec.id, rec.is_returned)}
                           className={`px-3 py-2 rounded text-[11px] font-bold flex items-center gap-1.5 transition-colors border ${
@@ -543,6 +583,48 @@ export default function TrackingTable() {
             <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-4 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-xs font-bold rounded hover:bg-slate-100 transition-colors uppercase tracking-widest">Önceki</button>
             <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="px-4 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-xs font-bold rounded hover:bg-slate-100 transition-colors uppercase tracking-widest">Sonraki</button>
             <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} className="px-3 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-xs font-bold rounded hover:bg-slate-100 transition-colors">»</button>
+          </div>
+        </div>
+      )}
+
+      {/* YENİ: NOT MODALI */}
+      {noteModal.isOpen && (
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
+          <div className="bg-white shadow-xl w-full max-w-md flex flex-col rounded-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="bg-slate-800 p-4 flex items-center justify-between">
+              <h2 className="font-bold text-sm text-white uppercase tracking-widest flex items-center gap-2">
+                <FileText className="w-4 h-4 text-[#03DF95]" />
+                Kayıt Notu
+              </h2>
+              <button onClick={() => setNoteModal({isOpen: false, id: "", note: ""})} className="text-slate-400 hover:text-white transition-colors">✕</button>
+            </div>
+            <div className="p-6 flex flex-col gap-4">
+              <label className="text-xs font-bold text-slate-600 uppercase tracking-widest">
+                Kargo ile ilgili gelişmeleri / notları yazın
+              </label>
+              <textarea
+                value={noteModal.note}
+                onChange={(e) => setNoteModal(prev => ({...prev, note: e.target.value}))}
+                placeholder="Örn: Müşteriye ulaşılamadı. Yeni takip numarası ile tekrar gönderildi: 123456789"
+                className="w-full h-32 p-3 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-800 focus:outline-none focus:border-[#03DF95] focus:ring-1 focus:ring-[#03DF95] resize-none transition-all"
+              />
+              <div className="flex gap-2 w-full mt-2">
+                <button 
+                  onClick={() => setNoteModal({isOpen: false, id: "", note: ""})} 
+                  disabled={isSavingNote} 
+                  className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold h-10 text-[11px] uppercase tracking-widest rounded transition-colors"
+                >
+                  İptal
+                </button>
+                <button 
+                  onClick={saveNote} 
+                  disabled={isSavingNote} 
+                  className="flex-1 bg-[#03DF95] hover:bg-[#02c784] text-slate-900 font-bold h-10 text-[11px] uppercase tracking-widest rounded transition-colors"
+                >
+                  {isSavingNote ? "Kaydediliyor..." : "Kaydet"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
