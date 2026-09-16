@@ -13,7 +13,6 @@ import {
   Calendar,
   AlertCircle,
   Code2,
-  Smartphone
 } from "lucide-react";
 
 interface AttendanceTableProps {
@@ -320,9 +319,6 @@ export default function AttendanceTable({
           <thead className="bg-slate-50 border-b border-slate-200 text-[9px] font-black text-slate-500 uppercase tracking-widest sticky top-0 z-10 shadow-sm">
             <tr>
               <th className="px-5 py-3">Personel Bilgisi</th>
-              <th className="px-2 py-3 text-center w-[60px] text-slate-400" title="Cihaz Kaydı">
-                <div className="flex items-center justify-center"><Smartphone className="w-3.5 h-3.5" /></div>
-              </th>
               <th className="px-2 py-3 text-center w-[100px]">Giriş Saati</th>
               <th className="px-2 py-3 text-center w-[100px]">Çıkış Saati</th>
               <th className="px-2 py-3 text-center text-amber-600 w-[90px]">
@@ -406,16 +402,6 @@ export default function AttendanceTable({
                       </td>
                     ) : (
                       <>
-                        <td className="px-2 py-2 text-center">
-                          {hasDeviceToken ? (
-                            <div className="mx-auto flex items-center justify-center w-6 h-6 bg-amber-50 border border-amber-200 rounded-full relative" title="Cihaz Sisteme Mühürlü">
-                               <span className="absolute inset-0 rounded-full bg-amber-400 animate-ping opacity-20"></span>
-                               <Smartphone size={12} className="text-amber-600 relative z-10" strokeWidth={2.5} />
-                            </div>
-                          ) : (
-                            <span className="text-slate-300 font-bold opacity-50">-</span>
-                          )}
-                        </td>
                         <td className="px-2 py-2 text-center font-black text-slate-700 tabular-nums text-[12px]">
                           <div className="flex items-center justify-center gap-2">
                             {getEntryStatusDot(record.check_in_time)}

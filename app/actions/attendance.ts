@@ -1,10 +1,6 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server';
-import { createHmac } from 'crypto';
-
-// Çevresel değişkenden gizli anahtarımızı alıyoruz
-const SECRET = process.env.WMS_ATTENDANCE_SECRET || 'logistock_master_key_2026';
 
 // Yardımcı Fonksiyon: Saati bir sonraki 15 dakikalık dilime (tavana) yuvarlar
 function roundToNext15Minutes(date: Date): Date {
@@ -22,59 +18,34 @@ function roundToNext15Minutes(date: Date): Date {
 }
 
 export async function processAttendanceScan(
-  scannedCode: string, // Eski terminalId yerine artık uzun QR string'i geliyor
+  scannedCode: string, // Artık 5 haneli ID geliyor
   actionType: 'IN' | 'OUT',
   branchId: string | null // UI'dan prop olarak gelen şube ID'si
 ) {
   // ==========================================
-  // 1. QR KOD KRİPTOGRAFİK DOĞRULAMA (KILL-SWITCH)
+  // 1. MANUEL GİRİŞ (5 HANELİ ID) KONTROLÜ
   // ==========================================
   
-  // A. Format Kontrolü
-  if (!scannedCode || !scannedCode.startsWith('WMS-')) {
-    return { success: false, message: 'GEÇERSİZ BARKOD FORMATI' };
+  // Sadece 5 haneli rakam kabul edilecek (Regex kalkanı)
+  if (!scannedCode || !/^\d{5}$/.test(scannedCode)) {
+    return { success: false, message: 'LÜTFEN 5 HANELİ KİMLİK NUMARANIZI GİRİNİZ!' };
   }
 
-  const parts = scannedCode.split('-');
-  if (parts.length !== 4) {
-    return { success: false, message: 'HATALI VEYA EKSİK BARKOD' };
-  }
-
-  const [prefix, empId, timestampStr, signature] = parts;
-  const qrTimestamp = parseInt(timestampStr, 10);
-
-  // B. Zaman (Time-Drift) Kontrolü
-  // QR kodun üretildiği an ile sunucuya ulaştığı an arasındaki farkı ölçüyoruz.
-  // Mobil tarafta 10 sn'de bir yenileniyor. Ağ gecikmelerine karşı 15 saniye maksimum tolerans veriyoruz.
-  const nowMs = Date.now();
-  const diffInSeconds = (nowMs - qrTimestamp) / 1000;
-
-  if (diffInSeconds > 15 || diffInSeconds < -5) {
-    return { success: false, message: 'SÜRESİ DOLMUŞ VEYA GEÇERSİZ BARKOD (YENİDEN OKUTUN)' };
-  }
-
-  // C. İmza (Sahtecilik) Kontrolü
-  // Biri ekran videosu veya sahte bir kod üretirse diye aynı anahtarla imzayı yeniden oluşturup kıyaslıyoruz.
-  const dataToSign = `${empId}:${qrTimestamp}`;
-  const expectedSignature = createHmac('sha256', SECRET).update(dataToSign).digest('hex').substring(0, 10);
-
-  if (signature !== expectedSignature) {
-    return { success: false, message: 'GÜVENLİK İHLALİ: SAHTE BARKOD TESPİT EDİLDİ' };
-  }
+  const empId = scannedCode;
 
   // ==========================================
-  // 2. WMS MESAİ VE PUANTAJ LOJİĞİ (Güvenlikten geçildi)
+  // 2. WMS MESAİ VE PUANTAJ LOJİĞİ
   // ==========================================
   
   const supabase = await createClient();
 
   try {
     // 1. Personel Doğrulaması (Sadece Aktif Personeller)
-    // Terminal kodu olarak empId kullanıyoruz (Çünkü QR kodunun içine onu gömdük)
+    // QR kullanmadığımız için terminal_code yerine doğrudan personelin 'id'si ile eşleştiriyoruz
     const { data: employee, error: empError } = await supabase
       .from('employees')
       .select('id, full_name, branch_id, is_active')
-      .eq('terminal_code', empId) // Dikkat: QR kodunda ID değil, güvenli 10 haneli terminal_code dönüyor
+      .eq('id', empId) 
       .eq('is_active', true)
       .single();
 
@@ -83,7 +54,7 @@ export async function processAttendanceScan(
     }
 
     // 🛡️ GÜVENLİK DUVARI: CROSS-BRANCH LOCK
-    // İSTEK: Eğer terminalin bağlı olduğu bir şube varsa ve bu şube personelin kayıtlı olduğu şube değilse işlemi REDDET! İsim GÖSTERME.
+    // İSTEK: Eğer terminalin bağlı olduğu bir şube varsa ve bu şube personelin kayıtlı olduğu şube değilse işlemi REDDET!
     if (branchId && employee.branch_id !== branchId) {
       return { 
         success: false, 
@@ -124,7 +95,6 @@ export async function processAttendanceScan(
       }
 
       // İSTEK 2: Rapor / İzin Kontrolü (Leave Requests tablosundan kontrol ediyoruz)
-      // WMS Şemasına uygun olarak leave_requests tablosundan kontrol edilir
       const { data: existingTodayReport } = await supabase
         .from('leave_requests') 
         .select('id')
@@ -143,7 +113,7 @@ export async function processAttendanceScan(
       }
 
       // 15 Dakika Kuralı (onTime Lojiği)
-      let attendanceStatus = 'ON_TIME';
+      const attendanceStatus = 'ON_TIME'; 
       
       const { error: insertError } = await supabase
         .from('attendance')
@@ -168,7 +138,6 @@ export async function processAttendanceScan(
     // ==========================================
     if (actionType === 'OUT') {
       // ÇIKIŞ LOJİĞİ DÜZELTMESİ: Sadece BUGÜN atılmış ve çıkışı yapılmamış kaydı bul.
-      // Geçmiş günlerdeki açık kayıtlar burada filtrelenir ve sistem dışı bırakılır.
       const { data: activeRecord } = await supabase
         .from('attendance')
         .select('id, rounded_check_in')

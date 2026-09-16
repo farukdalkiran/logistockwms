@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { processAttendanceScan } from "@/app/actions/attendance";
 import { supabase } from "@/lib/supabase";
-import { QrCode, Check, AlertCircle, ShieldAlert } from "lucide-react";
+import { Check, AlertCircle, ShieldAlert, User } from "lucide-react";
 
 interface BarcodeScannerProps {
   branchId: string | null;
@@ -75,10 +75,9 @@ export default function BarcodeScanner({
     
     const currentId = terminalId.trim();
 
-    // 🛡️ GÜÇLÜ KALKAN: Eski 5 haneli manuel girişler TAMAMEN YASAKLANDI.
-    // Barkod mutlaka "WMS-" ile başlamalı ve 4 parçadan oluşmalıdır. (WMS-ID-TIMESTAMP-SIGNATURE)
-    if (!currentId.startsWith("WMS-") || currentId.split("-").length !== 4) {
-      triggerFeedback("error", "GÜVENLİK İHLALİ: LÜTFEN SADECE MOBİL QR OKUTUNUZ!");
+    // 🛡️ GEÇİCİ MOD: QR iptal edildi, standart 5 haneli manuel giriş aktif.
+    if (currentId.length !== 5) {
+      triggerFeedback("error", "LÜTFEN 5 HANELİ KİMLİK NUMARANIZI GİRİNİZ!");
       setTerminalId("");
       return;
     }
@@ -87,7 +86,7 @@ export default function BarcodeScanner({
     setLoading(true);
 
     try {
-      // Barkod direkt olarak Server Action'a gönderiliyor. Zaman (10sn) ve İmza (HMAC) kontrolü orada yapılacak.
+      // 5 Haneli ID doğrudan Server Action'a gönderiliyor.
       const result = await processAttendanceScan(
         currentId, 
         actionType,
@@ -135,7 +134,7 @@ export default function BarcodeScanner({
 
       <div className="p-6 flex flex-col items-center bg-slate-50">
         
-        {/* Endüstriyel Tarayıcı Görsel Alanı */}
+        {/* Endüstriyel Manuel Giriş Görsel Alanı */}
         <div className="w-48 h-48 border-2 border-slate-200 bg-white relative mb-4 flex items-center justify-center shadow-sm rounded-md overflow-hidden group">
           <div className="absolute top-4 left-4 w-8 h-8 border-t-[4px] border-l-[4px] transition-colors duration-500 rounded-tl-[3px] z-10" style={{ borderColor: activeColor }}></div>
           <div className="absolute top-4 right-4 w-8 h-8 border-t-[4px] border-r-[4px] transition-colors duration-500 rounded-tr-[3px] z-10" style={{ borderColor: activeColor }}></div>
@@ -147,18 +146,21 @@ export default function BarcodeScanner({
             style={{ borderColor: `${activeColor}40` }}
           ></div>
 
-          <QrCode
-            size={160}
+          {/* QR İkonu yerine Personel İkonuna geçildi */}
+          <User
+            size={140}
             className="z-10 transition-all duration-300 drop-shadow-md group-hover:scale-105"
             color={activeColor}
             strokeWidth={1.5}
           />
         </div>
 
-        {/* Uyarı Bandı */}
-        <div className="w-full flex items-center justify-center gap-1.5 text-slate-500 bg-slate-200/50 py-1.5 px-3 rounded-md mb-6 border border-slate-200">
-          <ShieldAlert size={14} className="text-amber-600" />
-          <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">Elle giriş yapılamaz</span>
+        {/* GEÇİCİ UYARI BANDI (QR İPTAL BİLDİRİMİ) */}
+        <div className="w-full flex items-start gap-2 text-amber-800 bg-amber-50 py-3 px-3 rounded-md mb-6 border border-amber-200 shadow-sm">
+          <ShieldAlert size={18} className="text-amber-600 shrink-0 mt-0.5" />
+          <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 leading-relaxed">
+            Barkod okuyucuda dinamik QR sistemi stabil çalışmadığı için geçici olarak elle giriş aktif edilmiştir. Lütfen 5 haneli ID numaranızı tuşlayınız.
+          </span>
         </div>
 
         {/* İşlem Tipi Seçici */}
@@ -193,13 +195,13 @@ export default function BarcodeScanner({
           </button>
         </div>
 
-        {/* Barkod Giriş Formu */}
+        {/* ID Giriş Formu */}
         <div className="w-full flex flex-col gap-2 group">
           <label
             className="text-[11px] font-black text-slate-500 uppercase tracking-wider transition-colors group-focus-within:text-slate-800"
             htmlFor="terminal-input"
           >
-            MOBİL TERMİNAL QR KODUNU OKUTUN
+            5 HANELİ KİMLİK NUMARANIZ (ID)
           </label>
           <form
             onSubmit={handleSubmit}
@@ -209,11 +211,13 @@ export default function BarcodeScanner({
               id="terminal-input"
               ref={inputRef}
               type="password"
+              inputMode="numeric"
               value={terminalId}
-              onChange={(e) => setTerminalId(e.target.value)} // Regex kısıtlaması kaldırıldı
-              maxLength={80} // Dinamik uzun QR için artırıldı
+              // Sadece rakam girilmesine izin verir (Harf/Boşluk engellenir)
+              onChange={(e) => setTerminalId(e.target.value.replace(/\D/g, ""))} 
+              maxLength={5} // 5 hane ile sınırlandırıldı
               disabled={false} 
-              className={`h-16 w-full bg-white border-2 rounded-md pl-4 pr-16 font-mono text-center text-xl font-black tracking-widest outline-none transition-all focus:bg-slate-50 focus:shadow-[0_0_0_4px_rgba(0,0,0,0.04)] ${
+              className={`h-16 w-full bg-white border-2 rounded-md pl-4 pr-16 font-mono text-center text-2xl font-black tracking-[0.3em] outline-none transition-all focus:bg-slate-50 focus:shadow-[0_0_0_4px_rgba(0,0,0,0.04)] ${
                 isOut
                   ? "border-slate-300 focus:border-[#dc3545] text-[#dc3545]"
                   : "border-slate-300 focus:border-[#3d870c] text-[#3d870c]"
@@ -222,9 +226,9 @@ export default function BarcodeScanner({
             />
             <button
               type="submit"
-              disabled={loading || !terminalId.startsWith("WMS-")}
+              disabled={loading || terminalId.length !== 5}
               className={`absolute right-2 h-12 w-12 flex items-center justify-center rounded-md transition-all duration-200 active:scale-[0.92] ${
-                loading || !terminalId.startsWith("WMS-")
+                loading || terminalId.length !== 5
                   ? "opacity-40 cursor-not-allowed grayscale"
                   : "hover:scale-105 shadow-md"
               } ${isOut ? "bg-[#dc3545] text-white" : "bg-[#3d870c] text-white"}`}
