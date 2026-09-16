@@ -32,11 +32,8 @@ export async function middleware(req: NextRequest) {
     }
   );
 
-  // KRİTİK DEĞİŞİKLİK: getSession yerine getUser kullanıyoruz.
-  // Bu sayede token'ın Supabase sunucusunda başka bir cihaz tarafından ezilip ezilmediğini anlıyoruz.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // KRİTİK: getSession yerine getUser ile sunucu bazlı eşzamanlı doğrulama
+  const { data: { user } } = await supabase.auth.getUser();
 
   const path = req.nextUrl.pathname;
 
@@ -49,11 +46,10 @@ export async function middleware(req: NextRequest) {
     return res;
   }
 
-  // 1. HİÇ OTURUM YOKSA VEYA TOKEN BAŞKA CİHAZ YÜZÜNDEN GEÇERSİZ KALMIŞSA (!user)
+  // 1. HİÇ OTURUM YOKSA VEYA TOKEN GEÇERSİZ KALMIŞSA (!user)
   if (!user) {
-    // Güvenlik Duvarı: Cihaz yetkisizken Web Login (/login) ve Mobil Terminal (/mobile) hariç her yeri tamamen yasakla.
-    if (path !== "/login" && path !== "/mobile") {
-      // 404 yemek yerine, anlaşılır bir parametre ile login'e fırlatıyoruz
+    // Güvenlik Duvarı: Sadece Login rotasına izin ver (Mobil terminal iptal edildi)
+    if (path !== "/login") {
       const loginUrl = new URL("/login", req.url);
       loginUrl.searchParams.set("reason", "session_expired"); 
       return NextResponse.redirect(loginUrl);
@@ -64,23 +60,28 @@ export async function middleware(req: NextRequest) {
   // 2. YÖNETİCİ OTURUMU VARSA VE GEÇERLİYSE (user)
   if (user) {
     const authTimeCookie = req.cookies.get("wms_session_timestamp");
-    const MAX_SESSION_AGE = 72 * 60 * 60 * 1000; // 3 Gün
+    const MAX_SESSION_AGE = 72 * 60 * 60 * 1000; // 3 Gün (Milisaniye)
 
-    if (!authTimeCookie) {
-      res.cookies.set("wms_session_timestamp", Date.now().toString(), {
-        maxAge: 72 * 60 * 60,
-        path: "/",
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-      });
-    } else {
+    // Ağer daha önce bir cookie atandıysa, süresini kontrol et
+    if (authTimeCookie) {
       const sessionAge = Date.now() - parseInt(authTimeCookie.value);
+      // Kullanıcı 3 gün boyunca SİSTEMDE HİÇBİR İŞLEM YAPMADIYSA at
       if (sessionAge > MAX_SESSION_AGE) {
         await supabase.auth.signOut();
         res.cookies.delete("wms_session_timestamp");
         return NextResponse.redirect(new URL("/login?reason=timeout", req.url));
       }
     }
+
+    // YENİ: SLIDING WINDOW (KAYAN PENCERE) MOTORU
+    // Kullanıcı içeride ve işlem yapıyorsa (Middleware tetiklendiyse), süreyi şu andan itibaren 72 saat sonraya uzat!
+    // Bu sayede aktif çalışan personel ASLA sistemden düşmez.
+    res.cookies.set("wms_session_timestamp", Date.now().toString(), {
+      maxAge: 72 * 60 * 60, // 3 Gün (Saniye)
+      path: "/",
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+    });
 
     // A. Web Login Kalkanı
     // Giriş yapmış cihaz manuel olarak /login rotasına giderse onu Management paneline it.
@@ -96,7 +97,7 @@ export async function middleware(req: NextRequest) {
       }
 
       // EĞER personel login olmadan (URL'de empId parametresi olmadan) menüye veya operasyon ekranlarına 
-      // direkt girmeye çalışırsa, sistem onu acımasızca /terminal/login ekranına geri fırlatır.
+      // direkt girmeye çalışırsa, sistem onu /terminal/login ekranına geri fırlatır.
       if (!req.nextUrl.searchParams.has("empId")) {
         return NextResponse.redirect(new URL("/terminal/login", req.url));
       }

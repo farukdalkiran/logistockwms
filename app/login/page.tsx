@@ -170,14 +170,6 @@ export default function LoginPage() {
 
               {/* Ekstra Menü ve Yönlendirmeler */}
               <div className="mt-6 pt-6 border-t border-slate-100 flex flex-col gap-3">
-                <button 
-                  type="button" 
-                  onClick={() => router.push('/mobile')} 
-                  className="w-full h-12 bg-[#dc3545]/10 hover:bg-[#dc3545]/20 text-[#dc3545] border border-[#dc3545]/20 rounded-sm flex items-center justify-center gap-2 text-[12px] font-black tracking-wider uppercase transition-colors"
-                >
-                  <Smartphone size={18} /> Personel Mobil Terminali
-                </button>
-
                 <button type="button" onClick={() => { setError(''); setSuccessMsg(''); setCurrentView('forgot'); }} className="text-[11px] font-bold text-slate-400 hover:text-[#dc3545] transition-colors uppercase tracking-wider text-center mt-2">
                   Şifrenizi mi unuttunuz?
                 </button>
