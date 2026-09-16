@@ -6,6 +6,7 @@ import { Navbar } from "@/components/shared/Navbar";
 import { Footer } from "@/components/shared/Footer";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { getDashboardDataServer } from "@/app/actions/dashboard";
+import { Logo } from "@/components/ui/Logo";
 import {
   Building2, Users, AlertCircle, Package, 
   Layers, Database, BoxSelect, 
@@ -208,12 +209,9 @@ export default function ManagementDashboard() {
             </div>
 
             <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight uppercase leading-none">
-              HOŞ GELDİNİZ, <span className="text-[#dc3545]">{profileSafe?.full_name?.split(' ')[0] || 'YÖNETİCİ'}</span>
+              <span>HOŞ GELDİNİZ</span>
             </h1>
-            
-            <h2 className="text-sm sm:text-base font-black text-slate-500 tracking-[0.2em] uppercase flex items-center justify-center lg:justify-start gap-2 mt-2">
-              LOGISTOCK <span className="text-[#dc3545]">WMS</span> SİSTEMİ
-            </h2>
+        
 
             <p className="text-slate-400 text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.1em] font-mono mt-4 max-w-3xl leading-relaxed border-l-2 border-slate-700 pl-3">
               Mağaza ve depo arası iletişim ile transferlerin yönetildiği, kesintisiz ürün akışının sağlandığı, personel mesai ve izin haklarının takip edildiği tam otomatik depo yönetim altyapısı.
