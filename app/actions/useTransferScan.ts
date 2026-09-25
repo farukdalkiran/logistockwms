@@ -17,6 +17,12 @@ export type TransferItem = {
   };
 };
 
+// UUID geçerlilik kontrolü için ufak bir yardımcı fonksiyon
+const isValidUUID = (id: string) => {
+  const regex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  return regex.test(id);
+};
+
 export function useTransferScan(
   empId: string,
   branchName: string,
@@ -36,9 +42,7 @@ export function useTransferScan(
 
   const [isFetching, setIsFetching] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [flashState, setFlashState] = useState<"idle" | "success" | "error">(
-    "idle",
-  );
+  const [flashState, setFlashState] = useState<"idle" | "success" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
 
   const barcodeResolverCache = useRef(new Map());
@@ -61,8 +65,7 @@ export function useTransferScan(
 
   const playSound = useCallback((type: "success" | "error") => {
     try {
-      const AudioContext =
-        window.AudioContext || (window as any).webkitAudioContext;
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
       const ctx = new AudioContext();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -109,10 +112,13 @@ export function useTransferScan(
     message = "",
   ) => {
     if (!activeTransfer || !branchId) return;
+
+    // Eğer empId geçerli bir UUID değilse null gönderiyoruz ki Supabase tipi patlamasın.
+    const validEmpId = isValidUUID(empId) ? empId : null;
     
     const newLog = {
       transfer_id: activeTransfer.id,
-      employee_id: empId,
+      employee_id: validEmpId, 
       branch_id: branchId,
       barcode,
       scanned_qty: qty,
@@ -122,8 +128,11 @@ export function useTransferScan(
       created_at: new Date().toISOString()
     };
 
-    // Arka planda veritabanına kaydet (Bekletmeden)
-    supabase.from("scan_logs").insert(newLog).then();
+    // Arka planda veritabanına kaydet ve HATA VARSA KONSOLA YAZ
+    const { error } = await supabase.from("scan_logs").insert(newLog);
+    if (error) {
+      console.error("🔴 LOG KAYDEDİLEMEDİ. HATA:", error.message, "DETAY:", error.details);
+    }
 
     // Okutan kişinin ekranında anında göstermek için state'i güncelle (İzleyici değilse)
     if (!isSpectator) {
@@ -540,7 +549,7 @@ export function useTransferScan(
     mode,
     lastScanned,
     setLastScanned,
-    recentLogs,      // <--- BURA EKLENDİ
+    recentLogs,
     isFetching,
     isProcessing,
     setIsProcessing,
