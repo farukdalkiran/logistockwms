@@ -97,7 +97,6 @@ export default function AttendanceTable({
 
           if (!lates[row.employee_id]) lates[row.employee_id] = 0;
           if (row.check_in_time && (!row.status || !row.status.startsWith('LEAVE_'))) {
-            // TARAYICI SAATİNİ EZEN UTC+3 TÜRKİYE SAATİ KORUMASI
             const d = new Date(row.check_in_time);
             const localHours = d.getUTCHours() + 3;
             const realHours = localHours >= 24 ? localHours - 24 : localHours; 
@@ -214,7 +213,6 @@ export default function AttendanceTable({
     return <span className="w-2.5 h-2.5 rounded-full bg-[#0b9c2d] shrink-0 shadow-[0_0_6px_#0b9c2d]" title="Zamanında Giriş"></span>;
   };
 
-  // GELİŞMİŞ İHLAL ROZETİ (ŞİDDET SEVİYELERİNE GÖRE ANIMASYON)
   const getLateBadge = (lateCount: number) => {
     if (lateCount === 0) {
       return (
@@ -229,15 +227,12 @@ export default function AttendanceTable({
     let wrapperClass = "relative inline-flex p-[2px] rounded-sm overflow-hidden group shadow-sm";
 
     if (lateCount <= 3) {
-      // GÜVENLİ BÖLGE (Yeşil tonları, yavaş animasyon)
       gradientClass = "bg-[conic-gradient(from_90deg_at_50%_50%,#ecfdf5_0%,#10b981_50%,#ecfdf5_100%)] animate-[spin_4s_linear_infinite]";
       boxClass = "bg-emerald-50 text-emerald-700";
     } else if (lateCount === 4) {
-      // UYARI BÖLGESİ (Sarı tonları, normal hız)
       gradientClass = "bg-[conic-gradient(from_90deg_at_50%_50%,#fffbeb_0%,#f59e0b_50%,#fffbeb_100%)] animate-[spin_2s_linear_infinite]";
       boxClass = "bg-amber-100 text-amber-800";
     } else {
-      // KRİTİK BÖLGE (Kırmızı tonları, HIZLI DÖNÜŞ VE SALLANMA)
       wrapperClass += " animate-pulse shadow-[0_0_8px_rgba(220,53,69,0.5)]";
       gradientClass = "bg-[conic-gradient(from_90deg_at_50%_50%,#000000_0%,#dc3545_50%,#000000_100%)] animate-[spin_1s_linear_infinite]";
       boxClass = "bg-red-600 text-white shadow-inner";
@@ -315,32 +310,32 @@ export default function AttendanceTable({
       </div>
 
       <div className="flex-1 overflow-auto bg-white">
-        <table className="w-full text-xs text-left whitespace-nowrap">
+        <table className="w-full text-xs text-left border-collapse">
           <thead className="bg-slate-50 border-b border-slate-200 text-[9px] font-black text-slate-500 uppercase tracking-widest sticky top-0 z-10 shadow-sm">
             <tr>
-              <th className="px-5 py-3">Personel Bilgisi</th>
-              <th className="px-2 py-3 text-center w-[100px]">Giriş Saati</th>
-              <th className="px-2 py-3 text-center w-[100px]">Çıkış Saati</th>
-              <th className="px-2 py-3 text-center text-amber-600 w-[90px]">
+              <th className="px-5 py-3 text-left">Personel Bilgisi</th>
+              <th className="px-3 py-3 text-center whitespace-nowrap w-[110px]">Giriş Saati</th>
+              <th className="px-3 py-3 text-center whitespace-nowrap w-[110px]">Çıkış Saati</th>
+              <th className="px-3 py-3 text-center text-amber-600 whitespace-nowrap w-[90px]">
                 <div className="flex items-center justify-center gap-1"><Coffee className="w-3 h-3" /> Mola</div>
               </th>
-              <th className="px-2 py-3 text-center text-slate-500 w-[90px]">
+              <th className="px-3 py-3 text-center text-slate-500 whitespace-nowrap w-[95px]">
                 <div className="flex items-center justify-center gap-1"><Clock className="w-3 h-3" /> Günlük</div>
               </th>
-              <th className="px-2 py-3 text-center text-slate-500 w-[90px]">
+              <th className="px-3 py-3 text-center text-slate-500 whitespace-nowrap w-[85px]">
                 <div className="flex items-center justify-center gap-1"><AlertCircle className="w-3 h-3 text-[#dc3545]" /> İhlal</div>
               </th>
-              <th className="px-2 py-3 text-center text-[#0F172B] bg-slate-100 border-l border-slate-200 w-[100px]">
+              <th className="px-3 py-3 text-center text-[#0F172B] bg-slate-100 border-l border-r border-slate-200 whitespace-nowrap w-[110px]">
                 <div className="flex items-center justify-center gap-1"><CalendarDays className="w-3 h-3 text-[#0F172B]" /> Aylık</div>
               </th>
-              <th className="px-5 py-3 text-right w-[120px]">Durum</th>
+              <th className="px-5 py-3 text-right whitespace-nowrap w-[130px]">Durum</th>
             </tr>
           </thead>
           
           <tbody className="divide-y divide-slate-100">
             {loading && sortedRecords.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-3 py-20 text-center bg-white">
+                <td colSpan={8} className="px-3 py-20 text-center bg-white">
                   <div className="flex flex-col items-center justify-center gap-3 text-slate-400">
                     <div className="w-8 h-8 border-4 border-slate-100 border-t-[#dc3545] rounded-full animate-spin"></div>
                     <span className="text-[10px] font-bold uppercase tracking-widest">Kayıtlar Hesaplanıyor...</span>
@@ -349,7 +344,6 @@ export default function AttendanceTable({
               </tr>
             ) : sortedRecords && sortedRecords.length > 0 ? (
               sortedRecords.map((record: any, index: number) => {
-                
                 const roleType = getRoleType(record.employees?.position_title);
                 const employeeId = record.employee_id;
                 const monthlyTotal = monthlyTotals[employeeId] || 0;
@@ -359,40 +353,40 @@ export default function AttendanceTable({
                 const leaveText = isLeave ? record.status.replace('LEAVE_', '').replace(/_/g, ' ') : '';
                 
                 const isEven = index % 2 === 0;
-                const hasDeviceToken = record.employees?.device_token ? true : false;
 
                 return (
                   <tr key={record.id} className={`transition-all duration-200 hover:bg-slate-100 ${isEven ? 'bg-white' : 'bg-[#f8fafc]'} ${isLeave ? 'bg-blue-50/20' : ''}`}>
                     
-                    <td className="px-5 py-2 font-bold text-slate-800 flex items-center gap-3 min-w-[200px]">
-                      {roleType === "DEVELOPER" ? (
-                        <div className="relative inline-flex p-[2px] rounded-md overflow-hidden group shrink-0">
-                          <span className="absolute inset-[-1000%] animate-[spin_4s_linear_infinite] bg-[conic-gradient(from_90deg_at_50%_50%,#33cc00_0%,#9333ea_50%,#eb9100_100%)]" />
-                          <div className="relative flex items-center justify-center w-7 h-7 rounded-sm bg-[#a600cf] text-white">
-                            <Code2 className="w-4 h-4" strokeWidth={2.5} />
+                    <td className="px-5 py-2.5 font-bold text-slate-800 text-left min-w-[200px]">
+                      <div className="flex items-center gap-3">
+                        {roleType === "DEVELOPER" ? (
+                          <div className="relative inline-flex p-[2px] rounded-md overflow-hidden group shrink-0">
+                            <span className="absolute inset-[-1000%] animate-[spin_4s_linear_infinite] bg-[conic-gradient(from_90deg_at_50%_50%,#33cc00_0%,#9333ea_50%,#eb9100_100%)]" />
+                            <div className="relative flex items-center justify-center w-7 h-7 rounded-sm bg-[#a600cf] text-white">
+                              <Code2 className="w-4 h-4" strokeWidth={2.5} />
+                            </div>
                           </div>
-                        </div>
-                      ) : roleType === "MANAGER" ? (
-                        <div className="flex items-center justify-center w-8 h-8 rounded-sm bg-[#8f0000] text-white shrink-0">
-                          <ShieldCheck className="w-4 h-4" strokeWidth={2.5} />
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-center w-8 h-8 rounded-sm bg-[#cc0014] text-white shrink-0">
-                          <User className="w-4 h-4" strokeWidth={2.5} />
-                        </div>
-                      )}
+                        ) : roleType === "MANAGER" ? (
+                          <div className="flex items-center justify-center w-8 h-8 rounded-sm bg-[#8f0000] text-white shrink-0">
+                            <ShieldCheck className="w-4 h-4" strokeWidth={2.5} />
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-center w-8 h-8 rounded-sm bg-[#cc0014] text-white shrink-0">
+                            <User className="w-4 h-4" strokeWidth={2.5} />
+                          </div>
+                        )}
 
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-[11px] uppercase tracking-wide truncate max-w-[130px] sm:max-w-[170px] text-slate-900">{record.employees?.full_name || "BİLİNMEYEN"}</span>
-                        <span className={`text-[9px] uppercase tracking-wider ${roleType === 'DEVELOPER' ? 'text-purple-600 font-bold' : 'text-slate-400'}`}>
-                          {record.employees?.position_title || "PERSONEL"}
-                        </span>
+                        <div className="flex flex-col gap-0.5 text-left">
+                          <span className="text-[11px] uppercase tracking-wide truncate max-w-[130px] sm:max-w-[170px] text-slate-900">{record.employees?.full_name || "BİLİNMEYEN"}</span>
+                          <span className={`text-[9px] uppercase tracking-wider text-left ${roleType === 'DEVELOPER' ? 'text-purple-600 font-bold' : 'text-slate-400'}`}>
+                            {record.employees?.position_title || "PERSONEL"}
+                          </span>
+                        </div>
                       </div>
                     </td>
 
-                    {/* CİHAZ (PHONE) SÜTUNU & ANİMASYONU */}
                     {isLeave ? (
-                      <td colSpan={6} className="px-2 py-2 text-center">
+                      <td colSpan={5} className="px-3 py-2.5 text-center">
                         <span className={`inline-flex items-center justify-center gap-2 w-full max-w-[300px] px-3 py-1.5 rounded-sm border text-[9px] font-black uppercase tracking-widest shadow-sm ${
                           leaveText === 'SAGLIK RAPORU' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-blue-50 text-blue-700 border-blue-200'
                         }`}>
@@ -402,39 +396,37 @@ export default function AttendanceTable({
                       </td>
                     ) : (
                       <>
-                        <td className="px-2 py-2 text-center font-black text-slate-700 tabular-nums text-[12px]">
+                        <td className="px-3 py-2.5 text-center font-black text-slate-700 tabular-nums text-[12px] whitespace-nowrap">
                           <div className="flex items-center justify-center gap-2">
                             {getEntryStatusDot(record.check_in_time)}
-                            <span className="min-w-[36px] text-left">{formatTime(record.check_in_time)}</span>
+                            <span className="min-w-[40px] text-left">{formatTime(record.check_in_time)}</span>
                           </div>
                         </td>
-                        <td className="px-2 py-2 text-center font-bold text-slate-500 tabular-nums text-[12px]">{formatTime(record.check_out_time)}</td>
-                        <td className="px-2 py-2 text-center font-bold text-amber-600 tabular-nums">{record.break_hours ? `${Number(record.break_hours)}s` : "0s"}</td>
-                        <td className="px-2 py-2 text-center font-bold text-slate-700 tabular-nums text-[12px]">
-                          <span className="bg-slate-50 border border-slate-200 px-2 py-1 rounded-sm">{record.working_hours ? formatHours(record.working_hours) : "--"}</span>
+                        <td className="px-3 py-2.5 text-center font-bold text-slate-500 tabular-nums text-[12px] whitespace-nowrap">{formatTime(record.check_out_time)}</td>
+                        <td className="px-3 py-2.5 text-center font-bold text-amber-600 tabular-nums whitespace-nowrap">{record.break_hours ? `${Number(record.break_hours)}s` : "0s"}</td>
+                        <td className="px-3 py-2.5 text-center font-bold text-slate-700 tabular-nums text-[12px] whitespace-nowrap">
+                          <span className="bg-slate-50 border border-slate-200 px-2 py-1 rounded-sm inline-block">{record.working_hours ? formatHours(record.working_hours) : "--"}</span>
                         </td>
-                        <td className="px-2 py-2 text-center">
+                        <td className="px-3 py-2.5 text-center whitespace-nowrap">
                           {getLateBadge(monthlyLate)}
                         </td>
                       </>
                     )}
 
-                    <td className="px-2 py-2 text-center font-black text-[#0F172B] bg-slate-50 border-l border-slate-200 tabular-nums text-[12px]">
+                    <td className="px-3 py-2.5 text-center font-black text-[#0F172B] bg-slate-50 border-l border-r border-slate-200 tabular-nums text-[12px] whitespace-nowrap">
                       {monthlyTotal > 0 ? formatHours(monthlyTotal) : "0s"}
                     </td>
 
-                    <td className="px-5 py-2 text-right">
+                    <td className="px-5 py-2.5 text-right whitespace-nowrap">
                       {isLeave ? (
                         <span className="inline-flex items-center gap-1.5 px-2 py-1.5 text-blue-700 bg-blue-50 rounded-sm border border-blue-200 text-[9px] font-black uppercase tracking-widest">
                           <CheckCircle2 className="w-3.5 h-3.5" strokeWidth={3} /> Onaylandı
                         </span>
                       ) : !record.check_out_time ? (
-                        /* YENİ: İÇERİDE - Açık Yeşil Yapı */
                         <span className="inline-flex items-center gap-1.5 px-2 py-1.5 text-emerald-600 bg-emerald-50 rounded-sm border border-emerald-200 text-[9px] font-black uppercase tracking-widest">
                           <Clock className="w-3.5 h-3.5 text-emerald-500" strokeWidth={3} /> İÇERİDE
                         </span>
                       ) : (
-                        /* YENİ: TAMAMLANDI - Koyu Yeşil Yapı */
                         <span className="inline-flex items-center gap-1.5 px-2 py-1.5 text-white bg-emerald-700 rounded-sm border border-emerald-800 text-[9px] font-black uppercase tracking-widest shadow-sm">
                           <CheckCircle2 className="w-3.5 h-3.5 text-white" strokeWidth={3} /> TAMAMLANDI
                         </span>
@@ -445,7 +437,7 @@ export default function AttendanceTable({
               })
             ) : (
               <tr>
-                <td colSpan={9} className="px-3 py-16 text-center bg-white">
+                <td colSpan={8} className="px-3 py-16 text-center bg-white">
                   <div className="flex flex-col items-center justify-center gap-2 text-slate-400">
                     <Clock size={28} className="opacity-20 mb-1" />
                     <span className="text-[10px] font-bold uppercase tracking-widest">
