@@ -2,15 +2,22 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import { useAuth } from "@/components/providers/AuthProvider";
 import * as Icons from "lucide-react";
 import {
   ShieldCheck, Save, Trash2, Key, Users,
   Activity, ShieldAlert, Search, ChevronRight,
-  Copy, CheckSquare, XSquare, Lock, Check,AlertTriangle
+  Copy, CheckSquare, XSquare, Lock, Check, AlertTriangle
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import toast from "react-hot-toast";
+
+// 1. TİP TANIMLAMASI: Sunucudan (page.tsx) gelen veriyi karşılıyoruz.
+interface RoleSettingsClientProps {
+  userProfile: {
+    role: string | null;
+    branch_id: string | null;
+  } | null;
+}
 
 // Dinamik İkon Çözücü Motor
 const getIcon = (iconName: string | null, size = 16) => {
@@ -19,8 +26,8 @@ const getIcon = (iconName: string | null, size = 16) => {
   return Icon ? <Icon size={size} /> : <Icons.Circle size={size} />;
 };
 
-export default function RoleSettingsPage() {
-  const { userProfile, isLoading: isAuthLoading } = useAuth();
+export default function RoleSettingsClient({ userProfile }: RoleSettingsClientProps) {
+  // useAuth() kaldırıldı, veri artık Server'dan props (userProfile) olarak güvenle geliyor.
   
   const [accessState, setAccessState] = useState<"VERIFYING" | "DENIED" | "GRANTED">("VERIFYING");
   
@@ -35,7 +42,7 @@ export default function RoleSettingsPage() {
   const [newRoleName, setNewRoleName] = useState("");
 
   useEffect(() => {
-    if (isAuthLoading) return;
+    // Profil prop olarak gelmediyse (ki page.tsx bunu engeller, yine de güvenlik önlemi)
     if (!userProfile) {
       window.location.replace("/login");
       return;
@@ -59,10 +66,11 @@ export default function RoleSettingsPage() {
 
         let perms = data.permissions;
         if (typeof perms === "string") {
-          perms = perms.replace(/^{|}$/g, "").split(",").map((s: string) => s.trim().replace(/(^"|"$)/g, "")).filter(Boolean);
+          perms = perms.replace(/^{|}$/g, "").split(",").map((s: string) => s.trim().replace(/(^"\vert{}"$)/g, "")).filter(Boolean);
         }
         if (!Array.isArray(perms)) perms = [];
 
+        // Güvenlik duvarı yetki kontrolü
         if (!perms.includes("settings") && !perms.includes("role_settings")) {
           setAccessState("DENIED");
         } else {
@@ -75,7 +83,8 @@ export default function RoleSettingsPage() {
     };
 
     verifyAccess();
-  }, [userProfile, isAuthLoading]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userProfile]);
 
   const fetchSystemData = async () => {
     try {
@@ -85,7 +94,7 @@ export default function RoleSettingsPage() {
 
       const formattedRoles = (roleData || []).map((role) => {
         let perms = role.permissions || [];
-        if (typeof perms === "string") perms = perms.replace(/^{|}$/g, "").split(",").map((s: string) => s.trim().replace(/(^"|"$)/g, "")).filter(Boolean);
+        if (typeof perms === "string") perms = perms.replace(/^{|}$/g, "").split(",").map((s: string) => s.trim().replace(/(^"\vert{}"$)/g, "")).filter(Boolean);
         if (!Array.isArray(perms)) perms = [];
         return { ...role, permissions: perms };
       });
