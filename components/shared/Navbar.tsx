@@ -46,6 +46,7 @@ interface SystemModule {
   parent_id: string | null;
   sort_order: number;
   is_active: boolean;
+  created_at?: string; // Yeni modül tespiti için eklendi
   subItems?: SystemModule[];
 }
 
@@ -90,6 +91,7 @@ export const Navbar = () => {
         }
       }
 
+      // Yıldız (*) seçimi created_at bilgisini de getirecektir
       const { data: mods } = await supabase
         .from("system_modules")
         .select("*")
@@ -136,6 +138,17 @@ export const Navbar = () => {
     return false;
   };
 
+  // Son 30 gün içinde eklenmişse TRUE döndürür
+  const isModuleNew = (createdAt?: string) => {
+    if (!createdAt) return false;
+    const diffTime = Math.abs(new Date().getTime() - new Date(createdAt).getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays <= 30;
+  };
+
+  // KESİN EŞLEŞME (Exact Match) - Çakışmaları ve alt modüllerin gereksiz yanmasını önler
+  const isPathActive = (targetPath: string) => pathname === targetPath;
+
   const searchableLinks = useMemo(() => {
     const items: { name: string; path: string; parent: string | null; moduleId: string }[] = [];
     navLinks.forEach((link) => {
@@ -167,7 +180,6 @@ export const Navbar = () => {
           
           {/* SOL: Terminal ve Modül Arama */}
           <div className="flex items-center gap-4 shrink-0 z-10 bg-[#0b1120] pr-4">
-            {/* Özel Button: Dış kütüphane click efektlerini engellemek için raw html button kullanıldı */}
             <button
               onClick={() => router.push("/terminal/login")}
               className="flex items-center justify-center h-7 px-3 text-[10px] font-black uppercase tracking-widest gap-1.5 bg-[#dc3545] hover:bg-red-700 text-white shadow-sm transition-colors rounded"
@@ -216,8 +228,6 @@ export const Navbar = () => {
               )}
             </div>
           </div>
-
-
 
           {/* SAĞ: Destek & Profil */}
           <div className="flex items-center gap-3 md:gap-4 h-full shrink-0 z-10 bg-[#0b1120] pl-4 justify-end">
@@ -309,9 +319,8 @@ export const Navbar = () => {
                 const authSubItems = link.subItems?.filter((sub) => hasDirectAccess(sub.id)) || [];
                 const hasSubItems = authSubItems.length > 0;
 
-                const isActive = link.path === "/management"
-                  ? pathname === "/management"
-                  : pathname.startsWith(link.path) || authSubItems.some((sub) => pathname.startsWith(sub.path));
+                // Exact Match Kontrolü (Klasör ise kendisi veya altındaki açık sayfa kontrol edilir)
+                const isActive = isPathActive(link.path) || authSubItems.some((sub) => isPathActive(sub.path));
 
                 return (
                   <div key={link.id} className="relative group h-full flex items-center flex-shrink-0">
@@ -323,7 +332,18 @@ export const Navbar = () => {
                       } ${!isClickable && !hasSubItems ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       <DynamicIcon name={link.icon} size={15} className={isActive ? "text-[#dc3545]" : "text-slate-400 group-hover:text-slate-600 transition-colors"} />
-                      <span>{link.name}</span>
+<span className="flex items-center gap-1.5">
+  {link.name}
+  {isModuleNew(link.created_at) && (
+    <span className="flex items-center gap-1 px-1.5 py-[2px] text-[9px] font-black bg-red-50 text-[#dc3545] border border-[#dc3545]/20 rounded shadow-sm tracking-wider ml-1">
+      <span className="relative flex h-1.5 w-1.5">
+        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#dc3545] opacity-75"></span>
+        <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#dc3545]"></span>
+      </span>
+      YENİ
+    </span>
+  )}
+</span>
                       {hasSubItems && <ChevronDown size={11} className={`transition-colors duration-200 group-hover:rotate-180 ${isActive ? "text-[#dc3545]" : "text-slate-400"}`} />}
                     </Link>
 
@@ -333,7 +353,7 @@ export const Navbar = () => {
                         <div className="bg-white rounded-lg shadow-[0_10px_40px_-10px_rgba(0,0,0,0.15)] border border-slate-100 overflow-hidden py-1.5 relative">
                           {isActive && <div className="absolute top-0 left-0 w-1 h-full bg-[#dc3545]"></div>}
                           {authSubItems.map((subItem) => {
-                            const isSubActive = pathname === subItem.path;
+                            const isSubActive = isPathActive(subItem.path);
                             return (
                               <Link
                                 key={subItem.id}
@@ -342,7 +362,10 @@ export const Navbar = () => {
                                   isSubActive ? "text-[#dc3545] bg-red-50/50" : "text-slate-600 hover:bg-slate-50 hover:text-[#dc3545]"
                                 }`}
                               >
-                                {subItem.name}
+                                <span className="truncate">{subItem.name}</span>
+                                {isModuleNew(subItem.created_at) && (
+                                  <span className="ml-2 px-1.5 py-[2px] text-[8px] font-black bg-[#dc3545] text-white rounded shadow-sm animate-pulse tracking-wider shrink-0">YENİ</span>
+                                )}
                               </Link>
                             );
                           })}
@@ -401,9 +424,7 @@ export const Navbar = () => {
               const hasSubItems = authSubItems.length > 0;
               const isExpanded = mobileExpanded === link.id;
               
-              const isActive = link.path === "/management"
-                  ? pathname === "/management"
-                  : pathname.startsWith(link.path) || authSubItems.some((sub) => pathname.startsWith(sub.path));
+              const isActive = isPathActive(link.path) || authSubItems.some((sub) => isPathActive(sub.path));
 
               return (
                 <div key={link.id} className="flex flex-col px-3">
@@ -421,7 +442,12 @@ export const Navbar = () => {
                     } ${!isClickable && !hasSubItems ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     <DynamicIcon name={link.icon} size={18} className={isActive ? "text-[#dc3545]" : "text-slate-400"} />
-                    <span className="truncate tracking-wide">{link.name}</span>
+                    <span className="truncate tracking-wide flex items-center gap-1.5">
+                      {link.name}
+                      {isModuleNew(link.created_at) && (
+                        <span className="px-1.5 py-[2px] text-[8px] font-black bg-[#dc3545] text-white rounded shadow-sm animate-pulse tracking-wider">YENİ</span>
+                      )}
+                    </span>
                     {hasSubItems && (
                       <ChevronDown size={16} className={`ml-auto transition-transform duration-300 ${isExpanded ? "rotate-180 text-[#dc3545]" : "text-slate-400"}`} />
                     )}
@@ -431,7 +457,7 @@ export const Navbar = () => {
                     <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isExpanded ? "max-h-[500px] opacity-100 mb-2" : "max-h-0 opacity-0"}`}>
                       <div className="ml-5 pl-4 border-l-2 border-slate-100 flex flex-col gap-1 py-1">
                         {authSubItems.map((sub) => {
-                          const isSubActive = pathname === sub.path;
+                          const isSubActive = isPathActive(sub.path);
                           return (
                             <Link
                               key={sub.id}
@@ -442,6 +468,9 @@ export const Navbar = () => {
                               }`}
                             >
                               <span className="truncate">{sub.name}</span>
+                              {isModuleNew(sub.created_at) && (
+                                <span className="ml-2 px-1.5 py-[2px] text-[8px] font-black bg-[#dc3545] text-white rounded shadow-sm animate-pulse tracking-wider shrink-0">YENİ</span>
+                              )}
                             </Link>
                           );
                         })}

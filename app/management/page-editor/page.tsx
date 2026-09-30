@@ -42,6 +42,7 @@ interface SystemModule {
   parent_id: string | null;
   sort_order: number;
   is_active: boolean;
+  created_at?: string; // Navbar entegrasyonu ve yeni sayfa tespiti için eklendi
 }
 
 interface RoleDefinition {
@@ -69,6 +70,14 @@ export default function PageEditor() {
     is_active: true,
   });
 
+  // Yeni Modül Kontrolü (Son 30 Gün)
+  const isModuleNew = (createdAt?: string) => {
+    if (!createdAt) return false;
+    const diffTime = Math.abs(new Date().getTime() - new Date(createdAt).getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays <= 30;
+  };
+
   // Modülleri ve Rolleri Çekme
   const fetchData = async () => {
     setIsLoading(true);
@@ -77,7 +86,7 @@ export default function PageEditor() {
     const { data: rolesData } = await supabase.from("roles").select("role_code, permissions");
     if (rolesData) setRoles(rolesData as RoleDefinition[]);
 
-    // 2. Modülleri Çek
+    // 2. Modülleri Çek (* kullanarak created_at dahil tüm kolonları alıyoruz)
     const { data: modsData, error } = await supabase
       .from("system_modules")
       .select("*")
@@ -159,6 +168,7 @@ export default function PageEditor() {
       parent_id: formData.parent_id || null,
       sort_order: Number(formData.sort_order),
       is_active: formData.is_active,
+      // created_at veritabanı (Supabase) tarafından otomatik olarak DEFAULT NOW() ile eklenecektir.
     };
 
     // 1. Modülü Kaydet veya Güncelle
@@ -296,6 +306,13 @@ export default function PageEditor() {
                             <DynamicIcon name={mod.icon} size={14} />
                           </div>
                           <span className={isChild ? "font-bold" : "font-black"}>{mod.name}</span>
+                          
+                          {/* YENİ MODÜL ETİKETİ */}
+                          {isModuleNew(mod.created_at) && (
+                            <span className="px-1.5 py-[2px] text-[8px] font-black bg-[#dc3545] text-white rounded shadow-sm animate-pulse tracking-wider ml-2">
+                              YENİ
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-3">
@@ -455,7 +472,7 @@ export default function PageEditor() {
               </select>
             </div>
 
-            {/* DİNAMİK ROL SEÇİM ALANI (YENİ EKLENDİ) */}
+            {/* DİNAMİK ROL SEÇİM ALANI */}
             <div className="pt-2 border-t border-slate-100">
               <label className="block text-[11px] font-black text-slate-900 uppercase tracking-widest mb-2">
                 Hangi Roller Erişebilsin? (Yetki Ataması)
