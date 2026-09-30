@@ -24,8 +24,7 @@ export default async function HrLogsPage() {
   return (
     <div className="w-full min-h-screen bg-slate-50 p-4 lg:p-8 flex flex-col items-center pt-20">
       
-      
-        MESAİ LOG DÜZENLEME MODÜLÜ ASKIYA ALINMIŞTIR 
+    
         <LogRequestPanel managerBranchId={managerBranchId} isGlobal={isGlobal} /> 
      
     </div>
