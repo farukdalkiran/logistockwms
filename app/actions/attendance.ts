@@ -17,31 +17,27 @@ function roundToNext15Minutes(date: Date): Date {
   return newDate;
 }
 
+// Yardımcı Fonksiyon: Güvenli YYYY-MM-DD formatlayıcı (Sunucu dilinden bağımsız)
+function getTrtYMD(dateObj: Date): string {
+  const y = dateObj.getFullYear();
+  const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const d = String(dateObj.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 export async function processAttendanceScan(
-  scannedCode: string, // Artık 5 haneli ID geliyor
+  scannedCode: string, 
   actionType: 'IN' | 'OUT',
-  branchId: string | null // UI'dan prop olarak gelen şube ID'si
+  branchId: string | null 
 ) {
-  // ==========================================
-  // 1. MANUEL GİRİŞ (5 HANELİ ID) KONTROLÜ
-  // ==========================================
-  
-  // Sadece 5 haneli rakam kabul edilecek (Regex kalkanı)
   if (!scannedCode || !/^\d{5}$/.test(scannedCode)) {
     return { success: false, message: 'LÜTFEN 5 HANELİ KİMLİK NUMARANIZI GİRİNİZ!' };
   }
 
   const empId = scannedCode;
-
-  // ==========================================
-  // 2. WMS MESAİ VE PUANTAJ LOJİĞİ
-  // ==========================================
-  
   const supabase = await createClient();
 
   try {
-    // 1. Personel Doğrulaması (Sadece Aktif Personeller)
-    // QR kullanmadığımız için terminal_code yerine doğrudan personelin 'id'si ile eşleştiriyoruz
     const { data: employee, error: empError } = await supabase
       .from('employees')
       .select('id, full_name, branch_id, is_active')
@@ -53,37 +49,69 @@ export async function processAttendanceScan(
       return { success: false, message: 'GEÇERSİZ VEYA PASİF PERSONEL KİMLİĞİ' };
     }
 
-    // 🛡️ GÜVENLİK DUVARI: CROSS-BRANCH LOCK
-    // İSTEK: Eğer terminalin bağlı olduğu bir şube varsa ve bu şube personelin kayıtlı olduğu şube değilse işlemi REDDET!
     if (branchId && employee.branch_id !== branchId) {
       return { 
         success: false, 
-        message: `GÜVENLİK İHLALİ: PERSONEL BU ŞUBEYE KAYITLI DEĞİL!` 
+        message: 'GÜVENLİK İHLALİ: PERSONEL BU ŞUBEYE KAYITLI DEĞİL!' 
       };
     }
 
-    // Terminalin veya personelin şubesi (Güvenliği geçtiği için ikisi de aynı veya branchId null'dur)
     const activeBranchId = branchId || employee.branch_id;
-
     const now = new Date();
+    
+    // ⚠️ Vercel Bağımsız TRT Gece Yarısı ve "TAVAN LİMİT" Hesaplaması
+    const trDateNow = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Istanbul' }));
+    
+    // 1. Bugünün Başlangıcı (Alt Sınır)
+    const startOfDayTrt = new Date(`${getTrtYMD(trDateNow)}T00:00:00+03:00`).toISOString();
+    
+    // 2. Yarının Başlangıcı (Üst Sınır) - İleri tarihli izinlerin bugünü bozmaması için!
+    trDateNow.setDate(trDateNow.getDate() + 1);
+    const startOfTomorrowTrt = new Date(`${getTrtYMD(trDateNow)}T00:00:00+03:00`).toISOString();
+
     const actualTime = now.toISOString();
     const roundedTime = roundToNext15Minutes(now);
     const roundedTimeIso = roundedTime.toISOString();
-
-    // Bugünün başlangıcı (Local Midnight -> ISO)
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
 
     // ==========================================
     // MESAİ GİRİŞ (IN) OPERASYONU
     // ==========================================
     if (actionType === 'IN') {
       
-      // İSTEK 1: Sadece açık kayıt değil, BUGÜN atılmış HERHANGİ BİR kayıt var mı? (Günde maksimum 1 kayıt kuralı)
+      // HAYALET OTURUM KONTROLÜ (Dünden kalma açık mesai)
+      const { data: activeSession } = await supabase
+        .from('attendance')
+        .select('id, check_in_time')
+        .eq('employee_id', employee.id)
+        .is('check_out_time', null)
+        .order('check_in_time', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (activeSession) {
+        if (activeSession.check_in_time < startOfDayTrt) {
+          await supabase
+            .from('attendance')
+            .update({ 
+              check_out_time: startOfDayTrt, // Gece yarısı sistem kapattı
+              status: 'AUTO_CLOSED_MISSING_OUT' 
+            })
+            .eq('id', activeSession.id);
+        } else {
+          return { 
+            success: false, 
+            message: `HATA: ${employee.full_name.toUpperCase()} ŞU AN ZATEN İÇERİDE GÖRÜNÜYOR` 
+          };
+        }
+      }
+
+      // ⚠️ GÜNDE 1 KAYIT KURALI FİXİ: Sadece bugünü tarar, ileri tarihli (yıllık izin) kayıtları görmezden gelir!
       const { data: existingTodayIn } = await supabase
         .from('attendance')
         .select('id')
         .eq('employee_id', employee.id)
-        .gte('check_in_time', startOfDay)
+        .gte('check_in_time', startOfDayTrt)
+        .lt('check_in_time', startOfTomorrowTrt) // <--- KRİTİK DÜZELTME BURADA
         .limit(1)
         .maybeSingle();
 
@@ -94,14 +122,14 @@ export async function processAttendanceScan(
         };
       }
 
-      // İSTEK 2: Rapor / İzin Kontrolü (Leave Requests tablosundan kontrol ediyoruz)
+      // RAPOR / İZİN KONTROLÜ
       const { data: existingTodayReport } = await supabase
         .from('leave_requests') 
         .select('id')
         .eq('employee_id', employee.id)
         .eq('status', 'APPROVED')
-        .lte('start_date', startOfDay)
-        .gte('end_date', startOfDay)
+        .lte('start_date', startOfDayTrt)
+        .gte('end_date', startOfDayTrt)
         .limit(1)
         .maybeSingle();
 
@@ -112,9 +140,6 @@ export async function processAttendanceScan(
         };
       }
 
-      // 15 Dakika Kuralı (onTime Lojiği)
-      const attendanceStatus = 'ON_TIME'; 
-      
       const { error: insertError } = await supabase
         .from('attendance')
         .insert({
@@ -122,7 +147,7 @@ export async function processAttendanceScan(
           branch_id: activeBranchId,
           check_in_time: actualTime,
           rounded_check_in: roundedTimeIso,
-          status: attendanceStatus
+          status: 'ON_TIME'
         });
 
       if (insertError) throw insertError;
@@ -137,13 +162,13 @@ export async function processAttendanceScan(
     // MESAİ ÇIKIŞ (OUT) OPERASYONU
     // ==========================================
     if (actionType === 'OUT') {
-      // ÇIKIŞ LOJİĞİ DÜZELTMESİ: Sadece BUGÜN atılmış ve çıkışı yapılmamış kaydı bul.
+      
       const { data: activeRecord } = await supabase
         .from('attendance')
         .select('id, rounded_check_in')
         .eq('employee_id', employee.id)
-        .gte('check_in_time', startOfDay)
         .is('check_out_time', null)
+        .lt('check_in_time', startOfTomorrowTrt) // İleri tarihli izinleri yanlışlıkla "açık kayıt" sanmasını engeller
         .order('check_in_time', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -151,19 +176,15 @@ export async function processAttendanceScan(
       if (!activeRecord) {
         return { 
           success: false, 
-          message: `HATA: ${employee.full_name.toUpperCase()} İÇİN BUGÜN AÇIK MESAİ KAYDI BULUNAMADI` 
+          message: `HATA: ${employee.full_name.toUpperCase()} İÇİN AÇIK MESAİ KAYDI BULUNAMADI` 
         };
       }
 
-      // --- WMS PDKS MATEMATİK MOTORU ---
       const checkInDate = new Date(activeRecord.rounded_check_in);
       const diffInMilliseconds = roundedTime.getTime() - checkInDate.getTime();
       const totalHoursRounded = diffInMilliseconds / (1000 * 60 * 60);
 
-      // İş Kuralı: Mesai 5 saatin üstündeyse 1 saat mola düş, değilse 0
       const breakHours = totalHoursRounded > 5 ? 1 : 0;
-      
-      // Net Çalışma Saati = Yuvarlanmış Çıkış - Yuvarlanmış Giriş - Mola Saati
       const netWorkingHours = Math.max(0, totalHoursRounded - breakHours);
 
       const { error: updateError } = await supabase
