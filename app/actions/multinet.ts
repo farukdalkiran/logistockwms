@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 export interface MultinetRecord {
   employeeId: string;
   fullName: string;
-  baseDays: number;         // İlgili ayın toplam hafta içi hedef günü (Sabit)
+  baseDays: number;
   workedDays: number;
   extraDays: number;
   deductedDays: number;
@@ -26,19 +26,29 @@ export async function getMultinetCalculations(
   const today = new Date(new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" }));
   
   const isCurrentMonth = today.getFullYear() === year && (today.getMonth() + 1) === month;
+  
+  // GELECEK AY KONTROLÜ (Henüz yaşanmamış aylar için)
+  const isFutureMonth = (year > today.getFullYear()) || (year === today.getFullYear() && month > (today.getMonth() + 1));
 
-  // 1. İlgili ayın toplam hafta içi gün sayısını (Hedef Gün) tam olarak hesapla
-  const daysInMonth = new Date(year, month, 0).getDate();
+  // HEDEF AY LOJİĞİ (Bir sonraki ayın hesaplanması)
+  const nextMonth = month === 12 ? 1 : month + 1;
+  const nextYear = month === 12 ? year + 1 : year;
+
+  // 1. BİR SONRAKİ ayın (Hedef Ay) toplam hafta içi gün sayısını hesapla
+  const daysInNextMonth = new Date(nextYear, nextMonth, 0).getDate();
   let baseDays = 0;
-  for (let d = 1; d <= daysInMonth; d++) {
-    const date = new Date(year, month - 1, d);
+  for (let d = 1; d <= daysInNextMonth; d++) {
+    const date = new Date(nextYear, nextMonth - 1, d);
     if (date.getDay() !== 0 && date.getDay() !== 6) {
       baseDays++;
     }
   }
 
-  // 2. Şubedeki aktif personelleri çek
-  let empQuery = supabase.from("employees").select("id, full_name").eq("is_active", true);
+  // 2. SEÇİLİ ayın toplam gün sayısı
+  const daysInCurrentMonth = new Date(year, month, 0).getDate();
+
+  // 3. Şubedeki aktif personelleri çek (İşe giriş tarihini de alıyoruz ki öncesini kesmeyelim)
+  let empQuery = supabase.from("employees").select("id, full_name, employment_date").eq("is_active", true);
   if (branchId && branchId !== "GLOBAL") {
     empQuery = empQuery.eq("branch_id", branchId);
   }
@@ -47,11 +57,18 @@ export async function getMultinetCalculations(
   if (empError || !employees || employees.length === 0) return [];
 
   const employeeIds = employees.map(emp => emp.id);
+  
+  // PUANTAJ TARAMASI (Seçili ay için yapılır)
   const startDate = new Date(year, month - 1, 1).toISOString();
   
-  const endLimitDate = isCurrentMonth 
-    ? new Date(today.getFullYear(), today.getMonth(), today.getDate())
-    : new Date(year, month, 1);
+  // Eğer gelecek aysa puantaj taraması yapmanın anlamı yok ama yine de limiti ayarlıyoruz.
+  let endLimitDate = new Date(year, month, 1);
+  if (isCurrentMonth) {
+    endLimitDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  } else if (isFutureMonth) {
+    endLimitDate = new Date(year, month - 1, 1); // Gelecek aysa hiç tarama yapma
+  }
+  
   const endDate = endLimitDate.toISOString();
 
   const { data: attendance } = await supabase
@@ -87,7 +104,6 @@ export async function getMultinetCalculations(
       const dateKey = checkIn.toISOString().split('T')[0];
       processedDates.add(dateKey);
       
-      // İzin / Rapor statüsü kontrolü
       if (record.status && record.status.startsWith('LEAVE_')) {
         if (checkIn.getDay() !== 0 && checkIn.getDay() !== 6) {
           deductedDays += 1;
@@ -102,12 +118,9 @@ export async function getMultinetCalculations(
       const checkOut = new Date(record.check_out_time);
       const isWeekend = checkIn.getDay() === 0 || checkIn.getDay() === 6;
       
-      // Brüt süre hesabı (milisaniye cinsinden)
       const diffMs = checkOut.getTime() - checkIn.getTime();
       const grossHours = diffMs / (1000 * 60 * 60);
 
-      // Standart Mola Düşüşü: 10 saat ve üzeri çalışmalarda 1 saat mola düşülür
-      // (Eğer farklı bir mola kuralı varsa burası dinamikleştirilebilir)
       const breakHours = grossHours >= 6 ? 1.0 : 0.0;
       const netHours = Math.max(0, grossHours - breakHours);
 
@@ -118,14 +131,12 @@ export async function getMultinetCalculations(
         workedDays += 1;
       }
 
-      // 10 Saat Net Çalışma Aşımı Kontrolü (Mola düşüldükten sonra)
       if (netHours >= 10) {
         extraDays += 1;
-        details.push(`${checkIn.toLocaleDateString('tr-TR')} (10+ Saat Net Aşım, Brüt: ${grossHours.toFixed(1)}s, Mola: ${breakHours}s: +1)`);
+        details.push(`${checkIn.toLocaleDateString('tr-TR')} (10+ Saat Aşım: +1)`);
       }
     });
 
-    // Onaylı izinlerin işlenmesi
     const empLeaves = leaves?.filter(l => l.employee_id === emp.id) || [];
     empLeaves.forEach(leave => {
       const lStart = new Date(leave.start_date);
@@ -137,16 +148,33 @@ export async function getMultinetCalculations(
         if (!processedDates.has(dKey) && tempDate.getMonth() + 1 === month && tempDate.getDay() !== 0 && tempDate.getDay() !== 6) {
           deductedDays += 1;
           details.push(`${tempDate.toLocaleDateString('tr-TR')} (İzin: ${leave.type})`);
+          processedDates.add(dKey); // Aynı güne çift kesinti atmaması için
         }
         tempDate.setDate(tempDate.getDate() + 1);
       }
     });
 
-    // Geçmiş günlerde eksik çalışma tespiti
-    const checkDaysLimit = isCurrentMonth ? Math.max(0, today.getDate() - 1) : daysInMonth;
+    // SEÇİLİ AYA GÖRE Eksik Çalışma Kontrolü (Gelecek aylar için = 0)
+    let checkDaysLimit = 0;
+    if (isFutureMonth) {
+      checkDaysLimit = 0; // Henüz yaşanmamış aylarda eksik gün aranmaz
+    } else if (isCurrentMonth) {
+      checkDaysLimit = Math.max(0, today.getDate() - 1); // İçinde bulunduğumuz ayda düne kadar bakar
+    } else {
+      checkDaysLimit = daysInCurrentMonth; // Geçmiş aylarda tüm aya bakar
+    }
+
     let pastBaseDays = 0;
+    
+    // Personelin işe giriş tarihinden önceki günleri haksızca eksik saymamak için kalkan
+    const empStartDate = emp.employment_date ? new Date(emp.employment_date) : new Date(0);
+
     for (let d = 1; d <= checkDaysLimit; d++) {
       const date = new Date(year, month - 1, d);
+      
+      // Eğer bu tarih, personelin işe girdiği tarihten önceyse devamsızlık sayma
+      if (date < empStartDate) continue;
+
       if (date.getDay() !== 0 && date.getDay() !== 6) pastBaseDays++;
     }
 
