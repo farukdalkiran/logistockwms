@@ -11,6 +11,19 @@ import {
   deleteArasFile
 } from "@/app/actions/aras-integration";
 import ExcelUploadDrawer from "./ExcelUploadDrawer";
+import { 
+  Trash2, 
+  CheckCircle2, 
+  Download, 
+  UploadCloud, 
+  Activity, 
+  PackageCheck, 
+  PackageOpen, 
+  CalendarDays,
+  PackageSearch,
+  FileSpreadsheet,
+  AlertTriangle
+} from "lucide-react";
 
 interface ArasTrackingPanelProps {
   employeeId: string;
@@ -50,7 +63,6 @@ interface KargoFile {
 export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps) {
   const [isExcelOpen, setIsExcelOpen] = useState(false);
   const [isWipeModalOpen, setIsWipeModalOpen] = useState(false);
-  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
 
   const [files, setFiles] = useState<KargoFile[]>([]);
   const [selectedFileId, setSelectedFileId] = useState<string>("");
@@ -68,17 +80,9 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
 
   const deliveryRef = useRef<HTMLInputElement>(null);
   const trackingRef = useRef<HTMLInputElement>(null);
-  const profileMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchInitialData();
-    const handleClickOutside = (event: MouseEvent) => {
-      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
-        setIsProfileMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   useEffect(() => {
@@ -87,8 +91,8 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
   }, [selectedFileId]);
 
   useEffect(() => {
-    if (!isExcelOpen && !isWipeModalOpen && !activeGroup && !isProfileMenuOpen) deliveryRef.current?.focus();
-  }, [isExcelOpen, isWipeModalOpen, activeGroup, selectedFileId, isProfileMenuOpen]);
+    if (!isExcelOpen && !isWipeModalOpen && !activeGroup) deliveryRef.current?.focus();
+  }, [isExcelOpen, isWipeModalOpen, activeGroup, selectedFileId]);
 
   useEffect(() => {
     if (uiStatus === "success" || uiStatus === "error") {
@@ -102,7 +106,7 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     if (filesRes.success && filesRes.data) {
       setFiles(filesRes.data);
     }
-    await fetchStats("");
+    await fetchStats(selectedFileId);
   };
 
   const fetchStats = async (fileId: string) => {
@@ -130,6 +134,7 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     setTimeout(() => setCopiedField(null), 2000); 
   };
 
+  // 🚀 BARKOD MANTIĞI & OTOMATİK PROFİL SEÇİMİ
   const loadDeliveryData = async (targetDeliveryNo: string) => {
     setLoading(true);
     setUiStatus("idle");
@@ -139,8 +144,13 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
 
     if (result.success && result.data && result.data.length > 0) {
       const records = result.data as ShipmentData[];
-      const alreadyProcessed = records.find(r => r.is_processed_aras);
       
+      // CRITICAL: Eğer Global Moddaysa ve kayıt bulunduysa, otomatik olarak o dosyayı seç
+      if (!selectedFileId && records[0].file_id) {
+        setSelectedFileId(records[0].file_id);
+      }
+
+      const alreadyProcessed = records.find(r => r.is_processed_aras);
       const sdDocuments = records.map(r => r.sd_document).filter(Boolean);
       const uniqueSdDocuments = Array.from(new Set(sdDocuments));
       
@@ -205,17 +215,37 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     setTimeout(() => deliveryRef.current?.focus(), 50);
   };
 
-  const handleDeleteFile = async () => {
+  // DOSYA YÖNETİMİ & SİLME FONKSİYONLARI
+  const deleteSelectedFile = async () => {
+    if (!selectedFileId) return;
+    const currentFile = files.find(f => f.id === selectedFileId);
+    
+    const confirmDelete = window.confirm(`DİKKAT: "${currentFile?.filename}" isimli çalışma profili kalıcı olarak silinecektir. Onaylıyor musunuz?`);
+    if (!confirmDelete) return;
+
     setLoading(true);
     const result = await deleteArasFile(selectedFileId); 
     if (result.success) {
-      triggerFeedback("success", selectedFileId ? "ÇALIŞMA PROFİLİ SİLİNDİ!" : "TÜM VERİTABANI SIFIRLANDI!");
+      triggerFeedback("success", "PROFİL SİLİNDİ!");
+      setSelectedFileId("");
+      fetchInitialData();
+    } else {
+      triggerFeedback("error", "SİLME İŞLEMİ BAŞARISIZ!");
+    }
+    setLoading(false);
+  };
+
+  const handleGlobalWipe = async () => {
+    setLoading(true);
+    const result = await deleteArasFile(""); // Boş gönderildiğinde global wipe
+    if (result.success) {
+      triggerFeedback("success", "TÜM VERİTABANI SIFIRLANDI!");
       setIsWipeModalOpen(false);
       handleCancel();
       setSelectedFileId("");
       fetchInitialData();
     } else {
-      triggerFeedback("error", "SİLME İŞLEMİ BAŞARISIZ!");
+      triggerFeedback("error", "SIFIRLAMA BAŞARISIZ!");
     }
     setLoading(false);
   };
@@ -239,8 +269,8 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     const headers = "Delivery Number;Aras Takip No\n";
     const rows = result.data.map((r: any) => `${r.delivery_number};${r.aras_tracking_number}`).join("\n");
     const fileName = selectedFileId 
-      ? `ARAS_ÇIKTI_PROFIL_${selectedFileId}_${new Date().toISOString().split("T")[0]}.csv` 
-      : `ARAS_ÇIKTI_TUMU_${new Date().toISOString().split("T")[0]}.csv`;
+      ? `ARAS_CIKTI_PROFIL_${selectedFileId}_${new Date().toISOString().split("T")[0]}.csv` 
+      : `ARAS_CIKTI_TUMU_${new Date().toISOString().split("T")[0]}.csv`;
     
     downloadBlob("\uFEFF" + headers + rows, fileName);
   };
@@ -302,351 +332,332 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
       title="Kopyala"
     >
       {copiedField === fieldId ? (
-        <svg className="w-5 h-5 text-green-600 hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7"></path></svg>
+        <CheckCircle2 className="w-5 h-5 text-green-600 hover:text-white" />
       ) : (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
       )}
     </button>
   );
 
-  const selectedFileName = selectedFileId ? files.find(f => f.id === selectedFileId)?.filename : "TÜM DOSYALARDA ÇALIŞ (GLOBAL)";
   const progressPercent = stats.totalRecords > 0 ? Math.round((stats.processed / stats.totalRecords) * 100) : 0;
-
-  // Dairesel animasyon için SVG hesaplamaları
-  const radius = 60;
+  const radius = 34;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (progressPercent / 100) * circumference;
 
   return (
     <>
-      <div className="w-full max-w-7xl mx-auto flex flex-col gap-4 sm:gap-6 px-3 sm:px-0 text-slate-800 pb-12 font-['Quicksand']">
+      <div className="w-full flex flex-col gap-6 pb-12 font-['Quicksand'] animate-in fade-in duration-300">
         
-        {/* HERO HEADER - Mobil Uyumlu & Hafif Rounded */}
-        <div className="w-full bg-white border border-slate-200 border-l-4 border-l-[#dc3545] rounded-md p-4 sm:p-5 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 sm:gap-6 shadow-sm">
-          <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-5 w-full lg:w-auto">
-            <div className="w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-md border border-slate-200 bg-slate-50 relative overflow-hidden hidden sm:block">
-              <img 
-                src="https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExdmx4cjJodGhpM2VlbzRlcmZreGQxbHc5cHNjNnlpbDJycXJ4MGg0aCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/26DOM7YFBRsv7hYze/giphy.gif" 
-                alt="Lego Header" 
-                className="w-full h-full object-cover opacity-90"
-              />
+        {/* 1. DARK-INDUSTRIAL KOMUTA MERKEZİ BAŞLIĞI */}
+        <div className="bg-slate-900 rounded-md p-5 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-5 shadow-lg border-b-4 border-[#dc3545]">
+          
+          <div className="flex items-center gap-4">
+            <div className="bg-[#dc3545]/20 p-3 rounded-md border border-[#dc3545]/30">
+              <PackageSearch className="text-[#dc3545] w-6 h-6" />
+            </div>
+            <div>
+              <h1 className="text-xl sm:text-2xl font-black text-white tracking-widest uppercase flex items-center gap-2">
+                EKSİK PARÇA <span className="text-[#dc3545]">B2C</span>
+              </h1>
+              <p className="text-[10px] sm:text-xs text-slate-400 font-bold uppercase tracking-widest">
+                Kargo Modülü - Hızlı Barkod Eşleştirme
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full xl:w-auto">
+            {/* Native Select ile Profil Seçimi (Z-index hatası yaratmaz, endüstriyel durur) */}
+            <div className="relative flex-1 sm:w-72 xl:w-80">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <FileSpreadsheet className="w-4 h-4 text-slate-400" />
+              </div>
+              <select
+                value={selectedFileId}
+                onChange={(e) => setSelectedFileId(e.target.value)}
+                className="block w-full pl-10 pr-10 py-3 bg-slate-800 border border-slate-700 text-white text-xs font-bold uppercase tracking-widest rounded-md focus:outline-none focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] appearance-none cursor-pointer transition-colors"
+              >
+                <option value="">TÜM DOSYALARDA ÇALIŞ (GLOBAL)</option>
+                {files.map(f => (
+                  <option key={f.id} value={f.id}>{f.filename}</option>
+                ))}
+              </select>
+              <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+              </div>
             </div>
 
-            <div className="flex flex-col justify-center min-w-0 w-full lg:w-auto">
-              <div className="flex flex-wrap items-center justify-between sm:justify-start gap-3 mb-3">
-                <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight uppercase truncate">
-                  EKSİK PARÇA <span className="text-[#dc3545]">B2C</span>
-                </h1>
-                <span className="bg-slate-100 text-slate-700 text-[10px] px-3 py-1.5 uppercase tracking-widest font-bold rounded-sm">
-                  KARGO MODÜLÜ
-                </span>
+            {/* Seçili Dosyayı Silme Butonu (Sadece dosya seçiliyse görünür) */}
+            {selectedFileId && (
+              <button 
+                onClick={deleteSelectedFile}
+                className="h-11 px-4 bg-slate-800 hover:bg-red-900/50 text-[#dc3545] border border-slate-700 hover:border-[#dc3545]/50 rounded-md flex items-center justify-center gap-2 text-[11px] font-bold uppercase tracking-widest transition-colors shadow-sm shrink-0"
+                title="Seçili Profili Sil"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span className="hidden sm:inline">PROFİLİ SİL</span>
+              </button>
+            )}
+
+            {/* Yeni Yükleme Butonu */}
+            <button 
+              onClick={() => setIsExcelOpen(true)}
+              className="h-11 px-5 bg-[#dc3545] hover:bg-red-700 text-white rounded-md flex items-center justify-center gap-2 text-[11px] font-bold uppercase tracking-widest transition-colors shadow-sm shrink-0"
+            >
+              <UploadCloud className="w-4 h-4" />
+              YENİ YÜKLE
+            </button>
+          </div>
+        </div>
+
+        {/* 2. DASHBOARD VE ÇIKTI BÖLÜMÜ (Yatay Grid) */}
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+          
+          {/* İstatistikler */}
+          <div className="col-span-1 xl:col-span-9 grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="bg-white border border-slate-200 rounded-md p-3 flex items-center gap-4 shadow-sm relative overflow-hidden group">
+              <div className="relative w-16 h-16 flex items-center justify-center shrink-0">
+                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 80 80">
+                  <circle cx="40" cy="40" r={radius} stroke="currentColor" strokeWidth="8" fill="transparent" className="text-slate-100" />
+                  <circle cx="40" cy="40" r={radius} stroke="currentColor" strokeWidth="8" fill="transparent" strokeDasharray={circumference} strokeDashoffset={strokeDashoffset} strokeLinecap="round" className="text-[#dc3545] transition-all duration-1000 ease-out" />
+                </svg>
+                <div className="absolute flex flex-col items-center justify-center">
+                  <span className="text-xs font-black text-slate-800">%{progressPercent}</span>
+                </div>
               </div>
-              
-              {/* BATCH PROFİL SEÇİCİ */}
-              <div className="relative w-full sm:w-[400px]" ref={profileMenuRef}>
-                <button 
-                  onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
-                  className="w-full h-12 bg-slate-50 hover:bg-slate-100 border border-slate-200 focus:ring-2 focus:ring-[#dc3545]/20 focus:border-[#dc3545] rounded-md text-[12px] sm:text-[13px] font-semibold text-slate-700 flex items-center justify-between px-4 transition-all outline-none"
-                >
-                  <div className="flex items-center gap-2 truncate">
-                    <svg className="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
-                    <span className="truncate">{selectedFileName}</span>
-                  </div>
-                  <svg className={`w-4 h-4 text-slate-500 transition-transform duration-300 shrink-0 ${isProfileMenuOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                </button>
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">İlerleme</span>
+                <span className="text-sm font-black text-slate-800">DURUM</span>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-md p-4 border border-slate-200 shadow-sm flex flex-col relative overflow-hidden group">
+              <div className="absolute right-0 top-0 w-12 h-12 bg-slate-50 rounded-bl-full -z-10 group-hover:scale-110 transition-transform"></div>
+              <div className="flex items-center gap-2 text-slate-500 mb-1">
+                <Activity className="w-3.5 h-3.5" />
+                <span className="text-[9px] font-bold uppercase tracking-widest">Toplam Kayıt</span>
+              </div>
+              <span className="text-xl font-black text-slate-800">{stats.totalRecords.toLocaleString("tr-TR")}</span>
+            </div>
+
+            <div className="bg-white rounded-md p-4 border border-slate-200 shadow-sm flex flex-col relative overflow-hidden group">
+              <div className="absolute right-0 top-0 w-12 h-12 bg-green-50 rounded-bl-full -z-10 group-hover:scale-110 transition-transform"></div>
+              <div className="flex items-center gap-2 text-green-600 mb-1">
+                <PackageCheck className="w-3.5 h-3.5" />
+                <span className="text-[9px] font-bold uppercase tracking-widest">İşlenen</span>
+              </div>
+              <span className="text-xl font-black text-slate-800">{stats.processed.toLocaleString("tr-TR")}</span>
+            </div>
+
+            <div className="bg-white rounded-md p-4 border border-slate-200 shadow-sm flex flex-col relative overflow-hidden group">
+              <div className="absolute right-0 top-0 w-12 h-12 bg-orange-50 rounded-bl-full -z-10 group-hover:scale-110 transition-transform"></div>
+              <div className="flex items-center gap-2 text-orange-500 mb-1">
+                <PackageOpen className="w-3.5 h-3.5" />
+                <span className="text-[9px] font-bold uppercase tracking-widest">Kalan İşlem</span>
+              </div>
+              <span className="text-xl font-black text-slate-800">{stats.remaining.toLocaleString("tr-TR")}</span>
+            </div>
+
+            <div className="bg-white rounded-md p-4 border border-slate-200 shadow-sm flex flex-col relative overflow-hidden group">
+              <div className="absolute right-0 top-0 w-12 h-12 bg-blue-50 rounded-bl-full -z-10 group-hover:scale-110 transition-transform"></div>
+              <div className="flex items-center gap-2 text-blue-500 mb-1">
+                <CalendarDays className="w-3.5 h-3.5" />
+                <span className="text-[9px] font-bold uppercase tracking-widest">Bugün (İşlem)</span>
+              </div>
+              <span className="text-xl font-black text-slate-800">{stats.today.toLocaleString("tr-TR")}</span>
+            </div>
+          </div>
+
+          {/* Çıktı İşlemleri & Sıfırlama */}
+          <div className="col-span-1 xl:col-span-3 flex flex-col gap-3 justify-center">
+            <div className="grid grid-cols-2 gap-3">
+              <button 
+                onClick={exportTwoColumnExcel}
+                className="h-10 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-md flex justify-center items-center gap-2 text-[10px] font-bold uppercase tracking-widest transition-colors shadow-sm"
+              >
+                <Download className="w-3.5 h-3.5" />
+                2 KOLON ÇIKTI
+              </button>
+              <button 
+                onClick={exportExactOriginalExcel}
+                className="h-10 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-md flex justify-center items-center gap-2 text-[10px] font-bold uppercase tracking-widest transition-colors shadow-sm"
+              >
+                <Download className="w-3.5 h-3.5" />
+                TAM ÇIKTI
+              </button>
+            </div>
+            <button 
+              onClick={() => setIsWipeModalOpen(true)}
+              className="h-10 w-full bg-red-50 hover:bg-red-100 text-[#dc3545] border border-red-200 rounded-md flex justify-center items-center gap-2 text-[10px] font-bold uppercase tracking-widest transition-colors shadow-sm"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              TÜM VERİTABANINI SIFIRLA
+            </button>
+          </div>
+        </div>
+
+        {/* 3. İŞLEM BÖLGESİ (BARKOD OKUMA) */}
+        <div className={`border transition-all duration-300 p-5 sm:p-8 flex flex-col gap-6 rounded-md ${getContainerStyles()} w-full min-w-0 bg-white`}>
+          
+          {statusMessage && (
+            <div className={`p-4 text-sm font-bold uppercase tracking-widest border animate-in fade-in rounded-md break-words shadow-sm ${
+              uiStatus === "error" ? "bg-red-50 text-red-700 border-red-200" :
+              uiStatus === "update" ? "bg-blue-50 text-blue-700 border-blue-200" :
+              uiStatus === "warning" ? "bg-orange-50 text-orange-700 border-orange-200" :
+              "bg-green-50 text-green-700 border-green-200"
+            }`}>
+              {statusMessage}
+            </div>
+          )}
+
+          {/* ADIM 1: SİPARİŞ / DELIVERY NO */}
+          <div className={`transition-opacity duration-300 ${activeGroup ? "opacity-40 pointer-events-none" : "opacity-100"} w-full`}>
+            <div className="flex items-center gap-3 mb-3">
+              <span className="flex items-center justify-center w-6 h-6 rounded-md bg-slate-900 text-white text-xs font-bold">1</span>
+              <label className="text-sm font-bold text-slate-700 uppercase tracking-widest">
+                SİPARİŞ VEYA DELIVERY NO
+              </label>
+            </div>
+            <form onSubmit={handleDeliveryScan} className="flex flex-col sm:flex-row gap-3 w-full">
+              <input
+                ref={deliveryRef}
+                type="text"
+                value={deliveryNo}
+                onChange={(e) => setDeliveryNo(e.target.value)}
+                disabled={loading || activeGroup !== null}
+                className="flex-1 h-14 bg-slate-50 border border-slate-200 px-5 py-3 text-lg font-bold  text-slate-900 rounded-md focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#dc3545]/20 focus:border-[#dc3545] disabled:bg-slate-100 uppercase placeholder:text-slate-400 transition-all"
+                placeholder={selectedFileId ? "Sadece seçili dosyada ara..." : "Barkod okut veya yaz (Otomatik dosya seçimi aktiftir)..."}
+                autoComplete="off"
+              />
+              <button 
+                type="submit" 
+                disabled={loading || !deliveryNo.trim() || activeGroup !== null}
+                className="w-full sm:w-48 h-14 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm uppercase tracking-widest rounded-md transition-colors shadow-sm"
+              >
+                SORGULA
+              </button>
+            </form>
+          </div>
+
+          {/* ADIM 2: AKTİF SİPARİŞ DETAYLARI & EŞLEŞTİRME */}
+          {activeGroup && (
+            <div className="flex flex-col gap-0 animate-in slide-in-from-bottom-4 fade-in duration-300 bg-white border border-slate-200 shadow-sm rounded-md w-full min-w-0 mt-2 overflow-hidden">
+              <div className={`h-1.5 w-full ${activeGroup.isUpdateMode ? 'bg-blue-500' : 'bg-[#dc3545]'}`}></div>
+
+              {/* KPI HEADER */}
+              <div className="bg-slate-50/50 border-b border-slate-100 p-4 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+                <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-md px-4 py-2 shrink-0 shadow-sm">
+                  <span className="bg-slate-100 text-slate-900 px-3 py-1 font-black text-lg rounded-sm">{activeGroup.count}</span>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-tight">KALEM<br/>SİPARİŞ</span>
+                </div>
                 
-                {isProfileMenuOpen && (
-                  <div className="absolute top-full left-0 mt-2 w-full bg-white border border-slate-200 rounded-md shadow-xl z-50 animate-in fade-in slide-in-from-top-2 duration-200 max-h-72 overflow-y-auto">
-                    <div className="p-3 border-b border-slate-100 bg-slate-50 rounded-t-md">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Çalışma Profilini Seçin</span>
+                {activeGroup.sdDocumentsMatch ? (
+                  <div className="flex-1 flex items-center gap-3 bg-green-50/50 border border-green-200 rounded-md px-4 py-3">
+                    <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest truncate mb-0.5">SD DOCUMENT (TAM EŞLEŞME)</p>
+                      <p className="text-sm font-semibold font-mono text-green-800 truncate">{activeGroup.uniqueSdDocuments[0] || 'KOD YOK'}</p>
                     </div>
-                    <button 
-                      onClick={() => { setSelectedFileId(""); setIsProfileMenuOpen(false); }}
-                      className={`w-full text-left px-5 py-4 text-xs font-bold uppercase transition-colors hover:bg-slate-50 border-b border-slate-100 ${!selectedFileId ? 'text-[#dc3545] bg-red-50/50' : 'text-slate-700'}`}
-                    >
-                      TÜM DOSYALARDA ÇALIŞ (GLOBAL MOD)
-                    </button>
-                    {files.map(f => (
-                      <button 
-                        key={f.id}
-                        onClick={() => { setSelectedFileId(f.id); setIsProfileMenuOpen(false); }}
-                        className={`w-full text-left px-5 py-3 text-xs font-medium transition-colors hover:bg-slate-50 border-b border-slate-100 group ${selectedFileId === f.id ? 'bg-slate-50 text-[#dc3545]' : 'text-slate-600'}`}
-                      >
-                        <div className="truncate text-sm">{f.filename}</div>
-                        <div className={`text-[10px] mt-1 ${selectedFileId === f.id ? 'text-[#dc3545]/70' : 'text-slate-400'}`}>Yüklenme: {new Date(f.created_at).toLocaleString('tr-TR')}</div>
-                      </button>
-                    ))}
+                  </div>
+                ) : (
+                  <div className="flex-1 flex items-center gap-3 bg-orange-50/50 border border-orange-200 rounded-md px-4 py-3">
+                    <AlertTriangle className="w-5 h-5 text-orange-500 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold text-orange-600 uppercase tracking-widest truncate mb-0.5">FARKLI SD KODLARI İÇERİYOR</p>
+                      <p className="text-xs font-semibold font-mono text-orange-800 break-all">{activeGroup.uniqueSdDocuments.join(', ')}</p>
+                    </div>
                   </div>
                 )}
               </div>
-            </div>
-          </div>
-        </div>
 
-        {/* AKSİYON BUTONLARI - Mobil Uyumlu Grid/Flex */}
-        <div className="grid grid-cols-1 sm:flex sm:flex-wrap items-center sm:justify-end gap-3 w-full shrink-0">
-          <button 
-            onClick={() => setIsWipeModalOpen(true)}
-            className="w-full sm:w-auto h-11 bg-white hover:bg-red-50 text-[#dc3545] px-4 sm:px-5 font-bold text-[11px] uppercase tracking-widest transition-colors flex justify-center items-center gap-2 border border-red-200 rounded-md sm:mr-auto shadow-sm"
-          >
-            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-            <span>{selectedFileId ? "DOSYAYI SİL" : "TÜMÜNÜ SIFIRLA"}</span>
-          </button>
-          
-          <button 
-            onClick={() => setIsExcelOpen(true)}
-            className="w-full sm:w-auto h-11 bg-slate-900 hover:bg-slate-800 text-white px-4 sm:px-5 font-bold text-[11px] uppercase tracking-widest transition-colors flex justify-center items-center gap-2 rounded-md shadow-sm"
-          >
-            <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1h16v-1M12 4v10m-4-4l4 4 4-4"></path></svg>
-            YENİ PROFİL YÜKLE
-          </button>
-          
-          <div className="grid grid-cols-2 sm:flex gap-3 w-full sm:w-auto">
-            <button 
-              onClick={exportTwoColumnExcel}
-              className="w-full sm:w-auto h-11 bg-white hover:bg-slate-50 text-[#dc3545] px-3 sm:px-5 font-bold text-[10px] sm:text-[11px] uppercase tracking-widest transition-colors flex justify-center items-center gap-2 border border-slate-200 rounded-md shadow-sm"
-            >
-              <svg className="w-4 h-4 shrink-0 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-              ÇIKTI (2 KOLON)
-            </button>
-            
-            <button 
-              onClick={exportExactOriginalExcel}
-              className="w-full sm:w-auto h-11 bg-white hover:bg-slate-50 text-slate-700 px-3 sm:px-5 font-bold text-[10px] sm:text-[11px] uppercase tracking-widest transition-colors flex justify-center items-center gap-2 border border-slate-200 rounded-md shadow-sm"
-            >
-              <svg className="w-4 h-4 shrink-0 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
-              ÇIKTI (TAM ŞABLON)
-            </button>
-          </div>
-        </div>
-
-        <div className="w-full grid grid-cols-1 xl:grid-cols-12 gap-4 sm:gap-6 items-start">
-          
-          {/* SOL KOLON: AKTİF BARKOD İŞLEM BÖLGESİ */}
-          <div className={`col-span-1 xl:col-span-8 border transition-all duration-300 p-4 sm:p-6 lg:p-8 flex flex-col gap-6 rounded-md ${getContainerStyles()} w-full min-w-0 bg-white`}>
-            
-            {statusMessage && (
-              <div className={`p-4 text-sm font-bold uppercase tracking-widest border animate-in fade-in rounded-md break-words shadow-sm ${
-                uiStatus === "error" ? "bg-red-50 text-red-700 border-red-200" :
-                uiStatus === "update" ? "bg-blue-50 text-blue-700 border-blue-200" :
-                uiStatus === "warning" ? "bg-orange-50 text-orange-700 border-orange-200" :
-                "bg-green-50 text-green-700 border-green-200"
-              }`}>
-                {statusMessage}
-              </div>
-            )}
-
-            {/* ADIM 1: SİPARİŞ / DELIVERY NO */}
-            <div className={`transition-opacity duration-300 ${activeGroup ? "opacity-40 pointer-events-none" : "opacity-100"} w-full`}>
-              <div className="flex items-center gap-3 mb-3">
-                <span className="flex items-center justify-center w-6 h-6 rounded-md bg-slate-900 text-white text-xs font-bold">1</span>
-                <label className="text-sm font-bold text-slate-700 uppercase tracking-widest">
-                  SİPARİŞ VEYA DELIVERY NO
-                </label>
-              </div>
-              <form onSubmit={handleDeliveryScan} className="flex flex-col sm:flex-row gap-3 w-full">
-                <input
-                  ref={deliveryRef}
-                  type="text"
-                  value={deliveryNo}
-                  onChange={(e) => setDeliveryNo(e.target.value)}
-                  disabled={loading || activeGroup !== null}
-                  className="flex-1 h-12 sm:h-14 bg-slate-50 border border-slate-200 px-4 sm:px-5 text-base sm:text-lg font-bold font-mono text-slate-900 rounded-md focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#dc3545]/20 focus:border-[#dc3545] disabled:bg-slate-100 uppercase placeholder:text-slate-400 placeholder:font-sans transition-all"
-                  placeholder={selectedFileId ? "Sadece seçili dosyada ara..." : "Barkod okut veya yaz..."}
-                  autoComplete="off"
-                />
-                <button 
-                  type="submit" 
-                  disabled={loading || !deliveryNo.trim() || activeGroup !== null}
-                  className="w-full sm:w-40 h-12 sm:h-14 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm uppercase tracking-widest rounded-md transition-colors shadow-sm"
-                >
-                  SORGULA
-                </button>
-              </form>
-            </div>
-
-            {/* ADIM 2: AKTİF SİPARİŞ DETAYLARI & EŞLEŞTİRME */}
-            {activeGroup && (
-              <div className="flex flex-col gap-0 animate-in slide-in-from-bottom-4 fade-in duration-300 bg-white border border-slate-200 shadow-sm rounded-md w-full min-w-0 mt-2 overflow-hidden">
-                <div className={`h-1.5 w-full ${activeGroup.isUpdateMode ? 'bg-blue-500' : 'bg-[#dc3545]'}`}></div>
-
-                {/* KPI HEADER */}
-                <div className="bg-slate-50/50 border-b border-slate-100 p-4 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
-                  <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-md px-4 py-2 shrink-0 shadow-sm">
-                    <span className="bg-slate-100 text-slate-900 px-3 py-1 font-black text-lg rounded-sm">{activeGroup.count}</span>
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-tight">KALEM<br/>SİPARİŞ</span>
+              {/* INFO BOARD */}
+              <div className="p-5 sm:p-6 w-full border-b border-slate-100">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-6 w-full min-w-0">
+                  <div className="flex flex-col min-w-0 gap-5">
+                    <div className="flex flex-col gap-1.5">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ALICI AD SOYAD</p>
+                      <div className="flex items-stretch bg-slate-50 border border-slate-200 rounded-md">
+                        <span className="flex-1 flex items-center text-sm font-bold text-slate-800 uppercase truncate px-4 py-2.5">{activeGroup.primary.customer_name}</span>
+                        <CopyIcon fieldId="name" textToCopy={activeGroup.primary.customer_name} />
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">İLETİŞİM BİLGİSİ</p>
+                      <div className="flex items-stretch bg-slate-50 border border-slate-200 rounded-md">
+                        <span className="flex-1 flex items-center text-sm font-semibold font-mono text-slate-700 truncate px-4 py-2.5">{activeGroup.primary.mobile_number}</span>
+                        <CopyIcon fieldId="phone" textToCopy={formatPhoneForCopy(activeGroup.primary.mobile_number)} />
+                      </div>
+                    </div>
                   </div>
-                  
-                  {activeGroup.sdDocumentsMatch ? (
-                    <div className="flex-1 flex items-center gap-3 bg-green-50/50 border border-green-200 rounded-md px-4 py-3">
-                      <svg className="w-5 h-5 text-green-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7"></path></svg>
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest truncate mb-0.5">SD DOCUMENT (TAM EŞLEŞME)</p>
-                        <p className="text-sm font-semibold font-mono text-green-800 truncate">{activeGroup.uniqueSdDocuments[0] || 'KOD YOK'}</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex-1 flex items-center gap-3 bg-orange-50/50 border border-orange-200 rounded-md px-4 py-3">
-                      <svg className="w-5 h-5 text-orange-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-bold text-orange-600 uppercase tracking-widest truncate mb-0.5">FARKLI SD KODLARI İÇERİYOR</p>
-                        <p className="text-xs font-semibold font-mono text-orange-800 break-all">{activeGroup.uniqueSdDocuments.join(', ')}</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
 
-                {/* INFO BOARD */}
-                <div className="p-4 sm:p-6 w-full border-b border-slate-100">
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-5 w-full min-w-0">
-                    <div className="flex flex-col min-w-0 gap-4">
-                      <div className="flex flex-col gap-1.5">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ALICI AD SOYAD</p>
-                        <div className="flex items-stretch bg-slate-50 border border-slate-200 rounded-md">
-                          <span className="flex-1 flex items-center text-xs sm:text-sm font-bold text-slate-800 uppercase truncate px-3 py-2">{activeGroup.primary.customer_name}</span>
-                          <CopyIcon fieldId="name" textToCopy={activeGroup.primary.customer_name} />
-                        </div>
-                      </div>
-                      <div className="flex flex-col gap-1.5">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">İLETİŞİM BİLGİSİ</p>
-                        <div className="flex items-stretch bg-slate-50 border border-slate-200 rounded-md">
-                          <span className="flex-1 flex items-center text-xs sm:text-sm font-semibold font-mono text-slate-700 truncate px-3 py-2">{activeGroup.primary.mobile_number}</span>
-                          <CopyIcon fieldId="phone" textToCopy={formatPhoneForCopy(activeGroup.primary.mobile_number)} />
-                        </div>
+                  <div className="flex flex-col min-w-0 gap-5">
+                    <div className="flex flex-col gap-1.5">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ŞEHİR / BÖLGE</p>
+                      <div className="flex items-stretch bg-slate-50 border border-slate-200 rounded-md">
+                        <span className="flex-1 flex items-center text-sm font-bold text-slate-800 uppercase truncate px-4 py-2.5">
+                          {activeGroup.primary.city} / {activeGroup.primary.region}
+                        </span>
+                        <CopyIcon fieldId="cityRegion" textToCopy={`${activeGroup.primary.city || ''} / ${activeGroup.primary.region || ''}`.trim()} />
                       </div>
                     </div>
-
-                    <div className="flex flex-col min-w-0 gap-4">
-                      <div className="flex flex-col gap-1.5">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ŞEHİR / BÖLGE</p>
-                        <div className="flex items-stretch bg-slate-50 border border-slate-200 rounded-md">
-                          <span className="flex-1 flex items-center text-xs sm:text-sm font-bold text-slate-800 uppercase truncate px-3 py-2">
-                            {activeGroup.primary.city} / {activeGroup.primary.region}
-                          </span>
-                          <CopyIcon fieldId="cityRegion" textToCopy={`${activeGroup.primary.city || ''} / ${activeGroup.primary.region || ''}`.trim()} />
-                        </div>
-                      </div>
-                      <div className="flex flex-col gap-1.5 h-full">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">AÇIK ADRES & POSTA KODU</p>
-                        <div className="flex items-stretch bg-slate-50 border border-slate-200 rounded-md flex-1">
-                          <span className="flex-1 text-xs font-semibold text-slate-600 uppercase leading-relaxed break-words px-3 py-2">
-                            {`${activeGroup.primary.street || ""} ${activeGroup.primary.street_2 || ""} - Posta Kodu: ${activeGroup.primary.postal_code || "YOK"} --DN: ${activeGroup.primary.delivery_number}`.trim()}
-                          </span>
-                          <div className="flex items-start">
-                            <CopyIcon fieldId="fullAddress" textToCopy={`${activeGroup.primary.street || ""} ${activeGroup.primary.street_2 || ""} - Posta Kodu: ${activeGroup.primary.postal_code || "YOK"} --DN: ${activeGroup.primary.delivery_number}`.trim()} />
-                          </div>
+                    <div className="flex flex-col gap-1.5 h-full">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">AÇIK ADRES & POSTA KODU</p>
+                      <div className="flex items-stretch bg-slate-50 border border-slate-200 rounded-md flex-1">
+                        <span className="flex-1 text-xs font-semibold text-slate-600 uppercase leading-relaxed break-words px-4 py-2.5">
+                          {`${activeGroup.primary.street || ""} ${activeGroup.primary.street_2 || ""} - Posta Kodu: ${activeGroup.primary.postal_code || "YOK"} --DN: ${activeGroup.primary.delivery_number}`.trim()}
+                        </span>
+                        <div className="flex items-start">
+                          <CopyIcon fieldId="fullAddress" textToCopy={`${activeGroup.primary.street || ""} ${activeGroup.primary.street_2 || ""} - Posta Kodu: ${activeGroup.primary.postal_code || "YOK"} --DN: ${activeGroup.primary.delivery_number}`.trim()} />
                         </div>
                       </div>
                     </div>
                   </div>
                 </div>
+              </div>
 
-                {/* ARAS KARGO INPUT */}
-                <div className={`${activeGroup.isUpdateMode ? 'bg-blue-50/30' : 'bg-slate-50/50'} p-4 sm:p-6 w-full`}>
-                  <div className="flex items-center gap-3 mb-4">
-                    <span className={`flex items-center justify-center w-6 h-6 rounded-md text-white text-xs font-bold shadow-sm ${activeGroup.isUpdateMode ? 'bg-blue-500' : 'bg-[#dc3545]'}`}>2</span>
-                    <label className={`text-sm font-bold uppercase tracking-widest ${activeGroup.isUpdateMode ? 'text-blue-700' : 'text-[#dc3545]'}`}>
-                      {activeGroup.isUpdateMode ? 'KARGO BARKODUNU GÜNCELLE' : 'ARAS KARGO BARKODUNU OKUT'}
-                    </label>
-                  </div>
-                  <form onSubmit={handleTrackingScan} className="flex flex-col sm:flex-row gap-3 w-full">
-                    <input
-                      ref={trackingRef}
-                      type="text"
-                      value={trackingNo}
-                      onChange={(e) => setTrackingNo(e.target.value)}
+              {/* ARAS KARGO INPUT */}
+              <div className={`${activeGroup.isUpdateMode ? 'bg-blue-50/30' : 'bg-slate-50/50'} p-5 sm:p-6 w-full`}>
+                <div className="flex items-center gap-3 mb-4">
+                  <span className={`flex items-center justify-center w-6 h-6 rounded-md text-white text-xs font-bold shadow-sm ${activeGroup.isUpdateMode ? 'bg-blue-500' : 'bg-[#dc3545]'}`}>2</span>
+                  <label className={`text-sm font-bold uppercase tracking-widest ${activeGroup.isUpdateMode ? 'text-blue-700' : 'text-[#dc3545]'}`}>
+                    {activeGroup.isUpdateMode ? 'KARGO BARKODUNU GÜNCELLE' : 'ARAS KARGO BARKODUNU OKUT'}
+                  </label>
+                </div>
+                <form onSubmit={handleTrackingScan} className="flex flex-col sm:flex-row gap-3 w-full">
+                  <input
+                    ref={trackingRef}
+                    type="text"
+                    value={trackingNo}
+                    onChange={(e) => setTrackingNo(e.target.value)}
+                    disabled={loading}
+                    className={`flex-1 h-14 bg-white border px-5 text-xl font-bold font-mono text-slate-900 rounded-md focus:outline-none focus:ring-2 uppercase placeholder:text-slate-300 transition-all shadow-sm ${activeGroup.isUpdateMode ? 'border-blue-300 focus:ring-blue-500/20 focus:border-blue-500' : 'border-slate-300 focus:ring-[#dc3545]/20 focus:border-[#dc3545]'}`}
+                    placeholder={activeGroup.isUpdateMode ? "Yeni barkod..." : "Kargo barkodu..."}
+                    autoComplete="off"
+                  />
+                  <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                    <button 
+                      type="submit" 
+                      disabled={loading || !trackingNo.trim()}
+                      className={`w-full sm:w-40 h-14 px-8 text-white font-bold text-sm uppercase tracking-widest transition-all rounded-md shadow-sm ${activeGroup.isUpdateMode ? 'bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300' : 'bg-[#dc3545] hover:bg-red-700 disabled:bg-red-300'}`}
+                    >
+                      {activeGroup.isUpdateMode ? 'GÜNCELLE' : 'KAYDET'}
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={handleCancel}
                       disabled={loading}
-                      className={`flex-1 h-12 sm:h-14 bg-white border px-4 sm:px-5 text-lg sm:text-xl font-bold font-mono text-slate-900 rounded-md focus:outline-none focus:ring-2 uppercase placeholder:text-slate-300 placeholder:font-sans transition-all shadow-sm ${activeGroup.isUpdateMode ? 'border-blue-300 focus:ring-blue-500/20 focus:border-blue-500' : 'border-slate-300 focus:ring-[#dc3545]/20 focus:border-[#dc3545]'}`}
-                      placeholder={activeGroup.isUpdateMode ? "Yeni barkod..." : "Kargo barkodu..."}
-                      autoComplete="off"
-                    />
-                    <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
-                      <button 
-                        type="submit" 
-                        disabled={loading || !trackingNo.trim()}
-                        className={`w-full sm:w-auto h-12 sm:h-14 px-6 sm:px-8 text-white font-bold text-sm uppercase tracking-widest transition-all rounded-md shadow-sm ${activeGroup.isUpdateMode ? 'bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300' : 'bg-[#dc3545] hover:bg-red-700 disabled:bg-red-300'}`}
-                      >
-                        {activeGroup.isUpdateMode ? 'GÜNCELLE' : 'KAYDET'}
-                      </button>
-                      <button 
-                        type="button"
-                        onClick={handleCancel}
-                        disabled={loading}
-                        className="w-full sm:w-auto h-12 sm:h-14 px-5 sm:px-6 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs uppercase tracking-widest transition-colors border border-slate-200 rounded-md shadow-sm"
-                      >
-                        İPTAL
-                      </button>
-                    </div>
-                  </form>
-                </div>
+                      className="w-full sm:w-auto h-14 px-6 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs uppercase tracking-widest transition-colors border border-slate-200 rounded-md shadow-sm"
+                    >
+                      İPTAL
+                    </button>
+                  </div>
+                </form>
               </div>
-            )}
-          </div>
-
-          {/* SAĞ KOLON: YENİ DAİRESEL İSTATİSTİK PANOSU */}
-          <div className="col-span-1 xl:col-span-4 flex flex-col w-full h-full">
-            <div className="bg-white shadow-sm border border-slate-200 rounded-md flex flex-col p-5 sm:p-6 items-center justify-center h-full relative overflow-hidden min-h-[350px]">
-              
-              <div className="absolute top-4 left-4 flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded-sm border border-slate-100">
-                <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                <span className="text-[9px] text-slate-500 font-bold tracking-widest uppercase">CANLI VERİ</span>
-              </div>
-
-              <h3 className="text-slate-800 font-bold text-sm uppercase tracking-widest mb-6 mt-4 text-center">
-                Süreç İlerleme Durumu
-              </h3>
-
-              {/* Dairesel Progress Chart */}
-              <div className="relative w-36 h-36 sm:w-40 sm:h-40 flex items-center justify-center mb-6">
-                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 160 160">
-                  <circle
-                    cx="80" cy="80" r={radius}
-                    stroke="currentColor" strokeWidth="10" fill="transparent"
-                    className="text-slate-100"
-                  />
-                  <circle
-                    cx="80" cy="80" r={radius}
-                    stroke="currentColor" strokeWidth="10" fill="transparent"
-                    strokeDasharray={circumference}
-                    strokeDashoffset={strokeDashoffset}
-                    strokeLinecap="round"
-                    className="text-[#03DF95] transition-all duration-1000 ease-out"
-                  />
-                </svg>
-                {/* Merkez Yüzde */}
-                <div className="absolute flex flex-col items-center justify-center">
-                  <span className="text-3xl sm:text-4xl font-black text-slate-800 font-mono tracking-tighter">{progressPercent}</span>
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">% Yüzde</span>
-                </div>
-              </div>
-
-              {/* İstatistik Grid */}
-              <div className="grid grid-cols-2 gap-3 w-full">
-                <div className="bg-slate-50 rounded-md p-3 sm:p-4 flex flex-col items-center justify-center border border-slate-100">
-                   <span className="text-[9px] sm:text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Toplam</span>
-                   <span className="text-lg sm:text-xl font-black font-mono text-slate-800">{stats.totalRecords}</span>
-                </div>
-                <div className="bg-green-50/50 rounded-md p-3 sm:p-4 flex flex-col items-center justify-center border border-green-100">
-                   <span className="text-[9px] sm:text-[10px] font-bold text-green-600 uppercase tracking-widest mb-1">İşlenen</span>
-                   <span className="text-lg sm:text-xl font-black font-mono text-green-600">{stats.processed}</span>
-                </div>
-                <div className="bg-orange-50/50 rounded-md p-3 sm:p-4 flex flex-col items-center justify-center border border-orange-100">
-                   <span className="text-[9px] sm:text-[10px] font-bold text-orange-600 uppercase tracking-widest mb-1">Kalan</span>
-                   <span className="text-lg sm:text-xl font-black font-mono text-orange-600">{stats.remaining}</span>
-                </div>
-                <div className="bg-blue-50/50 rounded-md p-3 sm:p-4 flex flex-col items-center justify-center border border-blue-100">
-                   <span className="text-[9px] sm:text-[10px] font-bold text-blue-600 uppercase tracking-widest mb-1">Bugün</span>
-                   <span className="text-lg sm:text-xl font-black font-mono text-blue-600">{stats.today}</span>
-                </div>
-              </div>
-
             </div>
-          </div>
-
+          )}
         </div>
       </div>
 
-      {/* MODALLAR (Daha az yuvarlatılmış) */}
+      {/* MODALLAR */}
       <ExcelUploadDrawer 
         isOpen={isExcelOpen} 
         onClose={() => {
@@ -661,30 +672,29 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
           <div className="bg-white shadow-2xl w-full max-w-lg rounded-md overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="bg-red-50 border-b border-red-100 p-5 sm:p-6 flex items-center gap-4">
               <div className="w-10 h-10 rounded-md bg-red-100 flex items-center justify-center shrink-0">
-                <svg className="w-5 h-5 text-[#dc3545]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                <Trash2 className="w-5 h-5 text-[#dc3545]" />
               </div>
               <h2 className="text-red-700 font-bold text-base sm:text-lg tracking-widest uppercase">
-                {selectedFileId ? "Çalışma Profilini Sil" : "Veritabanı Sıfırlama"}
+                Veritabanı Sıfırlama
               </h2>
             </div>
             <div className="p-6 sm:p-8">
               <p className="text-slate-800 font-bold text-base sm:text-lg mb-3">DİKKAT: Veriler kalıcı olarak yok edilecektir!</p>
               <p className="text-slate-500 text-xs sm:text-sm mb-6 sm:mb-8 leading-relaxed">
-                Bu işlem geri alınamaz. 
-                {selectedFileId ? " Sadece seçili dosyaya ait ham veriler ve kargo eşleştirmeleri silinecektir." : " Sisteme yüklenen TÜM Excel verileri ve yapılan kargo barkod eşleştirmeleri tamamen temizlenecektir."}
+                Bu işlem geri alınamaz. Sisteme yüklenen TÜM Excel verileri ve yapılan kargo barkod eşleştirmeleri tamamen temizlenecektir.
               </p>
               <div className="flex flex-col sm:flex-row gap-3">
                 <button 
-                  onClick={handleDeleteFile} 
+                  onClick={handleGlobalWipe} 
                   disabled={loading}
-                  className="flex-1 bg-[#dc3545] hover:bg-red-700 text-white font-bold h-12 uppercase tracking-widest rounded-md transition-all disabled:opacity-50 text-xs sm:text-sm"
+                  className="flex-1 bg-[#dc3545] hover:bg-red-700 text-white font-bold h-12 uppercase tracking-widest rounded-md transition-all disabled:opacity-50 text-xs sm:text-sm shadow-sm"
                 >
                   {loading ? "SİLİNİYOR..." : "EVET, ONAYLIYORUM"}
                 </button>
                 <button 
                   onClick={() => setIsWipeModalOpen(false)} 
                   disabled={loading}
-                  className="flex-1 bg-white hover:bg-slate-50 text-slate-700 font-bold h-12 uppercase tracking-widest border border-slate-200 rounded-md transition-colors text-xs sm:text-sm"
+                  className="flex-1 bg-white hover:bg-slate-50 text-slate-700 font-bold h-12 uppercase tracking-widest border border-slate-200 rounded-md transition-colors text-xs sm:text-sm shadow-sm"
                 >
                   İPTAL
                 </button>
