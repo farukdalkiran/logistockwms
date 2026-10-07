@@ -22,7 +22,15 @@ import {
   CalendarDays,
   PackageSearch,
   FileSpreadsheet,
-  AlertTriangle
+  AlertTriangle,
+  Copy,
+  MapPin,
+  User,
+  Phone,
+  Building2,
+  MapPinned,
+  Zap,
+  BarChart3
 } from "lucide-react";
 
 interface ArasTrackingPanelProps {
@@ -85,9 +93,9 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     fetchInitialData();
   }, []);
 
+  // Profil değiştiğinde dataları güncelle (Otomatik seçimlerde stats'ı da günceller)
   useEffect(() => {
     fetchStats(selectedFileId);
-    handleCancel(); 
   }, [selectedFileId]);
 
   useEffect(() => {
@@ -145,7 +153,9 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     if (result.success && result.data && result.data.length > 0) {
       const records = result.data as ShipmentData[];
       
-      // CRITICAL: Eğer Global Moddaysa ve kayıt bulunduysa, otomatik olarak o dosyayı seç
+      // HATA 1 ÇÖZÜMÜ: Global moddaysak ilk gelen datanın ait olduğu dosyayı otomatik seç.
+      // DİKKAT: Burada handleProfileChange (içinde iptal fonksiyonu barındıran) yerine, 
+      // SADECE state güncelliyoruz ki ekran SİLİNMESİN.
       if (!selectedFileId && records[0].file_id) {
         setSelectedFileId(records[0].file_id);
       }
@@ -206,6 +216,12 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     setLoading(false);
   };
 
+  // KULLANICI MANUEL OLARAK DROPDOWN'DAN SEÇİM YAPTIĞINDA ÇALIŞIR
+  const handleProfileChange = (newFileId: string) => {
+    setSelectedFileId(newFileId);
+    handleCancel(); // Sadece MANUEL seçimde ekranı temizle.
+  };
+
   const handleCancel = () => {
     setActiveGroup(null);
     setTrackingNo("");
@@ -237,7 +253,7 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
 
   const handleGlobalWipe = async () => {
     setLoading(true);
-    const result = await deleteArasFile(""); // Boş gönderildiğinde global wipe
+    const result = await deleteArasFile(""); 
     if (result.success) {
       triggerFeedback("success", "TÜM VERİTABANI SIFIRLANDI!");
       setIsWipeModalOpen(false);
@@ -308,14 +324,32 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     downloadBlob("\uFEFF" + headerRow + rows, fileName);
   };
 
-  const getContainerStyles = () => {
-    switch (uiStatus) {
-      case "success": return "bg-green-50/50 border-green-500 shadow-sm";
-      case "error": return "bg-red-50/50 border-red-500 shadow-sm";
-      case "update": return "bg-blue-50/50 border-blue-500 shadow-sm"; 
-      case "warning": return "bg-orange-50/50 border-orange-500 shadow-sm";
-      default: return "bg-white border-slate-200 shadow-sm";
+  // YARDIMCI FONKSİYONLAR
+  const splitName = (fullName: string | null) => {
+    if (!fullName) return { first: "", last: "" };
+    const parts = fullName.trim().split(" ");
+    if (parts.length === 1) return { first: parts[0], last: "" };
+    const last = parts.pop() || "";
+    const first = parts.join(" ");
+    return { first, last };
+  };
+
+  // HATA 2 ÇÖZÜMÜ: SAF MAHALLE AYRIŞTIRMA (MAH, MH, MAHALLESİ EKLERİNDEN ARINDIRILMIŞ)
+  const extractNeighborhood = (street1: string | null, street2: string | null) => {
+    const fullAddress = `${street1 || ""} ${street2 || ""}`.trim();
+    
+    // Grup 1 (match[1]) sadece mahalle ismini alır. Mah/Mh ekleri Grup 2'de (match[2]) dışarıda kalır.
+    const match = fullAddress.match(/([a-zA-ZçğıöşüÇĞİÖŞÜ0-9\s.-]+?)\s+(mah|mh|mahallesi)\b\.?/i);
+    
+    if (match && match[1]) {
+      let pureMahalle = match[1].trim(); 
+      // Regex hatası veya adres kirliliği önlemi: Eğer virgül veya çizgi varsa, sadece son parçasını temiz olarak al.
+      if (pureMahalle.includes(',')) {
+        pureMahalle = pureMahalle.split(',').pop()?.trim() || pureMahalle;
+      }
+      return pureMahalle.toUpperCase();
     }
+    return "MAHALLE BULUNAMADI";
   };
 
   const formatPhoneForCopy = (phone: string | null | undefined) => {
@@ -324,73 +358,104 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
     return idx !== -1 ? phone.substring(idx) : phone;
   };
 
-  const CopyIcon = ({ fieldId, textToCopy }: { fieldId: string, textToCopy: string }) => (
-    <button 
-      type="button"
-      onClick={() => handleCopy(textToCopy, fieldId)}
-      className="flex-shrink-0 inline-flex items-center justify-center w-10 h-10 bg-slate-50 hover:bg-[#dc3545] text-slate-500 hover:text-white border-l border-slate-200 hover:border-[#dc3545] transition-colors focus:outline-none rounded-r-md"
-      title="Kopyala"
-    >
-      {copiedField === fieldId ? (
-        <CheckCircle2 className="w-5 h-5 text-green-600 hover:text-white" />
-      ) : (
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-      )}
-    </button>
-  );
+  const getContainerStyles = () => {
+    switch (uiStatus) {
+      case "success": return "border-emerald-500 shadow-emerald-500/20 shadow-lg";
+      case "error": return "border-red-500 shadow-red-500/20 shadow-lg";
+      case "update": return "border-blue-500 shadow-blue-500/20 shadow-lg"; 
+      case "warning": return "border-amber-500 shadow-amber-500/20 shadow-lg";
+      default: return "border-slate-200 shadow-sm";
+    }
+  };
+
+  // Canlı ve Renkli CopyBox Bileşeni
+  const CopyBox = ({ fieldId, textToCopy, label, icon: Icon, theme }: { fieldId: string, textToCopy: string, label: string, icon: any, theme: 'blue' | 'emerald' | 'amber' | 'indigo' | 'rose' }) => {
+    const themes = {
+      blue: "bg-blue-50/50 text-blue-800 border-blue-200 hover:bg-blue-600 hover:text-white",
+      emerald: "bg-emerald-50/50 text-emerald-800 border-emerald-200 hover:bg-emerald-600 hover:text-white",
+      amber: "bg-amber-50/50 text-amber-900 border-amber-200 hover:bg-amber-600 hover:text-white",
+      indigo: "bg-indigo-50/50 text-indigo-800 border-indigo-200 hover:bg-indigo-600 hover:text-white",
+      rose: "bg-rose-50/50 text-rose-800 border-rose-200 hover:bg-rose-600 hover:text-white"
+    };
+
+    return (
+      <div className="flex flex-col gap-1.5 w-full">
+        <div className="flex items-center gap-1.5 opacity-80 pl-1">
+          <Icon className="w-4 h-4" />
+          <p className="text-[10px] font-bold uppercase tracking-widest">{label}</p>
+        </div>
+        <div className="flex items-stretch bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden group">
+          <span className="flex-1 flex items-center text-sm font-bold uppercase truncate px-4 py-2.5 text-slate-800 select-all">
+            {textToCopy || "-"}
+          </span>
+          <button 
+            type="button"
+            onClick={() => handleCopy(textToCopy, fieldId)}
+            className={`flex-shrink-0 inline-flex items-center justify-center w-14 border-l transition-all focus:outline-none ${themes[theme]}`}
+            title="Kopyala"
+          >
+            {copiedField === fieldId ? (
+              <CheckCircle2 className="w-5 h-5 animate-in zoom-in" />
+            ) : (
+              <Copy className="w-4 h-4 opacity-70 group-hover:opacity-100 transition-opacity" />
+            )}
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   const progressPercent = stats.totalRecords > 0 ? Math.round((stats.processed / stats.totalRecords) * 100) : 0;
-  const radius = 34;
-  const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (progressPercent / 100) * circumference;
 
   return (
     <>
       <div className="w-full flex flex-col gap-6 pb-12 font-['Quicksand'] animate-in fade-in duration-300">
         
-        {/* 1. DARK-INDUSTRIAL KOMUTA MERKEZİ BAŞLIĞI */}
-        <div className="bg-slate-900 rounded-md p-5 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-5 shadow-lg border-b-4 border-[#dc3545]">
+        {/* 1. VİBRANT (CANLI) KOMUTA MERKEZİ BAŞLIĞI */}
+        <div className="bg-slate-900 rounded-xl p-5 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 shadow-xl border-b-4 border-[#dc3545] relative overflow-hidden">
           
-          <div className="flex items-center gap-4">
-            <div className="bg-[#dc3545]/20 p-3 rounded-md border border-[#dc3545]/30">
-              <PackageSearch className="text-[#dc3545] w-6 h-6" />
+          {/* Dekoratif Arka Plan Çizgileri */}
+          <div className="absolute right-0 top-0 w-1/2 h-full bg-gradient-to-l from-slate-800/50 to-transparent pointer-events-none"></div>
+
+          <div className="flex items-center gap-4 relative z-10">
+            <div className="bg-gradient-to-br from-[#dc3545] to-red-700 p-3.5 rounded-lg shadow-lg shadow-red-900/50">
+              <PackageSearch className="text-white w-7 h-7" />
             </div>
             <div>
               <h1 className="text-xl sm:text-2xl font-black text-white tracking-widest uppercase flex items-center gap-2">
                 EKSİK PARÇA <span className="text-[#dc3545]">B2C</span>
               </h1>
-              <p className="text-[10px] sm:text-xs text-slate-400 font-bold uppercase tracking-widest">
-                Kargo Modülü - Hızlı Barkod Eşleştirme
+              <p className="text-[11px] text-slate-400 font-bold uppercase tracking-widest">
+                Akıllı Barkod Eşleştirme & Kargo Modülü
               </p>
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full xl:w-auto">
-            {/* Native Select ile Profil Seçimi (Z-index hatası yaratmaz, endüstriyel durur) */}
-            <div className="relative flex-1 sm:w-72 xl:w-80">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <FileSpreadsheet className="w-4 h-4 text-slate-400" />
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto relative z-10">
+            {/* YENİLENMİŞ VE STABİL DROPDOWN ALANI */}
+            <div className="relative flex-1 min-w-[280px]">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                <FileSpreadsheet className={`w-4 h-4 ${selectedFileId ? 'text-emerald-400' : 'text-slate-400'}`} />
               </div>
               <select
                 value={selectedFileId}
-                onChange={(e) => setSelectedFileId(e.target.value)}
-                className="block w-full pl-10 pr-10 py-3 bg-slate-800 border border-slate-700 text-white text-xs font-bold uppercase tracking-widest rounded-md focus:outline-none focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] appearance-none cursor-pointer transition-colors"
+                onChange={(e) => handleProfileChange(e.target.value)}
+                className={`block w-full pl-11 pr-10 py-3.5 bg-slate-800/80 backdrop-blur-md text-white text-xs font-bold uppercase tracking-widest rounded-lg focus:outline-none focus:ring-2 appearance-none cursor-pointer transition-all border ${selectedFileId ? 'border-emerald-500/50 focus:ring-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.15)]' : 'border-slate-700 focus:ring-[#dc3545]/50'}`}
               >
-                <option value="">TÜM DOSYALARDA ÇALIŞ (GLOBAL)</option>
+                <option value="">🌐 TÜM VERİTABANINDA ÇALIŞ</option>
                 {files.map(f => (
-                  <option key={f.id} value={f.id}>{f.filename}</option>
+                  <option key={f.id} value={f.id}>📄 {f.filename}</option>
                 ))}
               </select>
-              <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+              <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none">
                 <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
               </div>
             </div>
 
-            {/* Seçili Dosyayı Silme Butonu (Sadece dosya seçiliyse görünür) */}
             {selectedFileId && (
               <button 
                 onClick={deleteSelectedFile}
-                className="h-11 px-4 bg-slate-800 hover:bg-red-900/50 text-[#dc3545] border border-slate-700 hover:border-[#dc3545]/50 rounded-md flex items-center justify-center gap-2 text-[11px] font-bold uppercase tracking-widest transition-colors shadow-sm shrink-0"
+                className="h-[50px] px-4 bg-slate-800 hover:bg-red-950/50 text-red-400 border border-slate-700 hover:border-red-500/50 rounded-lg flex items-center justify-center gap-2 text-[11px] font-bold uppercase tracking-widest transition-all shadow-sm shrink-0"
                 title="Seçili Profili Sil"
               >
                 <Trash2 className="w-4 h-4" />
@@ -398,10 +463,9 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
               </button>
             )}
 
-            {/* Yeni Yükleme Butonu */}
             <button 
               onClick={() => setIsExcelOpen(true)}
-              className="h-11 px-5 bg-[#dc3545] hover:bg-red-700 text-white rounded-md flex items-center justify-center gap-2 text-[11px] font-bold uppercase tracking-widest transition-colors shadow-sm shrink-0"
+              className="h-[50px] px-6 bg-gradient-to-r from-[#dc3545] to-red-700 hover:from-red-600 hover:to-red-800 text-white rounded-lg flex items-center justify-center gap-2 text-[11px] font-bold uppercase tracking-widest transition-all shadow-lg shadow-red-900/30 shrink-0 border border-red-500/50"
             >
               <UploadCloud className="w-4 h-4" />
               YENİ YÜKLE
@@ -409,110 +473,104 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
           </div>
         </div>
 
-        {/* 2. DASHBOARD VE ÇIKTI BÖLÜMÜ (Yatay Grid) */}
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+        {/* 2. YENİ RENKLİ (VIBRANT) İSTATİSTİK PANELI */}
+        <div className="grid grid-cols-1 xl:grid-cols-4 gap-4">
           
-          {/* İstatistikler */}
-          <div className="col-span-1 xl:col-span-9 grid grid-cols-2 md:grid-cols-5 gap-3">
-            <div className="bg-white border border-slate-200 rounded-md p-3 flex items-center gap-4 shadow-sm relative overflow-hidden group">
-              <div className="relative w-16 h-16 flex items-center justify-center shrink-0">
-                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 80 80">
-                  <circle cx="40" cy="40" r={radius} stroke="currentColor" strokeWidth="8" fill="transparent" className="text-slate-100" />
-                  <circle cx="40" cy="40" r={radius} stroke="currentColor" strokeWidth="8" fill="transparent" strokeDasharray={circumference} strokeDashoffset={strokeDashoffset} strokeLinecap="round" className="text-[#dc3545] transition-all duration-1000 ease-out" />
-                </svg>
-                <div className="absolute flex flex-col items-center justify-center">
-                  <span className="text-xs font-black text-slate-800">%{progressPercent}</span>
+          {/* Sol Kısım - 4 Renkli İstatistik Kartı */}
+          <div className="col-span-1 xl:col-span-3 grid grid-cols-2 md:grid-cols-4 gap-4">
+            
+            {/* İlerleme (Ana Metrik) */}
+            <div className="bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-xl p-5 text-white shadow-lg shadow-indigo-200 relative overflow-hidden flex flex-col justify-between">
+              <div className="absolute -right-4 -top-4 w-24 h-24 bg-white/10 rounded-full blur-xl"></div>
+              <div className="flex items-center justify-between mb-4 relative z-10">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-100">Genel İlerleme</span>
+                <BarChart3 className="w-5 h-5 text-indigo-200" />
+              </div>
+              <div className="relative z-10">
+                <div className="flex items-end gap-2 mb-2">
+                  <span className="text-3xl font-black">{progressPercent}%</span>
+                  <span className="text-xs font-semibold text-indigo-200 mb-1.5">Tamamlandı</span>
+                </div>
+                <div className="w-full bg-indigo-900/50 rounded-full h-1.5">
+                  <div className="bg-white h-1.5 rounded-full transition-all duration-1000 ease-out" style={{ width: `${progressPercent}%` }}></div>
                 </div>
               </div>
-              <div className="flex flex-col">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">İlerleme</span>
-                <span className="text-sm font-black text-slate-800">DURUM</span>
-              </div>
             </div>
 
-            <div className="bg-white rounded-md p-4 border border-slate-200 shadow-sm flex flex-col relative overflow-hidden group">
-              <div className="absolute right-0 top-0 w-12 h-12 bg-slate-50 rounded-bl-full -z-10 group-hover:scale-110 transition-transform"></div>
-              <div className="flex items-center gap-2 text-slate-500 mb-1">
-                <Activity className="w-3.5 h-3.5" />
-                <span className="text-[9px] font-bold uppercase tracking-widest">Toplam Kayıt</span>
+            {/* Toplam Kayıt */}
+            <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm flex flex-col justify-between group">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Toplam Kayıt</span>
+                <div className="p-2 bg-blue-50 rounded-lg text-blue-500 group-hover:scale-110 transition-transform"><Activity className="w-4 h-4" /></div>
               </div>
-              <span className="text-xl font-black text-slate-800">{stats.totalRecords.toLocaleString("tr-TR")}</span>
+              <span className="text-3xl font-black text-slate-800">{stats.totalRecords.toLocaleString("tr-TR")}</span>
             </div>
 
-            <div className="bg-white rounded-md p-4 border border-slate-200 shadow-sm flex flex-col relative overflow-hidden group">
-              <div className="absolute right-0 top-0 w-12 h-12 bg-green-50 rounded-bl-full -z-10 group-hover:scale-110 transition-transform"></div>
-              <div className="flex items-center gap-2 text-green-600 mb-1">
-                <PackageCheck className="w-3.5 h-3.5" />
-                <span className="text-[9px] font-bold uppercase tracking-widest">İşlenen</span>
+            {/* İşlenen */}
+            <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm flex flex-col justify-between group">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">İşlenen Sipariş</span>
+                <div className="p-2 bg-emerald-50 rounded-lg text-emerald-500 group-hover:scale-110 transition-transform"><PackageCheck className="w-4 h-4" /></div>
               </div>
-              <span className="text-xl font-black text-slate-800">{stats.processed.toLocaleString("tr-TR")}</span>
+              <span className="text-3xl font-black text-slate-800">{stats.processed.toLocaleString("tr-TR")}</span>
             </div>
 
-            <div className="bg-white rounded-md p-4 border border-slate-200 shadow-sm flex flex-col relative overflow-hidden group">
-              <div className="absolute right-0 top-0 w-12 h-12 bg-orange-50 rounded-bl-full -z-10 group-hover:scale-110 transition-transform"></div>
-              <div className="flex items-center gap-2 text-orange-500 mb-1">
-                <PackageOpen className="w-3.5 h-3.5" />
-                <span className="text-[9px] font-bold uppercase tracking-widest">Kalan İşlem</span>
+            {/* Kalan */}
+            <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm flex flex-col justify-between group">
+              <div className="flex items-center justify-between mb-4">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Bekleyen / Kalan</span>
+                <div className="p-2 bg-amber-50 rounded-lg text-amber-500 group-hover:scale-110 transition-transform"><PackageOpen className="w-4 h-4" /></div>
               </div>
-              <span className="text-xl font-black text-slate-800">{stats.remaining.toLocaleString("tr-TR")}</span>
+              <span className="text-3xl font-black text-slate-800">{stats.remaining.toLocaleString("tr-TR")}</span>
             </div>
 
-            <div className="bg-white rounded-md p-4 border border-slate-200 shadow-sm flex flex-col relative overflow-hidden group">
-              <div className="absolute right-0 top-0 w-12 h-12 bg-blue-50 rounded-bl-full -z-10 group-hover:scale-110 transition-transform"></div>
-              <div className="flex items-center gap-2 text-blue-500 mb-1">
-                <CalendarDays className="w-3.5 h-3.5" />
-                <span className="text-[9px] font-bold uppercase tracking-widest">Bugün (İşlem)</span>
-              </div>
-              <span className="text-xl font-black text-slate-800">{stats.today.toLocaleString("tr-TR")}</span>
-            </div>
           </div>
 
-          {/* Çıktı İşlemleri & Sıfırlama */}
-          <div className="col-span-1 xl:col-span-3 flex flex-col gap-3 justify-center">
+          {/* Sağ Kısım - Çıktı ve Aksiyonlar */}
+          <div className="col-span-1 flex flex-col gap-3 justify-center">
+            <div className="bg-white border border-slate-200 rounded-xl p-4 flex items-center justify-between shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-rose-50 rounded-lg text-rose-500">
+                  <Zap className="w-5 h-5" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Bugünkü İşlem</p>
+                  <p className="text-xl font-black text-slate-800">{stats.today.toLocaleString("tr-TR")}</p>
+                </div>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
-              <button 
-                onClick={exportTwoColumnExcel}
-                className="h-10 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-md flex justify-center items-center gap-2 text-[10px] font-bold uppercase tracking-widest transition-colors shadow-sm"
-              >
-                <Download className="w-3.5 h-3.5" />
-                2 KOLON ÇIKTI
+              <button onClick={exportTwoColumnExcel} className="h-11 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg flex justify-center items-center gap-2 text-[10px] font-bold uppercase tracking-widest transition-colors shadow-sm">
+                <Download className="w-3.5 h-3.5" /> 2 KOLON
               </button>
-              <button 
-                onClick={exportExactOriginalExcel}
-                className="h-10 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-md flex justify-center items-center gap-2 text-[10px] font-bold uppercase tracking-widest transition-colors shadow-sm"
-              >
-                <Download className="w-3.5 h-3.5" />
-                TAM ÇIKTI
+              <button onClick={exportExactOriginalExcel} className="h-11 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg flex justify-center items-center gap-2 text-[10px] font-bold uppercase tracking-widest transition-colors shadow-sm">
+                <Download className="w-3.5 h-3.5" /> TAM ÇIKTI
               </button>
             </div>
-            <button 
-              onClick={() => setIsWipeModalOpen(true)}
-              className="h-10 w-full bg-red-50 hover:bg-red-100 text-[#dc3545] border border-red-200 rounded-md flex justify-center items-center gap-2 text-[10px] font-bold uppercase tracking-widest transition-colors shadow-sm"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              TÜM VERİTABANINI SIFIRLA
-            </button>
           </div>
         </div>
 
-        {/* 3. İŞLEM BÖLGESİ (BARKOD OKUMA) */}
-        <div className={`border transition-all duration-300 p-5 sm:p-8 flex flex-col gap-6 rounded-md ${getContainerStyles()} w-full min-w-0 bg-white`}>
+        {/* 3. İŞLEM BÖLGESİ (BARKOD OKUMA) - VİBRANT BÖLGE */}
+        <div className={`transition-all duration-300 p-6 sm:p-8 flex flex-col gap-6 rounded-2xl bg-white border-2 ${getContainerStyles()} w-full min-w-0`}>
           
           {statusMessage && (
-            <div className={`p-4 text-sm font-bold uppercase tracking-widest border animate-in fade-in rounded-md break-words shadow-sm ${
+            <div className={`p-4 text-sm font-bold uppercase tracking-widest border animate-in fade-in rounded-xl break-words shadow-sm flex items-center gap-3 ${
               uiStatus === "error" ? "bg-red-50 text-red-700 border-red-200" :
               uiStatus === "update" ? "bg-blue-50 text-blue-700 border-blue-200" :
-              uiStatus === "warning" ? "bg-orange-50 text-orange-700 border-orange-200" :
-              "bg-green-50 text-green-700 border-green-200"
+              uiStatus === "warning" ? "bg-amber-50 text-amber-700 border-amber-200" :
+              "bg-emerald-50 text-emerald-700 border-emerald-200"
             }`}>
+              {uiStatus === "success" && <CheckCircle2 className="w-5 h-5" />}
+              {uiStatus === "error" && <AlertTriangle className="w-5 h-5" />}
               {statusMessage}
             </div>
           )}
 
           {/* ADIM 1: SİPARİŞ / DELIVERY NO */}
-          <div className={`transition-opacity duration-300 ${activeGroup ? "opacity-40 pointer-events-none" : "opacity-100"} w-full`}>
+          <div className={`transition-opacity duration-300 ${activeGroup ? "opacity-30 pointer-events-none" : "opacity-100"} w-full`}>
             <div className="flex items-center gap-3 mb-3">
-              <span className="flex items-center justify-center w-6 h-6 rounded-md bg-slate-900 text-white text-xs font-bold">1</span>
+              <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-slate-900 text-white text-sm font-black shadow-md">1</span>
               <label className="text-sm font-bold text-slate-700 uppercase tracking-widest">
                 SİPARİŞ VEYA DELIVERY NO
               </label>
@@ -524,120 +582,136 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
                 value={deliveryNo}
                 onChange={(e) => setDeliveryNo(e.target.value)}
                 disabled={loading || activeGroup !== null}
-                className="flex-1 h-14 bg-slate-50 border border-slate-200 px-5 py-3 text-lg font-bold  text-slate-900 rounded-md focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#dc3545]/20 focus:border-[#dc3545] disabled:bg-slate-100 uppercase placeholder:text-slate-400 transition-all"
-                placeholder={selectedFileId ? "Sadece seçili dosyada ara..." : "Barkod okut veya yaz (Otomatik dosya seçimi aktiftir)..."}
+                className="flex-1 h-16 bg-slate-50 border-2 border-slate-200 px-6 py-3 text-xl font-black text-slate-900 rounded-xl focus:outline-none focus:bg-white focus:border-[#dc3545] focus:ring-4 focus:ring-[#dc3545]/10 disabled:bg-slate-100 uppercase placeholder:text-slate-300 placeholder:font-semibold transition-all"
+                placeholder={selectedFileId ? "SADECE SEÇİLİ PROFİLDE ARA..." : "BARKOD OKUT VEYA YAZ (OTOMATİK SEÇİM AKTİF)..."}
                 autoComplete="off"
               />
               <button 
                 type="submit" 
                 disabled={loading || !deliveryNo.trim() || activeGroup !== null}
-                className="w-full sm:w-48 h-14 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm uppercase tracking-widest rounded-md transition-colors shadow-sm"
+                className="w-full sm:w-48 h-16 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-black text-sm uppercase tracking-widest rounded-xl transition-all shadow-md active:scale-95"
               >
                 SORGULA
               </button>
             </form>
           </div>
 
-          {/* ADIM 2: AKTİF SİPARİŞ DETAYLARI & EŞLEŞTİRME */}
+          {/* ADIM 2: AKTİF SİPARİŞ DETAYLARI & EŞLEŞTİRME (VIBRANT BENTO BOX) */}
           {activeGroup && (
-            <div className="flex flex-col gap-0 animate-in slide-in-from-bottom-4 fade-in duration-300 bg-white border border-slate-200 shadow-sm rounded-md w-full min-w-0 mt-2 overflow-hidden">
-              <div className={`h-1.5 w-full ${activeGroup.isUpdateMode ? 'bg-blue-500' : 'bg-[#dc3545]'}`}></div>
+            <div className="flex flex-col gap-0 animate-in slide-in-from-bottom-4 fade-in duration-300 bg-white border border-slate-200 shadow-xl rounded-2xl w-full min-w-0 mt-4 overflow-hidden">
+              
+              <div className={`h-2 w-full ${activeGroup.isUpdateMode ? 'bg-blue-500' : 'bg-[#dc3545]'}`}></div>
 
               {/* KPI HEADER */}
-              <div className="bg-slate-50/50 border-b border-slate-100 p-4 flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
-                <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-md px-4 py-2 shrink-0 shadow-sm">
-                  <span className="bg-slate-100 text-slate-900 px-3 py-1 font-black text-lg rounded-sm">{activeGroup.count}</span>
+              <div className="bg-slate-50 p-5 flex flex-col sm:flex-row gap-4 items-stretch sm:items-center justify-between border-b border-slate-100">
+                <div className="flex items-center gap-4 bg-white border border-slate-200 rounded-xl px-5 py-3 shrink-0 shadow-sm">
+                  <span className="bg-slate-900 text-white px-3.5 py-1.5 font-black text-xl rounded-lg">{activeGroup.count}</span>
                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest leading-tight">KALEM<br/>SİPARİŞ</span>
                 </div>
                 
                 {activeGroup.sdDocumentsMatch ? (
-                  <div className="flex-1 flex items-center gap-3 bg-green-50/50 border border-green-200 rounded-md px-4 py-3">
-                    <CheckCircle2 className="w-5 h-5 text-green-500 shrink-0" />
+                  <div className="flex-1 flex items-center gap-4 bg-emerald-50 border border-emerald-200 rounded-xl px-5 py-3 shadow-sm">
+                    <CheckCircle2 className="w-6 h-6 text-emerald-500 shrink-0" />
                     <div className="min-w-0">
-                      <p className="text-[10px] font-bold text-green-600 uppercase tracking-widest truncate mb-0.5">SD DOCUMENT (TAM EŞLEŞME)</p>
-                      <p className="text-sm font-semibold font-mono text-green-800 truncate">{activeGroup.uniqueSdDocuments[0] || 'KOD YOK'}</p>
+                      <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest truncate mb-0.5">SD DOCUMENT (TAM EŞLEŞME)</p>
+                      <p className="text-base font-black font-mono text-emerald-900 truncate">{activeGroup.uniqueSdDocuments[0] || 'KOD YOK'}</p>
                     </div>
                   </div>
                 ) : (
-                  <div className="flex-1 flex items-center gap-3 bg-orange-50/50 border border-orange-200 rounded-md px-4 py-3">
-                    <AlertTriangle className="w-5 h-5 text-orange-500 shrink-0" />
+                  <div className="flex-1 flex items-center gap-4 bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 shadow-sm">
+                    <AlertTriangle className="w-6 h-6 text-amber-500 shrink-0" />
                     <div className="min-w-0">
-                      <p className="text-[10px] font-bold text-orange-600 uppercase tracking-widest truncate mb-0.5">FARKLI SD KODLARI İÇERİYOR</p>
-                      <p className="text-xs font-semibold font-mono text-orange-800 break-all">{activeGroup.uniqueSdDocuments.join(', ')}</p>
+                      <p className="text-[10px] font-bold text-amber-600 uppercase tracking-widest truncate mb-0.5">FARKLI SD KODLARI İÇERİYOR</p>
+                      <p className="text-sm font-black font-mono text-amber-900 break-all">{activeGroup.uniqueSdDocuments.join(', ')}</p>
                     </div>
                   </div>
                 )}
               </div>
 
-              {/* INFO BOARD */}
-              <div className="p-5 sm:p-6 w-full border-b border-slate-100">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-6 w-full min-w-0">
-                  <div className="flex flex-col min-w-0 gap-5">
-                    <div className="flex flex-col gap-1.5">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ALICI AD SOYAD</p>
-                      <div className="flex items-stretch bg-slate-50 border border-slate-200 rounded-md">
-                        <span className="flex-1 flex items-center text-sm font-bold text-slate-800 uppercase truncate px-4 py-2.5">{activeGroup.primary.customer_name}</span>
-                        <CopyIcon fieldId="name" textToCopy={activeGroup.primary.customer_name} />
-                      </div>
+              {/* BENTO BOX INFO BOARD */}
+              <div className="p-5 sm:p-6 w-full border-b border-slate-100 bg-white">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 w-full min-w-0">
+                  
+                  {/* İSİM & SOYİSİM */}
+                  <div className="col-span-1 bg-slate-50 rounded-xl p-5 flex flex-col gap-4 border border-slate-100">
+                    {(() => {
+                      const { first, last } = splitName(activeGroup.primary.customer_name);
+                      return (
+                        <>
+                          <CopyBox fieldId="firstName" textToCopy={first} label="MÜŞTERİ ADI" icon={User} theme="blue" />
+                          <CopyBox fieldId="lastName" textToCopy={last} label="SOYADI" icon={User} theme="blue" />
+                        </>
+                      );
+                    })()}
+                  </div>
+
+                  {/* TELEFON & ŞEHİR */}
+                  <div className="col-span-1 bg-slate-50 rounded-xl p-5 flex flex-col gap-4 border border-slate-100">
+                    <CopyBox 
+                      fieldId="phone" 
+                      textToCopy={formatPhoneForCopy(activeGroup.primary.mobile_number)} 
+                      label="İLETİŞİM NUMARASI" 
+                      icon={Phone} 
+                      theme="indigo" 
+                    />
+                    <CopyBox 
+                      fieldId="cityRegion" 
+                      textToCopy={`${activeGroup.primary.city || ''} / ${activeGroup.primary.region || ''}`.trim()} 
+                      label="ŞEHİR & BÖLGE" 
+                      icon={MapPin} 
+                      theme="emerald" 
+                    />
+                  </div>
+
+                  {/* MAHALLE & AÇIK ADRES */}
+                  <div className="col-span-1 md:col-span-2 lg:col-span-1 flex flex-col gap-5">
+                    <div className="bg-slate-50 rounded-xl p-5 border border-slate-100">
+                      <CopyBox 
+                        fieldId="neighborhood" 
+                        textToCopy={extractNeighborhood(activeGroup.primary.street, activeGroup.primary.street_2)} 
+                        label="MAHALLE (OTOMATİK AYRIŞTIRILDI)" 
+                        icon={Building2} 
+                        theme="amber" 
+                      />
                     </div>
-                    <div className="flex flex-col gap-1.5">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">İLETİŞİM BİLGİSİ</p>
-                      <div className="flex items-stretch bg-slate-50 border border-slate-200 rounded-md">
-                        <span className="flex-1 flex items-center text-sm font-semibold font-mono text-slate-700 truncate px-4 py-2.5">{activeGroup.primary.mobile_number}</span>
-                        <CopyIcon fieldId="phone" textToCopy={formatPhoneForCopy(activeGroup.primary.mobile_number)} />
-                      </div>
+                    <div className="bg-slate-50 rounded-xl p-5 flex-1 flex flex-col border border-slate-100">
+                       <CopyBox 
+                        fieldId="fullAddress" 
+                        textToCopy={`${activeGroup.primary.street || ""} ${activeGroup.primary.street_2 || ""} - Posta Kodu: ${activeGroup.primary.postal_code || "YOK"}`.trim()} 
+                        label="AÇIK ADRES BÜTÜNÜ" 
+                        icon={MapPinned} 
+                        theme="rose" 
+                      />
                     </div>
                   </div>
 
-                  <div className="flex flex-col min-w-0 gap-5">
-                    <div className="flex flex-col gap-1.5">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">ŞEHİR / BÖLGE</p>
-                      <div className="flex items-stretch bg-slate-50 border border-slate-200 rounded-md">
-                        <span className="flex-1 flex items-center text-sm font-bold text-slate-800 uppercase truncate px-4 py-2.5">
-                          {activeGroup.primary.city} / {activeGroup.primary.region}
-                        </span>
-                        <CopyIcon fieldId="cityRegion" textToCopy={`${activeGroup.primary.city || ''} / ${activeGroup.primary.region || ''}`.trim()} />
-                      </div>
-                    </div>
-                    <div className="flex flex-col gap-1.5 h-full">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">AÇIK ADRES & POSTA KODU</p>
-                      <div className="flex items-stretch bg-slate-50 border border-slate-200 rounded-md flex-1">
-                        <span className="flex-1 text-xs font-semibold text-slate-600 uppercase leading-relaxed break-words px-4 py-2.5">
-                          {`${activeGroup.primary.street || ""} ${activeGroup.primary.street_2 || ""} - Posta Kodu: ${activeGroup.primary.postal_code || "YOK"} --DN: ${activeGroup.primary.delivery_number}`.trim()}
-                        </span>
-                        <div className="flex items-start">
-                          <CopyIcon fieldId="fullAddress" textToCopy={`${activeGroup.primary.street || ""} ${activeGroup.primary.street_2 || ""} - Posta Kodu: ${activeGroup.primary.postal_code || "YOK"} --DN: ${activeGroup.primary.delivery_number}`.trim()} />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
                 </div>
               </div>
 
               {/* ARAS KARGO INPUT */}
-              <div className={`${activeGroup.isUpdateMode ? 'bg-blue-50/30' : 'bg-slate-50/50'} p-5 sm:p-6 w-full`}>
-                <div className="flex items-center gap-3 mb-4">
-                  <span className={`flex items-center justify-center w-6 h-6 rounded-md text-white text-xs font-bold shadow-sm ${activeGroup.isUpdateMode ? 'bg-blue-500' : 'bg-[#dc3545]'}`}>2</span>
-                  <label className={`text-sm font-bold uppercase tracking-widest ${activeGroup.isUpdateMode ? 'text-blue-700' : 'text-[#dc3545]'}`}>
+              <div className={`${activeGroup.isUpdateMode ? 'bg-blue-50/50' : 'bg-slate-50/50'} p-6 sm:p-8 w-full`}>
+                <div className="flex items-center gap-3 mb-5">
+                  <span className={`flex items-center justify-center w-7 h-7 rounded-lg text-white text-sm font-black shadow-md ${activeGroup.isUpdateMode ? 'bg-blue-500' : 'bg-[#dc3545]'}`}>2</span>
+                  <label className={`text-base font-black uppercase tracking-widest ${activeGroup.isUpdateMode ? 'text-blue-700' : 'text-[#dc3545]'}`}>
                     {activeGroup.isUpdateMode ? 'KARGO BARKODUNU GÜNCELLE' : 'ARAS KARGO BARKODUNU OKUT'}
                   </label>
                 </div>
-                <form onSubmit={handleTrackingScan} className="flex flex-col sm:flex-row gap-3 w-full">
+                <form onSubmit={handleTrackingScan} className="flex flex-col sm:flex-row gap-4 w-full">
                   <input
                     ref={trackingRef}
                     type="text"
                     value={trackingNo}
                     onChange={(e) => setTrackingNo(e.target.value)}
                     disabled={loading}
-                    className={`flex-1 h-14 bg-white border px-5 text-xl font-bold font-mono text-slate-900 rounded-md focus:outline-none focus:ring-2 uppercase placeholder:text-slate-300 transition-all shadow-sm ${activeGroup.isUpdateMode ? 'border-blue-300 focus:ring-blue-500/20 focus:border-blue-500' : 'border-slate-300 focus:ring-[#dc3545]/20 focus:border-[#dc3545]'}`}
-                    placeholder={activeGroup.isUpdateMode ? "Yeni barkod..." : "Kargo barkodu..."}
+                    className={`flex-1 h-16 bg-white border-2 px-6 text-2xl font-black font-mono text-slate-900 rounded-xl focus:outline-none focus:ring-4 uppercase placeholder:text-slate-300 placeholder:font-semibold transition-all shadow-sm ${activeGroup.isUpdateMode ? 'border-blue-200 focus:ring-blue-500/20 focus:border-blue-500' : 'border-slate-200 focus:ring-[#dc3545]/20 focus:border-[#dc3545]'}`}
+                    placeholder={activeGroup.isUpdateMode ? "YENİ BARKOD..." : "KARGO BARKODU..."}
                     autoComplete="off"
                   />
                   <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
                     <button 
                       type="submit" 
                       disabled={loading || !trackingNo.trim()}
-                      className={`w-full sm:w-40 h-14 px-8 text-white font-bold text-sm uppercase tracking-widest transition-all rounded-md shadow-sm ${activeGroup.isUpdateMode ? 'bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300' : 'bg-[#dc3545] hover:bg-red-700 disabled:bg-red-300'}`}
+                      className={`w-full sm:w-48 h-16 px-8 text-white font-black text-sm uppercase tracking-widest transition-all rounded-xl shadow-lg active:scale-95 ${activeGroup.isUpdateMode ? 'bg-gradient-to-r from-blue-500 to-blue-700 hover:from-blue-600 hover:to-blue-800 disabled:opacity-50' : 'bg-gradient-to-r from-[#dc3545] to-red-700 hover:from-red-600 hover:to-red-800 disabled:opacity-50'}`}
                     >
                       {activeGroup.isUpdateMode ? 'GÜNCELLE' : 'KAYDET'}
                     </button>
@@ -645,7 +719,7 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
                       type="button"
                       onClick={handleCancel}
                       disabled={loading}
-                      className="w-full sm:w-auto h-14 px-6 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs uppercase tracking-widest transition-colors border border-slate-200 rounded-md shadow-sm"
+                      className="w-full sm:w-auto h-16 px-8 bg-white hover:bg-slate-100 text-slate-700 font-black text-sm uppercase tracking-widest transition-colors border-2 border-slate-200 rounded-xl shadow-sm active:scale-95"
                     >
                       İPTAL
                     </button>
@@ -669,32 +743,32 @@ export default function ArasTrackingPanel({ employeeId }: ArasTrackingPanelProps
 
       {isWipeModalOpen && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm transition-all duration-300">
-          <div className="bg-white shadow-2xl w-full max-w-lg rounded-md overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="bg-red-50 border-b border-red-100 p-5 sm:p-6 flex items-center gap-4">
-              <div className="w-10 h-10 rounded-md bg-red-100 flex items-center justify-center shrink-0">
-                <Trash2 className="w-5 h-5 text-[#dc3545]" />
+          <div className="bg-white shadow-2xl w-full max-w-lg rounded-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-red-50 border-b border-red-100 p-6 flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-red-100 flex items-center justify-center shrink-0">
+                <Trash2 className="w-6 h-6 text-[#dc3545]" />
               </div>
-              <h2 className="text-red-700 font-bold text-base sm:text-lg tracking-widest uppercase">
+              <h2 className="text-red-700 font-black text-lg tracking-widest uppercase">
                 Veritabanı Sıfırlama
               </h2>
             </div>
-            <div className="p-6 sm:p-8">
-              <p className="text-slate-800 font-bold text-base sm:text-lg mb-3">DİKKAT: Veriler kalıcı olarak yok edilecektir!</p>
-              <p className="text-slate-500 text-xs sm:text-sm mb-6 sm:mb-8 leading-relaxed">
+            <div className="p-8">
+              <p className="text-slate-800 font-black text-lg mb-3">DİKKAT: Veriler kalıcı olarak yok edilecektir!</p>
+              <p className="text-slate-500 text-sm mb-8 leading-relaxed font-semibold">
                 Bu işlem geri alınamaz. Sisteme yüklenen TÜM Excel verileri ve yapılan kargo barkod eşleştirmeleri tamamen temizlenecektir.
               </p>
-              <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex flex-col sm:flex-row gap-4">
                 <button 
                   onClick={handleGlobalWipe} 
                   disabled={loading}
-                  className="flex-1 bg-[#dc3545] hover:bg-red-700 text-white font-bold h-12 uppercase tracking-widest rounded-md transition-all disabled:opacity-50 text-xs sm:text-sm shadow-sm"
+                  className="flex-1 bg-[#dc3545] hover:bg-red-700 text-white font-black h-14 uppercase tracking-widest rounded-xl transition-all disabled:opacity-50 text-sm shadow-md active:scale-95"
                 >
                   {loading ? "SİLİNİYOR..." : "EVET, ONAYLIYORUM"}
                 </button>
                 <button 
                   onClick={() => setIsWipeModalOpen(false)} 
                   disabled={loading}
-                  className="flex-1 bg-white hover:bg-slate-50 text-slate-700 font-bold h-12 uppercase tracking-widest border border-slate-200 rounded-md transition-colors text-xs sm:text-sm shadow-sm"
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black h-14 uppercase tracking-widest rounded-xl transition-colors text-sm shadow-sm active:scale-95"
                 >
                   İPTAL
                 </button>
