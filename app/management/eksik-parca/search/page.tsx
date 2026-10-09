@@ -4,7 +4,7 @@ import { useEffect, useState, FormEvent } from "react";
 import { supabase } from "@/lib/supabase"; 
 import * as XLSX from "xlsx"; 
 import toast, { Toaster } from "react-hot-toast";
-import { Truck, Undo2, Search, AlertTriangle, RefreshCw, Trash2, CheckCircle2, FileText } from 'lucide-react';
+import { Undo2, Search, AlertTriangle, RefreshCw, Trash2, FileText } from 'lucide-react';
 
 interface ShipmentRecord {
   id: string;
@@ -18,7 +18,7 @@ interface ShipmentRecord {
   item_count: number;
   created_at: string;
   missing_address: boolean;
-  note?: string; // YENİ EKLENEN KOLON
+  note?: string; 
 }
 
 type SortKey = keyof ShipmentRecord;
@@ -212,7 +212,6 @@ export default function TrackingTable() {
     }
   };
 
-  // YENİ: NOT KAYDETME FONKSİYONU
   const saveNote = async () => {
     setIsSavingNote(true);
     try {
@@ -247,7 +246,7 @@ export default function TrackingTable() {
       "Takip No": r.aras_tracking_number,
       "Kalem": r.item_count || 1,
       "Durum": r.is_returned ? "İADE" : (r.missing_address ? "EKSİK/HATALI ADRES" : "NORMAL"),
-      "Ek Notlar": r.note || "-" // YENİ: NOTLAR EXCEL'E EKLENDİ
+      "Ek Notlar": r.note || "-"
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -256,9 +255,17 @@ export default function TrackingTable() {
     XLSX.writeFile(workbook, `WMS_Rapor_${new Date().getTime()}.xlsx`);
   };
 
-  const openArasTrack = (trackingNo: string) => {
-    if (!trackingNo || /[a-zA-Z]/.test(trackingNo)) return;
-    window.open(`https://kargotakip.araskargo.com.tr/mainpage.aspx?code=${trackingNo}`, "Aras_Takip", "width=1000,height=750,left=200,top=100");
+  // KARGO TAKİP BUTONU İÇİN DİNAMİK YÖNLENDİRİCİ (Hepsijet ve Aras Ayrımı)
+  const openTrack = (trackingNo: string, isHepsijet: boolean) => {
+    if (!trackingNo) return;
+    
+    if (isHepsijet) {
+      window.open(`https://www.hepsijet.com/gonderi-takibi/${trackingNo}`, "Hepsijet_Takip", "width=1000,height=750,left=200,top=100");
+    } else {
+      // Sadece Aras kargolarda harf kontrolü yap, Hepsijet'i sal.
+      if (/[a-zA-Z]/.test(trackingNo)) return;
+      window.open(`https://kargotakip.araskargo.com.tr/mainpage.aspx?code=${trackingNo}`, "Aras_Takip", "width=1000,height=750,left=200,top=100");
+    }
   };
 
   const totalPages = Math.ceil(totalRecordsCount / rowsPerPage) || 1;
@@ -448,7 +455,15 @@ export default function TrackingTable() {
               </tr>
             ) : (
               records.map((rec) => {
-                const addressErr = rec.missing_address; 
+                
+                // MİMARİ MÜDAHALE: CPR Hepsijet olduğu için harf kuralını ez (Bypass)
+                const trackingStr = rec.aras_tracking_number || "";
+                const shipmentStr = rec.aras_shipment_number || "";
+                const isHepsijet = trackingStr.toUpperCase().startsWith("CPR") || shipmentStr.toUpperCase().startsWith("CPR");
+                
+                // Veritabanında true olsa bile, Hepsijet ise "Eksik Adres" hatasını kaldır
+                const addressErr = rec.missing_address && !isHepsijet; 
+
                 const isSelected = selectedIds.includes(rec.id);
                 
                 return (
@@ -510,7 +525,7 @@ export default function TrackingTable() {
 
                     <td className="px-4 py-3 text-right pr-6 whitespace-nowrap">
                       <div className="flex items-center justify-end gap-2">
-                        {/* YENİ: NOT BUTONU */}
+                        {/* NOT BUTONU */}
                         <button 
                           onClick={() => setNoteModal({ isOpen: true, id: rec.id, note: rec.note || "" })}
                           className={`px-3 py-2 rounded text-[11px] font-bold flex items-center gap-1.5 transition-colors border ${
@@ -537,13 +552,22 @@ export default function TrackingTable() {
                           {rec.is_returned ? "İPTAL ET" : "İADEYE ÇEK"}
                         </button>
 
+                        {/* FİRMAYA GÖRE DEĞİŞEN DİNAMİK TAKİP BUTONU */}
                         <button 
-                          onClick={() => openArasTrack(rec.aras_tracking_number)}
+                          onClick={() => openTrack(rec.aras_tracking_number, isHepsijet)}
                           disabled={!rec.aras_tracking_number || addressErr}
-                          className="px-3 py-2 rounded text-[11px] font-bold flex items-center gap-1.5 bg-[#03DF95] hover:bg-[#02c784] text-slate-900 disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 transition-colors border border-transparent disabled:border-slate-200"
-                          title="Kargo Takip"
+                          className={`px-4 py-2 rounded text-[11px] font-bold flex items-center gap-1.5 transition-all shadow-sm border border-transparent disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 ${
+                            isHepsijet 
+                              ? "bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white"
+                              : "bg-red-600 hover:bg-red-700 text-white"
+                          }`}
+                          title={isHepsijet ? "Hepsijet Kargo Takip" : "Aras Kargo Takip"}
                         >
-                          <Truck className="w-4 h-4" />
+                          {isHepsijet ? (
+                            <img src="https://www.hepsijet.com/images/hepsijet.svg" className="h-3 brightness-0 invert" alt="Hepsijet" />
+                          ) : (
+                            <img src="https://inet.araskargo.com.tr/assets/images/INET%20TR%20Logos/aras-logo.png" className="h-3 object-contain brightness-0 invert" alt="Aras" />
+                          )}
                           TAKİP
                         </button>
                       </div>
@@ -587,7 +611,7 @@ export default function TrackingTable() {
         </div>
       )}
 
-      {/* YENİ: NOT MODALI */}
+      {/* NOT MODALI */}
       {noteModal.isOpen && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm">
           <div className="bg-white shadow-xl w-full max-w-md flex flex-col rounded-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">

@@ -97,10 +97,11 @@ export async function getShipmentsByDeliveryNumber(deliveryNumber: string, fileI
 }
 
 /**
- * BARKOD KAYDETME MOTORU 
+ * BARKOD KAYDETME VE ÇİFT TABLO SENKRONİZASYON MOTORU
  */
 export async function saveArasTracking(deliveryNumber: string, trackingNumber: string, employeeId: string, fileId?: string) {
   try {
+    // 1. ADIM: İLK TABLOYU GÜNCELLE VE GÜNCEL VERİYİ GERİ ÇEK (.select().single() ile)
     let query = supabaseAdmin
       .from("erp_raw_shipments")
       .update({
@@ -115,13 +116,68 @@ export async function saveArasTracking(deliveryNumber: string, trackingNumber: s
       query = query.eq("file_id", fileId);
     }
 
-    const { error } = await query;
-    if (error) return { success: false, error: `KAYIT HATASI: ${error.message}` };
+    const { data: updatedRecord, error: updateError } = await query.select().single();
 
+    if (updateError) return { success: false, error: `GÜNCELLEME HATASI: ${updateError.message}` };
+    if (!updatedRecord) return { success: false, error: "Güncellenecek sipariş bulunamadı!" };
+
+    // 2. ADIM: YENİ KARGO (HEPSİJET/ARAS) VE EKSİK ADRES LOJİĞİ
+    const trackingNo = trackingNumber.trim();
+    let shipmentNo = updatedRecord.shipment_number ? String(updatedRecord.shipment_number).trim() : "";
+
+    // Hepsijet (CPR) Kontrolü (Büyük/küçük harf duyarsız)
+    const isHepsijet = trackingNo.toLowerCase().includes("cpr");
+
+    // Eğer Hepsijet ise Shipment ve Tracking aynı CPR kodu olmalı
+    if (isHepsijet) {
+      shipmentNo = trackingNo;
+    }
+
+    // Eksik Adres Şartı: Sadece "eksik" kelimesi geçiyorsa veya ikisi de tamamen boşsa true olsun.
+    // (Eski hasLetter regex'i CPR gibi harfli barkodları bozduğu için tamamen kaldırıldı)
+    const isMissingAddress = 
+      trackingNo.toLowerCase().includes("eksik") || 
+      shipmentNo.toLowerCase().includes("eksik") || 
+      (trackingNo === "" && shipmentNo === "");
+
+    // 3. ADIM: İKİNCİ TABLOYA (cargo_records) AKTARILACAK VERİ PAKETİNİ HAZIRLA
+    const secondTablePayload = {
+      customer_name: updatedRecord.customer_name || "",
+      mobile_number: updatedRecord.mobile_number || "",
+      sd_document: updatedRecord.sd_document || "",
+      delivery_number: updatedRecord.delivery_number || "",
+      aras_shipment_number: shipmentNo, // CPR ise trackingNo ile aynı değer gidecek
+      aras_tracking_number: trackingNo,
+      is_returned: false,
+      item_count: 1, // Koli/Kalem başı okutulduğu için 1 geçiyoruz
+      missing_address: isMissingAddress,
+      created_at: new Date().toISOString()
+      // note, batch_id, file_name alanları null kalacak şekilde şemaya uygun bırakıldı
+    };
+
+    // 4. ADIM: İKİNCİ TABLOYA YAZ
+    const { error: insertError } = await supabaseAdmin
+      .from("cargo_records")
+      .insert(secondTablePayload);
+
+    if (insertError) {
+      return { success: false, error: `CARGO_RECORDS TABLOSUNA AKTARIM HATASI: ${insertError.message}` };
+    }
+
+    // 5. ADIM: ZORUNLU İŞLEM LOGU (transaction_logs)
+    await supabaseAdmin.from("transaction_logs").insert({
+      employee_id: employeeId,
+      action: "KARGO_ESLESTIRME",
+      details: `Delivery: ${deliveryNumber} -> Kargo No: ${trackingNo} eşleştirildi ve cargo_records tablosuna aktarıldı.`
+    });
+
+    // İşlem başarılı, UI'ı tazele
     revalidatePath("/management/cargo");
     return { success: true };
+
   } catch (err: any) {
-    return { success: false, error: "Sunucu bağlantı hatası." };
+    console.error("Çift Tablo Yazma Hatası:", err);
+    return { success: false, error: "Sunucu bağlantı hatası veya veri uyuşmazlığı." };
   }
 }
 
