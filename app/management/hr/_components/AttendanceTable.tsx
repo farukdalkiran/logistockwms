@@ -1,455 +1,1124 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+
 import { supabase } from "@/lib/supabase";
+
 import {
-  User,
+  UserRound,
   ShieldCheck,
   RefreshCw,
-  Clock,
+  Clock3,
   Coffee,
   CalendarDays,
   CheckCircle2,
   Calendar,
-  AlertCircle,
+  AlertTriangle,
   Code2,
+  LogIn,
+  LogOut,
+  UsersRound,
+  Activity,
+  ArrowUpRight,
+  Timer,
+  CircleAlert,
+  Wifi,
+  SearchX,
 } from "lucide-react";
+
+/* =============================================
+   TYPES
+============================================= */
 
 interface AttendanceTableProps {
   branchId: string | null;
   isDeveloper?: boolean;
 }
 
+interface Employee {
+  full_name: string | null;
+  position_title: string | null;
+  device_token?: string | null;
+}
+
+interface AttendanceRecord {
+  id: string;
+  employee_id: string;
+  check_in_time: string | null;
+  check_out_time: string | null;
+  break_hours: number | string | null;
+  working_hours: number | string | null;
+  status: string | null;
+  employees: Employee | null;
+}
+
+interface MonthlyRecord {
+  employee_id: string;
+  working_hours: number | string | null;
+  check_in_time: string | null;
+  status: string | null;
+}
+
+type RoleType = "DEVELOPER" | "MANAGER" | "PERSONNEL";
+
+const TIMEZONE = "Europe/Istanbul";
+const PRIMARY = "#dc3545";
+const PAGE_SIZE = 1000;
+
+/* =============================================
+   DATE & FORMAT HELPERS
+============================================= */
+
+function getIstanbulParts(date: Date) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  const get = (type: string) =>
+    Number(parts.find((part) => part.type === type)?.value ?? 0);
+
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour"),
+    minute: get("minute"),
+  };
+}
+
+function istanbulMidnightToUTC(year: number, month: number, day: number) {
+  // Türkiye UTC+3 saat diliminde.
+  return new Date(Date.UTC(year, month - 1, day, -3, 0, 0)).toISOString();
+}
+
+function getDateRanges() {
+  const now = getIstanbulParts(new Date());
+
+  const todayStart = istanbulMidnightToUTC(now.year, now.month, now.day);
+
+  const tomorrowStart = istanbulMidnightToUTC(now.year, now.month, now.day + 1);
+
+  const monthStart = istanbulMidnightToUTC(now.year, now.month, 1);
+
+  const nextMonthStart = istanbulMidnightToUTC(now.year, now.month + 1, 1);
+
+  return {
+    todayStart,
+    tomorrowStart,
+    monthStart,
+    nextMonthStart,
+  };
+}
+
+function formatTime(value: string | null) {
+  if (!value) return "--:--";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "--:--";
+
+  return date.toLocaleTimeString("tr-TR", {
+    timeZone: TIMEZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function formatHours(value: number | string | null | undefined) {
+  if (value === null || value === undefined) return "--";
+
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) return "--";
+
+  const totalMinutes = Math.round(number * 60);
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours === 0) return `${minutes}dk`;
+  if (minutes === 0) return `${hours}s`;
+
+  return `${hours}s ${minutes}dk`;
+}
+
+function formatDate(date: Date) {
+  return new Intl.DateTimeFormat("tr-TR", {
+    timeZone: TIMEZONE,
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
+
+function isLeaveStatus(status: string | null) {
+  return status?.startsWith("LEAVE_") ?? false;
+}
+
+function getLateMinutes(value: string | null) {
+  if (!value) return null;
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return null;
+
+  const { hour, minute } = getIstanbulParts(date);
+
+  return hour * 60 + minute;
+}
+
+function getRoleType(title?: string | null): RoleType {
+  if (!title) return "PERSONNEL";
+
+  const lower = title.toLocaleLowerCase("tr-TR");
+
+  if (lower.includes("developer") || lower.includes("geliştirici")) {
+    return "DEVELOPER";
+  }
+
+  if (
+    ["yönetici", "müdür", "şef", "admin", "lider", "uzman"].some((role) =>
+      lower.includes(role),
+    )
+  ) {
+    return "MANAGER";
+  }
+
+  return "PERSONNEL";
+}
+
+function getLeaveName(status: string | null) {
+  if (!status) return "İZİN";
+
+  const value = status
+    .replace(/^LEAVE_/, "")
+    .replace(/_/g, " ")
+    .toLocaleUpperCase("tr-TR");
+
+  if (value === "SAGLIK RAPORU") return "SAĞLIK RAPORU";
+
+  return value;
+}
+
+/* =============================================
+   REUSABLE COMPONENTS
+============================================= */
+
+function EntryIndicator({ time }: { time: string | null }) {
+  const minutes = getLateMinutes(time);
+
+  if (minutes === null) {
+    return <span className="h-2 w-2 shrink-0 rounded-full bg-slate-300" />;
+  }
+
+  let color = "bg-emerald-500";
+  let label = "Zamanında giriş";
+
+  if (minutes > 495) {
+    color = "bg-[#dc3545]";
+    label = "Geç giriş - 08:15 sonrası";
+  } else if (minutes >= 491) {
+    color = "bg-amber-500";
+    label = "Tolerans sınırı - 08:11 / 08:15";
+  }
+
+  return (
+    <span
+      title={label}
+      aria-label={label}
+      className={`h-2 w-2 shrink-0 rounded-full ring-4 ring-slate-100 ${color}`}
+    />
+  );
+}
+
+function LateBadge({ count }: { count: number }) {
+  if (count === 0) {
+    return (
+      <span className="inline-flex min-w-[36px] items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-bold text-slate-400 tabular-nums">
+        0
+      </span>
+    );
+  }
+
+  let style = "border-emerald-200 bg-emerald-50 text-emerald-700";
+  let dot = "bg-emerald-500";
+
+  if (count === 4) {
+    style = "border-amber-200 bg-amber-50 text-amber-700";
+    dot = "bg-amber-500";
+  }
+
+  if (count >= 5) {
+    style = "border-red-200 bg-red-50 text-red-700";
+    dot = "bg-red-500";
+  }
+
+  return (
+    <span
+      title={`${count} geç giriş kaydı`}
+      className={`inline-flex min-w-[42px] items-center justify-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-extrabold tabular-nums ${style}`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+      {count}
+    </span>
+  );
+}
+
+function RoleAvatar({ role }: { role: RoleType }) {
+  if (role === "DEVELOPER") {
+    return (
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-violet-200 bg-violet-50 text-violet-700">
+        <Code2 size={17} strokeWidth={2.2} />
+      </div>
+    );
+  }
+
+  if (role === "MANAGER") {
+    return (
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-[#b91c1c]">
+        <ShieldCheck size={17} strokeWidth={2.2} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-100 text-slate-600">
+      <UserRound size={17} strokeWidth={2.1} />
+    </div>
+  );
+}
+
+function StatusBadge({ record }: { record: AttendanceRecord }) {
+  if (isLeaveStatus(record.status)) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wide text-blue-700">
+        <Calendar size={13} />
+        İzinli
+      </span>
+    );
+  }
+
+  if (!record.check_out_time) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wide text-emerald-700">
+        <span className="relative flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-40" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+        </span>
+        İçeride
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-100 px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wide text-slate-700">
+      <CheckCircle2 size={13} strokeWidth={2.5} />
+      Tamamlandı
+    </span>
+  );
+}
+
+function HeaderStat({
+  label,
+  value,
+  icon: Icon,
+  accent = false,
+}: {
+  label: string;
+  value: string | number;
+  icon: React.ElementType;
+  accent?: boolean;
+}) {
+  return (
+    <div className="flex min-w-[94px] items-center gap-2.5 rounded-lg border border-white/10 bg-white/[0.055] px-3 py-2">
+      <div
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${
+          accent
+            ? "bg-[#dc3545]/15 text-[#ff697b]"
+            : "bg-white/10 text-slate-300"
+        }`}
+      >
+        <Icon size={15} strokeWidth={2} />
+      </div>
+
+      <div className="min-w-0">
+        <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+          {label}
+        </div>
+
+        <div className="mt-0.5 text-[13px] font-extrabold leading-none text-white tabular-nums">
+          {value}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =============================================
+   MAIN COMPONENT
+============================================= */
+
 export default function AttendanceTable({
   branchId,
-  isDeveloper,
+  isDeveloper = false,
 }: AttendanceTableProps) {
-  const [records, setRecords] = useState<any[]>([]);
-  const [monthlyTotals, setMonthlyTotals] = useState<Record<string, number>>({});
+  const [records, setRecords] = useState<AttendanceRecord[]>([]);
+
+  const [monthlyTotals, setMonthlyTotals] = useState<Record<string, number>>(
+    {},
+  );
+
   const [monthlyLates, setMonthlyLates] = useState<Record<string, number>>({});
+
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState<Date | null>(null);
 
-  // --- 1. VERİ ÇEKME & MATEMATİK FONKSİYONU ---
+  const requestIdRef = useRef(0);
+
+  const canFetch = isDeveloper || (!!branchId && branchId !== "GLOBAL");
+
+  /* ===========================================
+     CLOCK
+  =========================================== */
+
+  useEffect(() => {
+    setNow(new Date());
+
+    const interval = window.setInterval(() => {
+      setNow(new Date());
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, []);
+
+  /* ===========================================
+     DATA FETCH
+  =========================================== */
+
   const fetchRecords = useCallback(
     async (showRefreshAnim = false) => {
-      if (!isDeveloper && (!branchId || branchId === "GLOBAL")) return;
+      const requestId = ++requestIdRef.current;
 
-      if (showRefreshAnim) setIsRefreshing(true);
-
-      const now = new Date();
-      
-      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0).toISOString();
-      const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).toISOString();
-      
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0).toISOString();
-      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
-
-      let dailyQuery = supabase
-        .from("attendance")
-        .select(`
-          id,
-          employee_id,
-          check_in_time,
-          check_out_time,
-          break_hours,
-          working_hours,
-          status,
-          employees!attendance_employee_id_fkey ( full_name, position_title, device_token ) 
-        `)
-        .gte("check_in_time", todayStart)
-        .lte("check_in_time", todayEnd)
-        .order("check_in_time", { ascending: false });
-
-      if (branchId && branchId !== "GLOBAL") {
-        dailyQuery = dailyQuery.eq("branch_id", branchId);
+      if (!canFetch) {
+        setRecords([]);
+        setMonthlyTotals({});
+        setMonthlyLates({});
+        setError(null);
+        setLoading(false);
+        setIsRefreshing(false);
+        return;
       }
 
-      const { data: dailyData, error: dailyError } = await dailyQuery;
-
-      if (dailyError) {
-        console.error("[WMS_DB_ERROR] Günlük mesai çekilemedi:", dailyError.message);
+      if (showRefreshAnim) {
+        setIsRefreshing(true);
       } else {
-        setRecords(dailyData || []);
+        setLoading(true);
       }
 
-      let monthlyQuery = supabase
-        .from("attendance")
-        .select("employee_id, working_hours, check_in_time, status")
-        .gte("check_in_time", monthStart)
-        .lte("check_in_time", monthEnd);
+      setError(null);
 
-      if (branchId && branchId !== "GLOBAL") {
-        monthlyQuery = monthlyQuery.eq("branch_id", branchId);
-      }
+      const { todayStart, tomorrowStart, monthStart, nextMonthStart } =
+        getDateRanges();
 
-      const { data: monthlyData, error: monthlyError } = await monthlyQuery;
+      try {
+        let dailyQuery = supabase
+          .from("attendance")
+          .select(
+            `
+            id,
+            employee_id,
+            check_in_time,
+            check_out_time,
+            break_hours,
+            working_hours,
+            status,
+            employees!attendance_employee_id_fkey (
+              full_name,
+              position_title,
+              device_token
+            )
+          `,
+          )
+          .gte("check_in_time", todayStart)
+          .lt("check_in_time", tomorrowStart)
+          .order("check_in_time", { ascending: false });
 
-      if (!monthlyError && monthlyData) {
+        if (branchId && branchId !== "GLOBAL") {
+          dailyQuery = dailyQuery.eq("branch_id", branchId);
+        }
+
+        const { data: dailyData, error: dailyError } = await dailyQuery;
+
+        if (dailyError) throw dailyError;
+
+        const monthlyData: MonthlyRecord[] = [];
+
+        // Supabase varsayılan satır limitinden
+        // etkilenmemek için aylık kayıtları
+        // parçalar halinde topluyoruz.
+        for (let from = 0; ; from += PAGE_SIZE) {
+          let monthlyQuery = supabase
+            .from("attendance")
+            .select("employee_id, working_hours, check_in_time, status")
+            .gte("check_in_time", monthStart)
+            .lt("check_in_time", nextMonthStart)
+            .order("check_in_time", { ascending: true })
+            .order("id", { ascending: true })
+            .range(from, from + PAGE_SIZE - 1);
+
+          if (branchId && branchId !== "GLOBAL") {
+            monthlyQuery = monthlyQuery.eq("branch_id", branchId);
+          }
+
+          const { data: monthlyPage, error: monthlyError } = await monthlyQuery;
+
+          if (monthlyError) throw monthlyError;
+
+          const page = (monthlyPage ?? []) as MonthlyRecord[];
+
+          monthlyData.push(...page);
+
+          if (page.length < PAGE_SIZE) break;
+
+          if (requestId !== requestIdRef.current) return;
+        }
+
         const totals: Record<string, number> = {};
         const lates: Record<string, number> = {};
 
-        monthlyData.forEach((row) => {
-          if (row.working_hours) {
-            if (!totals[row.employee_id]) totals[row.employee_id] = 0;
-            totals[row.employee_id] += Number(row.working_hours);
+        for (const row of monthlyData) {
+          const id = row.employee_id;
+
+          if (!id) continue;
+
+          if (!(id in totals)) totals[id] = 0;
+          if (!(id in lates)) lates[id] = 0;
+
+          const hours = Number(row.working_hours ?? 0);
+
+          if (Number.isFinite(hours)) {
+            totals[id] += hours;
           }
 
-          if (!lates[row.employee_id]) lates[row.employee_id] = 0;
-          if (row.check_in_time && (!row.status || !row.status.startsWith('LEAVE_'))) {
-            const d = new Date(row.check_in_time);
-            const localHours = d.getUTCHours() + 3;
-            const realHours = localHours >= 24 ? localHours - 24 : localHours; 
-            const mins = realHours * 60 + d.getUTCMinutes();
-            
-            if (mins > 495) { // 08:15 Sonrası
-              lates[row.employee_id]++;
+          if (row.check_in_time && !isLeaveStatus(row.status)) {
+            const minutes = getLateMinutes(row.check_in_time);
+
+            if (minutes !== null && minutes > 495) {
+              lates[id] += 1;
             }
           }
-        });
-        
+        }
+
+        if (requestId !== requestIdRef.current) return;
+
+        setRecords((dailyData ?? []) as unknown as AttendanceRecord[]);
         setMonthlyTotals(totals);
         setMonthlyLates(lates);
-      }
+      } catch (err) {
+        if (requestId !== requestIdRef.current) return;
 
-      setLoading(false);
-      if (showRefreshAnim) {
-        setTimeout(() => setIsRefreshing(false), 500);
+        console.error("[WMS_ATTENDANCE_ERROR]", err);
+
+        setError(
+          "Mesai kayıtları alınırken bir sorun oluştu. Lütfen tekrar deneyin.",
+        );
+      } finally {
+        if (requestId === requestIdRef.current) {
+          setLoading(false);
+          setIsRefreshing(false);
+        }
       }
     },
-    [branchId, isDeveloper],
+    [branchId, canFetch],
   );
 
+  /* ===========================================
+     REALTIME
+  =========================================== */
+
   useEffect(() => {
-    fetchRecords();
+    void fetchRecords();
 
-    const handleCustomTrigger = () => fetchRecords(true);
-    window.addEventListener("refresh-wms-attendance", handleCustomTrigger);
+    const handleRefresh = () => {
+      void fetchRecords(true);
+    };
 
-    const realtimeFilter = branchId && branchId !== "GLOBAL" ? `branch_id=eq.${branchId}` : undefined;
+    window.addEventListener("refresh-wms-attendance", handleRefresh);
+
+    if (!canFetch) {
+      return () => {
+        window.removeEventListener("refresh-wms-attendance", handleRefresh);
+        requestIdRef.current++;
+      };
+    }
+
+    const realtimeFilter =
+      branchId && branchId !== "GLOBAL"
+        ? `branch_id=eq.${branchId}`
+        : undefined;
 
     const channel = supabase
-      .channel("attendance_realtime")
+      .channel(`attendance_realtime_${branchId ?? "GLOBAL"}`)
       .on(
         "postgres_changes",
-        { 
-          event: "*", 
-          schema: "public", 
+        {
+          event: "*",
+          schema: "public",
           table: "attendance",
-          filter: realtimeFilter
+          ...(realtimeFilter ? { filter: realtimeFilter } : {}),
         },
-        () => fetchRecords(),
+        () => {
+          void fetchRecords(true);
+        },
       )
       .subscribe();
 
     return () => {
-      window.removeEventListener("refresh-wms-attendance", handleCustomTrigger);
-      supabase.removeChannel(channel);
+      window.removeEventListener("refresh-wms-attendance", handleRefresh);
+
+      requestIdRef.current++;
+      void supabase.removeChannel(channel);
     };
-  }, [fetchRecords, branchId]);
+  }, [fetchRecords, branchId, canFetch]);
+
+  /* ===========================================
+     SORTING & STATS
+  =========================================== */
 
   const sortedRecords = useMemo(() => {
-    if (!records || records.length === 0) return [];
-    const regular = records.filter(r => !(r.status && r.status.startsWith('LEAVE_')));
-    const leaves = records.filter(r => r.status && r.status.startsWith('LEAVE_'));
+    const regular = records.filter((record) => !isLeaveStatus(record.status));
+
+    const leaves = records.filter((record) => isLeaveStatus(record.status));
+
     return [...regular, ...leaves];
   }, [records]);
 
-  // --- YARDIMCI FONKSİYONLAR ---
-  const formatTime = (timeStr: string | null) => {
-    if (!timeStr) return "--:--";
-    return new Date(timeStr).toLocaleTimeString("tr-TR", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
+  const stats = useMemo(() => {
+    const regular = records.filter((record) => !isLeaveStatus(record.status));
 
-  const formatHours = (val: number | string | null) => {
-    if (val === null || val === undefined) return "--";
-    const num = Number(val);
-    if (num === 0) return "0s";
+    return {
+      total: records.length,
+      inside: regular.filter((record) => !record.check_out_time).length,
+      completed: regular.filter((record) => !!record.check_out_time).length,
+      leaves: records.filter((record) => isLeaveStatus(record.status)).length,
+    };
+  }, [records]);
 
-    const hours = Math.floor(num);
-    const minutes = Math.round((num - hours) * 60);
+  const currentTime = now ? formatTime(now.toISOString()) : "--:--";
 
-    let finalHours = hours;
-    let finalMinutes = minutes;
-    if (finalMinutes === 60) {
-      finalHours += 1;
-      finalMinutes = 0;
-    }
+  const currentDate = now ? formatDate(now) : "Tarih yükleniyor";
 
-    if (finalMinutes === 0) return `${finalHours}s`;
-    if (finalHours === 0) return `${finalMinutes}dk`;
-    return `${finalHours}s ${finalMinutes}dk`;
-  };
-
-  const getRoleType = (title?: string) => {
-    if (!title) return "PERSONNEL";
-    const lower = title.toLocaleLowerCase("tr-TR");
-    
-    if (lower.includes("developer") || lower.includes("geliştirici")) {
-      return "DEVELOPER";
-    }
-    if (["yönetici", "müdür", "şef", "admin", "lider","uzman"].some((k) => lower.includes(k))) {
-      return "MANAGER";
-    }
-    return "PERSONNEL";
-  };
-
-  const getEntryStatusDot = (timeStr: string | null) => {
-    if (!timeStr) return null;
-    const d = new Date(timeStr);
-    const localHours = d.getUTCHours() + 3;
-    const realHours = localHours >= 24 ? localHours - 24 : localHours; 
-    const totalMins = realHours * 60 + d.getUTCMinutes();
-
-    if (totalMins > 495) {
-      return <span className="w-2.5 h-2.5 rounded-full bg-[#dc3545] shrink-0 shadow-[0_0_6px_#dc3545] animate-pulse" title="Geç Giriş İhlali (> 08:15)"></span>;
-    }
-    else if (totalMins >= 491 && totalMins <= 495) {
-      return <span className="w-2.5 h-2.5 rounded-full bg-[#f97316] shrink-0 shadow-[0_0_6px_#f97316] animate-pulse" title="Tolerans Sınırında (08:11 - 08:15)"></span>;
-    }
-    return <span className="w-2.5 h-2.5 rounded-full bg-[#0b9c2d] shrink-0 shadow-[0_0_6px_#0b9c2d]" title="Zamanında Giriş"></span>;
-  };
-
-  const getLateBadge = (lateCount: number) => {
-    if (lateCount === 0) {
-      return (
-        <div className="flex justify-center">
-          <span className="text-slate-300 font-black text-[12px] opacity-70">-</span>
-        </div>
-      );
-    }
-
-    let gradientClass = "";
-    let boxClass = "";
-    let wrapperClass = "relative inline-flex p-[2px] rounded-sm overflow-hidden group shadow-sm";
-
-    if (lateCount <= 3) {
-      gradientClass = "bg-[conic-gradient(from_90deg_at_50%_50%,#ecfdf5_0%,#10b981_50%,#ecfdf5_100%)] animate-[spin_4s_linear_infinite]";
-      boxClass = "bg-emerald-50 text-emerald-700";
-    } else if (lateCount === 4) {
-      gradientClass = "bg-[conic-gradient(from_90deg_at_50%_50%,#fffbeb_0%,#f59e0b_50%,#fffbeb_100%)] animate-[spin_2s_linear_infinite]";
-      boxClass = "bg-amber-100 text-amber-800";
-    } else {
-      wrapperClass += " animate-pulse shadow-[0_0_8px_rgba(220,53,69,0.5)]";
-      gradientClass = "bg-[conic-gradient(from_90deg_at_50%_50%,#000000_0%,#dc3545_50%,#000000_100%)] animate-[spin_1s_linear_infinite]";
-      boxClass = "bg-red-600 text-white shadow-inner";
-    }
-
-    return (
-      <div className="flex justify-center">
-        <div className={wrapperClass}>
-          <span className={`absolute inset-[-1000%] ${gradientClass}`} />
-          <span className={`relative inline-flex items-center justify-center min-w-[20px] h-[20px] px-1 text-[10px] font-black tabular-nums rounded-[3px] ${boxClass}`}>
-            {lateCount}
-          </span>
-        </div>
-      </div>
-    );
-  };
+  /* ===========================================
+     RENDER
+  =========================================== */
 
   return (
-    <div className="bg-white border border-slate-200 w-full shadow-sm rounded-md overflow-hidden flex flex-col h-[700px]">
-      
-      {/* ENDÜSTRİYEL DARK HEADING & LEJANT */}
-      <div className="bg-[#0F172B] px-5 py-5 flex justify-between items-center border-b-4 border-[#dc3545] shrink-0 z-20 shadow-sm">
-        <div className="flex flex-col justify-center">
-          <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1.5">
-            CANLI İZLEME MODÜLÜ
+    <section className="flex h-[900px] w-full min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_4px_24px_rgba(15,23,42,0.06)]">
+      {/* =====================================
+          DARK HEADER
+      ===================================== */}
+
+      <div className="relative shrink-0 overflow-hidden bg-[#0F172B]">
+        <div className="absolute inset-x-0 top-0 h-[2px] bg-[#dc3545]" />
+
+        <div className="pointer-events-none absolute -right-16 -top-24 h-64 w-64 rounded-full bg-[#dc3545]/[0.055] blur-3xl" />
+
+        <div className="relative px-4 py-4 sm:px-5 lg:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            {/* HEADER TITLE */}
+
+            <div className="flex min-w-0 items-center gap-3.5">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.07]">
+                <Activity
+                  size={21}
+                  strokeWidth={2.1}
+                  className="text-[#ff6075]"
+                />
+              </div>
+
+              <div className="min-w-0">
+                <div className="mb-1.5 flex flex-wrap items-center gap-2">
+                  <span className="text-[9px] font-extrabold uppercase tracking-[0.17em] text-slate-400">
+                    PERSONEL TAKİP SİSTEMİ
+                  </span>
+
+                  <span className="inline-flex items-center gap-1.5 rounded border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wider text-emerald-400">
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+                    CANLI
+                  </span>
+                </div>
+
+                <h2 className="truncate text-[15px] font-black uppercase tracking-[0.025em] text-white sm:text-[16px]">
+                  Günlük Mesai Hareketleri
+                </h2>
+
+                <div className="mt-1 flex items-center gap-1.5 text-[10px] font-medium text-slate-400">
+                  <CalendarDays size={11} />
+                  <span>{currentDate}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* HEADER RIGHT */}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="hidden xl:flex items-center gap-2 rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2">
+                <Wifi size={13} className="text-emerald-400" />
+
+                <div>
+                  <div className="text-[8px] font-bold uppercase tracking-wider text-slate-500">
+                    SİSTEM
+                  </div>
+
+                  <div className="text-[10px] font-extrabold text-slate-200">
+                    ANLIK TAKİP
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex min-w-[84px] items-center gap-2.5 rounded-lg border border-white/10 bg-white/[0.05] px-3 py-2">
+                <Clock3 size={15} className="text-slate-400" />
+
+                <div>
+                  <div className="text-[8px] font-bold uppercase tracking-wider text-slate-500">
+                    SAAT
+                  </div>
+
+                  <div className="text-[14px] font-black leading-tight text-white tabular-nums">
+                    {currentTime}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => void fetchRecords(true)}
+                disabled={loading || isRefreshing || !canFetch}
+                title="Mesai kayıtlarını yenile"
+                aria-label="Mesai kayıtlarını yenile"
+                className="group flex h-[42px] w-[42px] items-center justify-center rounded-lg border border-white/15 bg-white/[0.07] text-slate-300 transition-all duration-200 hover:border-[#dc3545] hover:bg-[#dc3545] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <RefreshCw
+                  size={17}
+                  strokeWidth={2.3}
+                  className={`transition-transform duration-300 ${
+                    loading || isRefreshing
+                      ? "animate-spin"
+                      : "group-hover:rotate-90"
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+
+          {/* HEADER STATS */}
+
+          <div className="mt-4 grid grid-cols-2 gap-2 border-t border-white/10 pt-3 sm:grid-cols-4">
+            <HeaderStat
+              label="Toplam Kayıt"
+              value={stats.total}
+              icon={UsersRound}
+            />
+
+            <HeaderStat
+              label="İçeride"
+              value={stats.inside}
+              icon={LogIn}
+              accent
+            />
+
+            <HeaderStat
+              label="Tamamlandı"
+              value={stats.completed}
+              icon={CheckCircle2}
+            />
+
+            <HeaderStat
+              label="İzinli"
+              value={stats.leaves}
+              icon={CalendarDays}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* =====================================
+          INFO & LEGEND
+      ===================================== */}
+
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-[#f8fafc] px-4 py-2.5 sm:px-6">
+        <div className="flex items-center gap-2">
+          <div className="flex h-6 w-6 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500">
+            <Activity size={12} />
+          </div>
+
+          <span className="text-[10px] font-extrabold uppercase tracking-[0.075em] text-slate-700">
+            Personel Hareket Listesi
           </span>
-          <span className="text-sm font-black text-white flex items-center gap-2.5 uppercase tracking-wide">
-            <span className="w-2.5 h-2.5 rounded-sm bg-[#dc3545] animate-pulse shadow-[0_0_8px_#dc3545]"></span>
-            GÜNLÜK MESAİ HAREKETLERİ
+
+          <span className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-extrabold text-slate-600 tabular-nums">
+            {records.length}
           </span>
         </div>
 
-        <div className="hidden lg:flex items-center gap-3 bg-[#1E293B] border border-slate-700 px-3 py-1.5 rounded-sm shadow-inner text-[9px] font-bold uppercase tracking-wider text-slate-300">
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-[#0b9c2d]"></span> &lt;08:10
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-[#f97316]"></span> 08:11-08:15
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-[#dc3545]"></span> &gt;08:15
-          </span>
-        </div>
-
-        <div className="flex gap-2 text-center items-center">
-          <div className="bg-[#1E293B] px-3 py-1.5 border border-slate-700 rounded-sm shadow-inner min-w-[60px] flex flex-col justify-center">
-            <span className="block text-[9px] text-white font-bold uppercase tracking-wider">SAAT</span>
-            <span className="text-sm font-black text-white font-mono tabular-nums">
-              {new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            <span className="text-[9px] font-bold text-slate-500">
+              08:10 ve öncesi
             </span>
           </div>
 
-          <div className="bg-[#1E293B] px-3 py-1.5 border border-slate-700 rounded-sm shadow-inner min-w-[60px] flex flex-col justify-center">
-            <span className="block text-[9px] text-white font-bold uppercase tracking-wider">KAYIT</span>
-            {loading ? (
-              <span className="text-sm font-black text-white font-mono h-5 flex items-center justify-center">
-                <span className="w-3 h-3 border-[3px] border-t-transparent border-white rounded-full animate-spin"></span>
-              </span>
-            ) : (
-              <span className="text-sm font-black text-white font-mono tabular-nums">{records.length}</span>
-            )}
+          <div className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-amber-500" />
+            <span className="text-[9px] font-bold text-slate-500">
+              08:11 - 08:15
+            </span>
           </div>
 
-          <div className="bg-[#1E293B] px-2 py-1.5 border border-slate-700 rounded-sm shadow-inner flex flex-col justify-center ml-1">
-            <button
-              onClick={() => fetchRecords(true)}
-              disabled={loading || isRefreshing}
-              className="bg-[#0F172B] hover:bg-[#dc3545] border border-slate-600 hover:border-[#dc3545] transition-all duration-300 h-[34px] px-3 rounded-sm shadow-sm flex items-center justify-center text-slate-300 hover:text-white disabled:opacity-50 group"
-              title="Tabloyu Yenile"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 transition-transform duration-500 group-hover:rotate-180 ${isRefreshing ? "animate-spin text-white" : ""}`} strokeWidth={2.5} />
-            </button>
+          <div className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-[#dc3545]" />
+            <span className="text-[9px] font-bold text-slate-500">
+              08:15 sonrası
+            </span>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto bg-white">
-        <table className="w-full text-xs text-left border-collapse">
-          <thead className="bg-slate-50 border-b border-slate-200 text-[9px] font-black text-slate-500 uppercase tracking-widest sticky top-0 z-10 shadow-sm">
-            <tr>
-              <th className="px-5 py-3 text-left">Personel Bilgisi</th>
-              <th className="px-3 py-3 text-center whitespace-nowrap w-[110px]">Giriş Saati</th>
-              <th className="px-3 py-3 text-center whitespace-nowrap w-[110px]">Çıkış Saati</th>
-              <th className="px-3 py-3 text-center text-amber-600 whitespace-nowrap w-[90px]">
-                <div className="flex items-center justify-center gap-1"><Coffee className="w-3 h-3" /> Mola</div>
+      {/* =====================================
+          ERROR
+      ===================================== */}
+
+      {error && (
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-red-200 bg-red-50 px-3 py-1">
+          <div className="flex items-center gap-2 text-[11px] font-semibold text-red-700">
+            <CircleAlert size={15} />
+            {error}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void fetchRecords(true)}
+            className="shrink-0 text-[10px] font-extrabold uppercase text-red-700 underline underline-offset-2"
+          >
+            Tekrar Dene
+          </button>
+        </div>
+      )}
+
+      {/* =====================================
+          TABLE
+      ===================================== */}
+
+      <div className="relative min-h-0 flex-1 overflow-auto bg-white">
+        <table className="w-full min-w-[1040px] border-separate border-spacing-0 text-left">
+          {/* TABLE HEADER */}
+
+          <thead className="sticky top-0 z-20">
+            <tr className="bg-slate-100">
+              <th className="w-[240px] border-b border-r border-slate-200 bg-slate-100 px-3 py-1.5 text-left">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                  Personel Bilgisi
+                </span>
               </th>
-              <th className="px-3 py-3 text-center text-slate-500 whitespace-nowrap w-[95px]">
-                <div className="flex items-center justify-center gap-1"><Clock className="w-3 h-3" /> Günlük</div>
+
+              <th className="w-[115px] border-b border-r border-slate-200 bg-slate-100 px-3 py-3.5 text-center">
+                <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                  <LogIn size={13} />
+                  Giriş
+                </span>
               </th>
-              <th className="px-3 py-3 text-center text-slate-500 whitespace-nowrap w-[85px]">
-                <div className="flex items-center justify-center gap-1"><AlertCircle className="w-3 h-3 text-[#dc3545]" /> İhlal</div>
+
+              <th className="w-[115px] border-b border-r border-slate-200 bg-slate-100 px-3 py-3.5 text-center">
+                <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                  <LogOut size={13} />
+                  Çıkış
+                </span>
               </th>
-              <th className="px-3 py-3 text-center text-[#0F172B] bg-slate-100 border-l border-r border-slate-200 whitespace-nowrap w-[110px]">
-                <div className="flex items-center justify-center gap-1"><CalendarDays className="w-3 h-3 text-[#0F172B]" /> Aylık</div>
+
+              <th className="w-[95px] border-b border-r border-slate-200 bg-slate-100 px-3 py-3.5 text-center">
+                <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap text-[10px] font-extrabold uppercase tracking-wider text-amber-700">
+                  <Coffee size={13} />
+                  Mola
+                </span>
               </th>
-              <th className="px-5 py-3 text-right whitespace-nowrap w-[130px]">Durum</th>
+
+              <th className="w-[115px] border-b border-r border-slate-200 bg-slate-100 px-3 py-3.5 text-center">
+                <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                  <Timer size={13} />
+                  Günlük
+                </span>
+              </th>
+
+              <th className="w-[95px] border-b border-r border-slate-200 bg-slate-100 px-3 py-3.5 text-center">
+                <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                  <AlertTriangle size={13} className="text-[#dc3545]" />
+                  İhlal
+                </span>
+              </th>
+
+              <th className="w-[125px] border-b border-r border-[#cdd5e1] bg-[#e7ecf3] px-3 py-3.5 text-center">
+                <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap text-[10px] font-black uppercase tracking-wider text-[#0F172B]">
+                  <CalendarDays size={13} />
+                  Aylık
+                </span>
+              </th>
+
+              <th className="w-[145px] border-b border-slate-200 bg-slate-100 px-3 py-1.5 text-right">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
+                  Durum
+                </span>
+              </th>
             </tr>
           </thead>
-          
-          <tbody className="divide-y divide-slate-100">
-            {loading && sortedRecords.length === 0 ? (
+
+          {/* TABLE BODY */}
+
+          <tbody>
+            {loading && records.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-3 py-20 text-center bg-white">
-                  <div className="flex flex-col items-center justify-center gap-3 text-slate-400">
-                    <div className="w-8 h-8 border-4 border-slate-100 border-t-[#dc3545] rounded-full animate-spin"></div>
-                    <span className="text-[10px] font-bold uppercase tracking-widest">Kayıtlar Hesaplanıyor...</span>
+                <td colSpan={8} className="px-5 py-24 text-center">
+                  <div className="flex flex-col items-center justify-center gap-4">
+                    <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-slate-200 bg-slate-50">
+                      <RefreshCw
+                        size={23}
+                        className="animate-spin text-[#dc3545]"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="text-[12px] font-extrabold uppercase tracking-wide text-slate-700">
+                        Mesai kayıtları yükleniyor
+                      </div>
+
+                      <div className="mt-1.5 text-[11px] text-slate-400">
+                        Personel verileri hazırlanıyor...
+                      </div>
+                    </div>
                   </div>
                 </td>
               </tr>
-            ) : sortedRecords && sortedRecords.length > 0 ? (
-              sortedRecords.map((record: any, index: number) => {
-                const roleType = getRoleType(record.employees?.position_title);
-                const employeeId = record.employee_id;
-                const monthlyTotal = monthlyTotals[employeeId] || 0;
-                const monthlyLate = monthlyLates[employeeId] || 0;
+            ) : !error && sortedRecords.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="px-5 py-24 text-center">
+                  <div className="flex flex-col items-center justify-center gap-3">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-300">
+                      <SearchX size={28} strokeWidth={1.6} />
+                    </div>
 
-                const isLeave = record.status && record.status.startsWith('LEAVE_');
-                const leaveText = isLeave ? record.status.replace('LEAVE_', '').replace(/_/g, ' ') : '';
-                
-                const isEven = index % 2 === 0;
+                    <div>
+                      <div className="text-[12px] font-extrabold uppercase tracking-wide text-slate-700">
+                        Henüz Mesai Kaydı Bulunmuyor
+                      </div>
+
+                      <p className="mt-1.5 text-[11px] font-medium text-slate-400">
+                        Bugün için personel hareketi kaydedilmedi.
+                      </p>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              sortedRecords.map((record, index) => {
+                const roleType = getRoleType(record.employees?.position_title);
+
+                const employeeId = record.employee_id;
+
+                const monthlyTotal = monthlyTotals[employeeId] ?? 0;
+
+                const monthlyLate = monthlyLates[employeeId] ?? 0;
+
+                const isLeave = isLeaveStatus(record.status);
+
+                const leaveText = getLeaveName(record.status);
+
+                const isMedicalLeave = leaveText === "SAĞLIK RAPORU";
 
                 return (
-                  <tr key={record.id} className={`transition-all duration-200 hover:bg-slate-100 ${isEven ? 'bg-white' : 'bg-[#f8fafc]'} ${isLeave ? 'bg-blue-50/20' : ''}`}>
-                    
-                    <td className="px-5 py-2.5 font-bold text-slate-800 text-left min-w-[200px]">
-                      <div className="flex items-center gap-3">
-                        {roleType === "DEVELOPER" ? (
-                          <div className="relative inline-flex p-[2px] rounded-md overflow-hidden group shrink-0">
-                            <span className="absolute inset-[-1000%] animate-[spin_4s_linear_infinite] bg-[conic-gradient(from_90deg_at_50%_50%,#33cc00_0%,#9333ea_50%,#eb9100_100%)]" />
-                            <div className="relative flex items-center justify-center w-7 h-7 rounded-sm bg-[#a600cf] text-white">
-                              <Code2 className="w-4 h-4" strokeWidth={2.5} />
-                            </div>
-                          </div>
-                        ) : roleType === "MANAGER" ? (
-                          <div className="flex items-center justify-center w-8 h-8 rounded-sm bg-[#8f0000] text-white shrink-0">
-                            <ShieldCheck className="w-4 h-4" strokeWidth={2.5} />
-                          </div>
-                        ) : (
-                          <div className="flex items-center justify-center w-8 h-8 rounded-sm bg-[#cc0014] text-white shrink-0">
-                            <User className="w-4 h-4" strokeWidth={2.5} />
-                          </div>
-                        )}
+                  <tr
+                    key={record.id}
+                    className={`group transition-colors duration-150 hover:bg-[#f1f5f9] ${
+                      index % 2 === 0 ? "bg-white" : "bg-[#fafbfd]"
+                    }`}
+                  >
+                    {/* PERSONNEL */}
 
-                        <div className="flex flex-col gap-0.5 text-left">
-                          <span className="text-[11px] uppercase tracking-wide truncate max-w-[130px] sm:max-w-[170px] text-slate-900">{record.employees?.full_name || "BİLİNMEYEN"}</span>
-                          <span className={`text-[9px] uppercase tracking-wider text-left ${roleType === 'DEVELOPER' ? 'text-purple-600 font-bold' : 'text-slate-400'}`}>
-                            {record.employees?.position_title || "PERSONEL"}
-                          </span>
+                    <td className="border-b border-r border-slate-100 px-3 py-1">
+                      <div className="flex items-center gap-3">
+                        <RoleAvatar role={roleType} />
+
+                        <div className="min-w-0">
+                          <div
+                            title={
+                              record.employees?.full_name ??
+                              "Bilinmeyen Personel"
+                            }
+                            className="max-w-[190px] truncate text-[11px] font-extrabold uppercase tracking-[0.015em] text-[#0F172B]"
+                          >
+                            {record.employees?.full_name ||
+                              "BİLİNMEYEN PERSONEL"}
+                          </div>
+
+                          <div className="mt-1 flex items-center gap-1.5">
+                            {roleType === "DEVELOPER" && (
+                              <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
+                            )}
+
+                            <span
+                              className={`max-w-[180px] truncate text-[9px] font-bold uppercase tracking-wide ${
+                                roleType === "DEVELOPER"
+                                  ? "text-violet-600"
+                                  : roleType === "MANAGER"
+                                    ? "text-red-600"
+                                    : "text-slate-400"
+                              }`}
+                            >
+                              {record.employees?.position_title || "PERSONEL"}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </td>
 
+                    {/* LEAVE OR WORKING RECORD */}
+
                     {isLeave ? (
-                      <td colSpan={5} className="px-3 py-2.5 text-center">
-                        <span className={`inline-flex items-center justify-center gap-2 w-full max-w-[300px] px-3 py-1.5 rounded-sm border text-[9px] font-black uppercase tracking-widest shadow-sm ${
-                          leaveText === 'SAGLIK RAPORU' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-blue-50 text-blue-700 border-blue-200'
-                        }`}>
-                          <Calendar className="w-3.5 h-3.5" />
-                          {leaveText === 'SAGLIK RAPORU' ? 'SAĞLIK RAPORU' : `${leaveText}`}
-                        </span>
+                      <td
+                        colSpan={5}
+                        className="border-b border-r border-slate-100 px-4 py-3 text-center"
+                      >
+                        <div
+                          className={`mx-auto flex max-w-[340px] items-center justify-center gap-2 rounded-md border px-3 py-2 ${
+                            isMedicalLeave
+                              ? "border-red-200 bg-red-50 text-red-700"
+                              : "border-blue-200 bg-blue-50 text-blue-700"
+                          }`}
+                        >
+                          <CalendarDays size={15} strokeWidth={2.1} />
+
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider">
+                            {leaveText}
+                          </span>
+                        </div>
                       </td>
                     ) : (
                       <>
-                        <td className="px-3 py-2.5 text-center font-black text-slate-700 tabular-nums text-[12px] whitespace-nowrap">
-                          <div className="flex items-center justify-center gap-2">
-                            {getEntryStatusDot(record.check_in_time)}
-                            <span className="min-w-[40px] text-left">{formatTime(record.check_in_time)}</span>
+                        {/* CHECK IN */}
+
+                        <td className="border-b border-r border-slate-100 px-3 py-3 text-center">
+                          <div className="inline-flex items-center justify-center gap-2">
+                            <EntryIndicator time={record.check_in_time} />
+
+                            <span className="text-[12px] font-extrabold text-slate-800 tabular-nums">
+                              {formatTime(record.check_in_time)}
+                            </span>
                           </div>
                         </td>
-                        <td className="px-3 py-2.5 text-center font-bold text-slate-500 tabular-nums text-[12px] whitespace-nowrap">{formatTime(record.check_out_time)}</td>
-                        <td className="px-3 py-2.5 text-center font-bold text-amber-600 tabular-nums whitespace-nowrap">{record.break_hours ? `${Number(record.break_hours)}s` : "0s"}</td>
-                        <td className="px-3 py-2.5 text-center font-bold text-slate-700 tabular-nums text-[12px] whitespace-nowrap">
-                          <span className="bg-slate-50 border border-slate-200 px-2 py-1 rounded-sm inline-block">{record.working_hours ? formatHours(record.working_hours) : "--"}</span>
+
+                        {/* CHECK OUT */}
+
+                        <td className="border-b border-r border-slate-100 px-3 py-3 text-center">
+                          {record.check_out_time ? (
+                            <span className="text-[12px] font-bold text-slate-700 tabular-nums">
+                              {formatTime(record.check_out_time)}
+                            </span>
+                          ) : (
+                            <span className="text-[12px] font-bold text-slate-300">
+                              --:--
+                            </span>
+                          )}
                         </td>
-                        <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                          {getLateBadge(monthlyLate)}
+
+                        {/* BREAK */}
+
+                        <td className="border-b border-r border-slate-100 px-3 py-3 text-center">
+                          <span className="text-[11px] font-bold text-amber-700 tabular-nums">
+                            {formatHours(record.break_hours ?? 0)}
+                          </span>
+                        </td>
+
+                        {/* DAILY HOURS */}
+
+                        <td className="border-b border-r border-slate-100 px-3 py-3 text-center">
+                          <span className="inline-flex min-w-[64px] items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-extrabold text-slate-700 tabular-nums">
+                            {record.working_hours !== null &&
+                            record.working_hours !== undefined
+                              ? formatHours(record.working_hours)
+                              : "--"}
+                          </span>
+                        </td>
+
+                        {/* LATE VIOLATIONS */}
+
+                        <td className="border-b border-r border-slate-100 px-3 py-3 text-center">
+                          <LateBadge count={monthlyLate} />
                         </td>
                       </>
                     )}
 
-                    <td className="px-3 py-2.5 text-center font-black text-[#0F172B] bg-slate-50 border-l border-r border-slate-200 tabular-nums text-[12px] whitespace-nowrap">
-                      {monthlyTotal > 0 ? formatHours(monthlyTotal) : "0s"}
+                    {/* MONTHLY HOURS */}
+
+                    <td className="border-b border-r border-[#e2e8f0] bg-[#f1f5f9]/70 px-3 py-3 text-center group-hover:bg-[#e7edf5]">
+                      <div className="inline-flex items-center justify-center gap-1.5">
+                        <span className="text-[12px] font-black text-[#0F172B] tabular-nums">
+                          {formatHours(monthlyTotal)}
+                        </span>
+                      </div>
                     </td>
 
-                    <td className="px-5 py-2.5 text-right whitespace-nowrap">
-                      {isLeave ? (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-1.5 text-blue-700 bg-blue-50 rounded-sm border border-blue-200 text-[9px] font-black uppercase tracking-widest">
-                          <CheckCircle2 className="w-3.5 h-3.5" strokeWidth={3} /> Onaylandı
-                        </span>
-                      ) : !record.check_out_time ? (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-1.5 text-emerald-600 bg-emerald-50 rounded-sm border border-emerald-200 text-[9px] font-black uppercase tracking-widest">
-                          <Clock className="w-3.5 h-3.5 text-emerald-500" strokeWidth={3} /> İÇERİDE
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 px-2 py-1.5 text-white bg-emerald-700 rounded-sm border border-emerald-800 text-[9px] font-black uppercase tracking-widest shadow-sm">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-white" strokeWidth={3} /> TAMAMLANDI
-                        </span>
-                      )} 
+                    {/* STATUS */}
+
+                    <td className="border-b border-slate-100 px-3 py-1 text-right">
+                      <StatusBadge record={record} />
                     </td>
                   </tr>
                 );
               })
-            ) : (
-              <tr>
-                <td colSpan={8} className="px-3 py-16 text-center bg-white">
-                  <div className="flex flex-col items-center justify-center gap-2 text-slate-400">
-                    <Clock size={28} className="opacity-20 mb-1" />
-                    <span className="text-[10px] font-bold uppercase tracking-widest">
-                      BUGÜN İÇİN HENÜZ MESAİ HAREKETİ BULUNMUYOR
-                    </span>
-                  </div>
-                </td>
-              </tr>
             )}
           </tbody>
         </table>
       </div>
-    </div>
+
+      {/* =====================================
+          FOOTER
+      ===================================== */}
+
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-200 bg-[#f8fafc] px-4 py-3 sm:px-6">
+        <div className="flex items-center gap-2">
+          <span className="flex h-6 w-6 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500">
+            <UsersRound size={12} />
+          </span>
+
+          <span className="text-[10px] font-semibold text-slate-500">
+            Toplam{" "}
+            <strong className="font-extrabold text-[#0F172B]">
+              {records.length}
+            </strong>{" "}
+            kayıt görüntüleniyor
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+
+          <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500">
+            Otomatik Veri Takibi
+          </span>
+
+          <span className="hidden text-[9px] font-semibold text-slate-400 sm:inline">
+            • Türkiye Saati (UTC+3)
+          </span>
+        </div>
+      </div>
+    </section>
   );
 }

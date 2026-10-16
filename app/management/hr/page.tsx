@@ -108,7 +108,7 @@ export default async function HRManagementPage() {
             YENİ DİNAMİK QR MESAİ SİSTEMİ
           </h2>
           <p className="text-sm font-bold text-slate-500 mb-6 tracking-wide leading-relaxed">
-            Sistem güvenliğini artırmak amacıyla personel giriş/çıkışları artık kişisel mobil cihazlardan, <strong className="text-[#dc3545]">10 saniyede bir yenilenen Dinamik QR kod</strong> ile yapılmaktadır. Cihaz zimmetleme aktif edilmiştir.
+            Sistem güvenliğini artırmak amacıyla personel giriş/çıkışları artık kişisel mobil cihazlardan, <strong className="text-[#dc3545]">15 saniyede bir yenilenen Dinamik QR kod</strong> ile yapılmaktadır. Cihaz zimmetleme aktif edilmiştir.
           </p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

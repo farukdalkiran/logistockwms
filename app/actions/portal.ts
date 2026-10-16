@@ -1,0 +1,269 @@
+'use server'
+
+import { cookies } from 'next/headers';
+import { createClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
+
+// GÜVENLİK KONTROLÜ: Service Role Key var mı?
+if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.error("🚨 KRİTİK HATA: .env.local içinde SUPABASE_SERVICE_ROLE_KEY bulunamadı!");
+}
+
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+const PORTAL_COOKIE = 'wms_portal_session';
+const QR_SECRET = process.env.SUPABASE_SERVICE_ROLE_KEY || 'logistock_secret_key';
+const TIME_STEP_SEC = 15; // 15 saniyelik bloklar
+
+// ==========================================
+// 1. PERSONEL GİRİŞ MOTORU
+// ==========================================
+export async function portalLogin(empId: string, passwordInput: string) {
+  try {
+    const { data: employee, error } = await supabaseAdmin
+      .from('employees')
+      .select('id, full_name, is_active, password')
+      .eq('id', empId)
+      .maybeSingle();
+
+    if (error) return { success: false, message: 'Veritabanı bağlantı hatası.' };
+    if (!employee) return { success: false, message: 'Bu ID sistemde kayıtlı değil!' };
+
+    const dbPassword = (employee.password || '').trim();
+    const inputPassword = (passwordInput || '').trim();
+
+    if (dbPassword !== inputPassword) return { success: false, message: 'Şifreniz hatalı!' };
+    if (!employee.is_active) return { success: false, message: 'Hesabınız pasife alınmış.' };
+
+    if (inputPassword.toLowerCase().startsWith('lgs')) {
+      return { success: true, requirePasswordChange: true };
+    }
+
+    const cookieStore = await cookies();
+    cookieStore.set(PORTAL_COOKIE, employee.id, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 365,
+    });
+
+    return { success: true, requirePasswordChange: false };
+  } catch (err: any) {
+    return { success: false, message: 'Beklenmeyen bir sunucu hatası oluştu.' };
+  }
+}
+
+// ==========================================
+// 2. KATI KURALLI ŞİFRE YENİLEME MOTORU
+// ==========================================
+export async function portalChangePassword(empId: string, newPassword: string) {
+  const pwd = newPassword.trim();
+  const hasLetter = /[a-zA-Z]/.test(pwd);
+  const hasSymbol = /[^a-zA-Z0-9\s]/.test(pwd);
+  const isLengthValid = pwd.length >= 8 && pwd.length <= 14;
+
+  if (!isLengthValid || !hasLetter || !hasSymbol) {
+    return { success: false, message: 'Şifreniz 8-14 karakter olmalı, harf ve sembol içermelidir.' };
+  }
+
+  const { error } = await supabaseAdmin.from('employees').update({ password: pwd }).eq('id', empId);
+  if (error) return { success: false, message: 'Şifre güncellenemedi.' };
+
+  const cookieStore = await cookies();
+  cookieStore.set(PORTAL_COOKIE, empId, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 60 * 60 * 24 * 365,
+  });
+
+  return { success: true };
+}
+
+// ==========================================
+// 3. OTURUM VE ÇIKIŞ İŞLEMLERİ
+// ==========================================
+export async function getPortalSession() {
+  const cookieStore = await cookies();
+  const empId = cookieStore.get(PORTAL_COOKIE)?.value;
+  if (!empId) return null;
+
+  const { data: employee } = await supabaseAdmin
+    .from('employees')
+    .select(`
+      id, 
+      full_name, 
+      branch_id,
+      branches (name)
+    `)
+    .eq('id', empId)
+    .single();
+
+  if (!employee) return null;
+
+  let branchName = 'MERKEZ KADRO';
+  if (employee.branches) {
+    if (Array.isArray(employee.branches) && employee.branches.length > 0) {
+      branchName = employee.branches[0].name;
+    } else if (!Array.isArray(employee.branches) && (employee.branches as any).name) {
+      branchName = (employee.branches as any).name;
+    }
+  }
+
+  return {
+    ...employee,
+    resolvedBranchName: branchName
+  };
+}
+
+export async function portalLogout() {
+  const cookieStore = await cookies();
+  cookieStore.delete(PORTAL_COOKIE);
+  return { success: true };
+}
+
+// ==========================================
+// 4. DİNAMİK 15 SN QR KOD ÜRETİCİ (Veri Çıktılı)
+// ==========================================
+export async function getFreshQR() {
+  const emp = await getPortalSession();
+  if (!emp) return { success: false };
+
+  const now = new Date();
+  
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const localDateStr = `${year}-${month}-${day}`; 
+  
+  const hour = String(now.getHours()).padStart(2, '0');
+  const minute = String(now.getMinutes()).padStart(2, '0');
+  const localTimeStr = `${hour}:${minute}`; 
+  
+  const secBlock = Math.floor(now.getSeconds() / TIME_STEP_SEC);
+
+  const payload = `${emp.id}:${localDateStr}:${localTimeStr}:${secBlock}`;
+  
+  const hash = crypto.createHmac('sha256', QR_SECRET)
+    .update(payload)
+    .digest('hex')
+    .substring(0, 6)
+    .toUpperCase();
+  
+  // Örn: wms_39760_2026-10-16_10:57_2_A1B2C3
+  return { 
+    success: true, 
+    qrData: `wms_${emp.id}_${localDateStr}_${localTimeStr}_${secBlock}_${hash}` 
+  };
+}
+
+// ==========================================
+// 5. TERMİNAL OKUYUCU İÇİN QR DOĞRULAYICI (Anti-Tampering & Anti-Replay)
+// ==========================================
+export async function verifyPortalQR(scannedQR: string) {
+  if (!scannedQR || !scannedQR.startsWith('wms_')) {
+    return { success: false, message: 'GEÇERSİZ BARKOD FORMATI' };
+  }
+
+  const parts = scannedQR.split('_');
+  if (parts.length !== 6) {
+    return { success: false, message: 'HATALI BARKOD YAPISI' };
+  }
+
+  const empId = parts[1];
+  const dateStr = parts[2];
+  const timeStr = parts[3];
+  const secBlock = parseInt(parts[4]);
+  const scannedHash = parts[5];
+
+  // 1. Kurcalama (Tampering) Kontrolü
+  const payload = `${empId}:${dateStr}:${timeStr}:${secBlock}`;
+  const expectedHash = crypto.createHmac('sha256', QR_SECRET)
+    .update(payload)
+    .digest('hex')
+    .substring(0, 6)
+    .toUpperCase();
+  
+  if (scannedHash !== expectedHash) {
+    return { success: false, message: 'GÜVENLİK İHLALİ: BARKOD DEĞİŞTİRİLMİŞ!' };
+  }
+
+  // 2. Süre (Anti-Replay / Ekran Görüntüsü) Kontrolü
+  const barcodeTime = new Date(`${dateStr}T${timeStr}:00`);
+  barcodeTime.setSeconds(secBlock * TIME_STEP_SEC);
+  
+  const now = new Date();
+  const diffMs = now.getTime() - barcodeTime.getTime();
+  
+  if (diffMs > 30000 || diffMs < -5000) {
+    return { success: false, message: 'SÜRESİ GEÇMİŞ QR! LÜTFEN EKRANI YENİLEYİNİZ.' };
+  }
+
+  return { 
+    success: true, 
+    empId, 
+    recordedDate: dateStr, 
+    recordedTime: timeStr 
+  };
+}
+
+// ==========================================
+// 6. AYLIK İSTATİSTİK VE GÜNLÜK LOG TABLOSU
+// ==========================================
+export async function getPortalStats() {
+  const emp = await getPortalSession();
+  if (!emp) return null;
+
+  const date = new Date();
+  const firstDay = new Date(date.getFullYear(), date.getMonth(), 1).toISOString();
+  const today = new Date().toISOString();
+
+  const { data: attendances } = await supabaseAdmin
+    .from('attendance')
+    .select('check_in_time, check_out_time, working_hours, status')
+    .eq('employee_id', emp.id)
+    .gte('check_in_time', firstDay)
+    .lte('check_in_time', today)
+    .order('check_in_time', { ascending: false });
+
+  let totalHours = 0;
+  let overTime = 0;
+  const presentDaysCount = attendances?.length || 0;
+  const logs: any[] = [];
+
+  if (attendances) {
+    attendances.forEach(att => {
+      const hrs = att.working_hours || 0;
+      totalHours += hrs;
+      if (hrs > 8) overTime += (hrs - 8);
+
+      const inDate = new Date(att.check_in_time);
+      const outDate = att.check_out_time ? new Date(att.check_out_time) : null;
+
+      logs.push({
+        date: inDate.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' }),
+        checkIn: inDate.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
+        checkOut: outDate ? outDate.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : '-',
+        hours: hrs > 0 ? hrs.toFixed(1) : '-',
+        status: att.status
+      });
+    });
+  }
+
+  let pastWorkingDays = 0;
+  for (let d = new Date(firstDay); d <= new Date(); d.setDate(d.getDate() + 1)) {
+    if (d.getDay() !== 0 && d.getDay() !== 6) pastWorkingDays++; 
+  }
+
+  const missingDays = Math.max(0, pastWorkingDays - presentDaysCount);
+
+  return {
+    totalHours: totalHours.toFixed(1),
+    overTime: overTime.toFixed(1),
+    missingDays,
+    logs
+  };
+}

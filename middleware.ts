@@ -9,6 +9,38 @@ export async function middleware(req: NextRequest) {
     },
   });
 
+  const path = req.nextUrl.pathname;
+
+  // 1. STATİK DOSYALAR VE API İSTİSNALARI (Performans)
+  if (
+    path.startsWith("/_next") ||
+    path.startsWith("/favicon.ico") ||
+    path.match(/\.(png|jpg|jpeg|gif|svg)$/)
+  ) {
+    return res;
+  }
+
+  // ==========================================
+  // 2. SAHA PERSONELİ (PORTAL) ZIRHI VE BYPASS
+  // ==========================================
+  // Bu rotalar Supabase Auth duvarına girmeden kendi çereziyle (wms_portal_session) çalışır.
+  if (path.startsWith("/portal")) {
+    if (path === "/portal/login") {
+      return res; // Login sayfasına erişim serbest
+    }
+
+    // Portal ana sayfasına çerezsiz girmeye çalışanları portal login'e at
+    const portalSession = req.cookies.get("wms_portal_session");
+    if (!portalSession) {
+      return NextResponse.redirect(new URL("/portal/login", req.url));
+    }
+    
+    return res; // Çerezi varsa Supabase kontrolüne sokmadan doğrudan içeri al
+  }
+
+  // ==========================================
+  // 3. YÖNETİCİ / MERKEZ KADRO SUPABASE ZIRHI
+  // ==========================================
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -32,23 +64,10 @@ export async function middleware(req: NextRequest) {
     }
   );
 
-  // KRİTİK: getSession yerine getUser ile sunucu bazlı eşzamanlı doğrulama
   const { data: { user } } = await supabase.auth.getUser();
 
-  const path = req.nextUrl.pathname;
-
-  // Statik dosyaları, API rotalarını ve Next.js sistem dosyalarını taramadan muaf tut (Performans)
-  if (
-    path.startsWith("/_next") ||
-    path.startsWith("/favicon.ico") ||
-    path.match(/\.(png|jpg|jpeg|gif|svg)$/)
-  ) {
-    return res;
-  }
-
-  // 1. HİÇ OTURUM YOKSA VEYA TOKEN GEÇERSİZ KALMIŞSA (!user)
+  // A. HİÇ OTURUM YOKSA VEYA TOKEN GEÇERSİZ KALMIŞSA (!user)
   if (!user) {
-    // Güvenlik Duvarı: Sadece Login rotasına izin ver (Mobil terminal iptal edildi)
     if (path !== "/login") {
       const loginUrl = new URL("/login", req.url);
       loginUrl.searchParams.set("reason", "session_expired"); 
@@ -57,15 +76,13 @@ export async function middleware(req: NextRequest) {
     return res;
   }
 
-  // 2. YÖNETİCİ OTURUMU VARSA VE GEÇERLİYSE (user)
+  // B. YÖNETİCİ OTURUMU VARSA VE GEÇERLİYSE (user)
   if (user) {
     const authTimeCookie = req.cookies.get("wms_session_timestamp");
     const MAX_SESSION_AGE = 72 * 60 * 60 * 1000; // 3 Gün (Milisaniye)
 
-    // Ağer daha önce bir cookie atandıysa, süresini kontrol et
     if (authTimeCookie) {
       const sessionAge = Date.now() - parseInt(authTimeCookie.value);
-      // Kullanıcı 3 gün boyunca SİSTEMDE HİÇBİR İŞLEM YAPMADIYSA at
       if (sessionAge > MAX_SESSION_AGE) {
         await supabase.auth.signOut();
         res.cookies.delete("wms_session_timestamp");
@@ -73,9 +90,7 @@ export async function middleware(req: NextRequest) {
       }
     }
 
-    // YENİ: SLIDING WINDOW (KAYAN PENCERE) MOTORU
-    // Kullanıcı içeride ve işlem yapıyorsa (Middleware tetiklendiyse), süreyi şu andan itibaren 72 saat sonraya uzat!
-    // Bu sayede aktif çalışan personel ASLA sistemden düşmez.
+    // KAYAN PENCERE (SLIDING WINDOW) - Aktif kullanıcı düşmez
     res.cookies.set("wms_session_timestamp", Date.now().toString(), {
       maxAge: 72 * 60 * 60, // 3 Gün (Saniye)
       path: "/",
@@ -83,21 +98,16 @@ export async function middleware(req: NextRequest) {
       secure: process.env.NODE_ENV === "production",
     });
 
-    // A. Web Login Kalkanı
-    // Giriş yapmış cihaz manuel olarak /login rotasına giderse onu Management paneline it.
+    // Giriş yapmış cihaz manuel olarak /login rotasına giderse onu içeri it
     if (path === "/login") {
       return NextResponse.redirect(new URL("/", req.url));
     }
 
-    // B. Terminal Zırhı ve Çapraz Geçiş Denetimi
+    // C. ESKİ TERMİNAL ZIRHI (Şu anki operasyonda kullanılmaya devam edebilir)
     if (path.startsWith("/terminal")) {
-      // Terminal Login sayfasına erişimi SERBEST bırak. (Personelin ID barkodunu okutabilmesi için)
       if (path === "/terminal/login") {
         return res;
       }
-
-      // EĞER personel login olmadan (URL'de empId parametresi olmadan) menüye veya operasyon ekranlarına 
-      // direkt girmeye çalışırsa, sistem onu /terminal/login ekranına geri fırlatır.
       if (!req.nextUrl.searchParams.has("empId")) {
         return NextResponse.redirect(new URL("/terminal/login", req.url));
       }

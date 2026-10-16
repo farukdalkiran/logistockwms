@@ -43,7 +43,12 @@ export interface ShiftAttendance {
   status: "onTime" | "late" | "absent" | "excused";
   manager_id: string | null; // Manuel düzeltme yapan yöneticinin ID'si
 }
-
+export interface EmployeeWithBranch {
+  id: string;
+  full_name: string;
+  branch_id: string | null;
+  branches?: { name: string }[] | { name: string } | null;
+}
 export interface Product {
   id: string;
   barcode: string;

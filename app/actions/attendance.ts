@@ -1,6 +1,10 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server';
+import crypto from 'crypto';
+
+const QR_SECRET = process.env.SUPABASE_SERVICE_ROLE_KEY || 'logistock_secret_key';
+const TIME_STEP_SEC = 15;
 
 // Yardımcı Fonksiyon: Saati bir sonraki 15 dakikalık dilime (tavana) yuvarlar
 function roundToNext15Minutes(date: Date): Date {
@@ -30,11 +34,45 @@ export async function processAttendanceScan(
   actionType: 'IN' | 'OUT',
   branchId: string | null 
 ) {
-  if (!scannedCode || !/^\d{5}$/.test(scannedCode)) {
-    return { success: false, message: 'LÜTFEN 5 HANELİ KİMLİK NUMARANIZI GİRİNİZ!' };
+  if (!scannedCode || !scannedCode.startsWith('wms_')) {
+    return { success: false, message: 'GEÇERSİZ BARKOD FORMATI' };
   }
 
-  const empId = scannedCode;
+  // 1. QR BARKOD PARÇALAMA VE GÜVENLİK KONTROLÜ
+  const parts = scannedCode.split('_');
+  if (parts.length !== 6) {
+    return { success: false, message: 'HATALI BARKOD YAPISI' };
+  }
+
+  const empId = parts[1];
+  const dateStr = parts[2];
+  const timeStr = parts[3];
+  const secBlock = parseInt(parts[4]);
+  const scannedHash = parts[5];
+
+  // Tampering (Kurcalama) Kontrolü
+  const payload = `${empId}:${dateStr}:${timeStr}:${secBlock}`;
+  const expectedHash = crypto.createHmac('sha256', QR_SECRET)
+    .update(payload)
+    .digest('hex')
+    .substring(0, 6)
+    .toUpperCase();
+  
+  if (scannedHash !== expectedHash) {
+    return { success: false, message: 'GÜVENLİK İHLALİ: BARKOD DEĞİŞTİRİLMİŞ!' };
+  }
+
+  // Süre (Anti-Replay / Ekran Görüntüsü) Kontrolü
+  const barcodeTime = new Date(`${dateStr}T${timeStr}:00`);
+  barcodeTime.setSeconds(secBlock * TIME_STEP_SEC);
+  const now = new Date();
+  const diffMs = now.getTime() - barcodeTime.getTime();
+  
+  if (diffMs > 30000 || diffMs < -5000) {
+    return { success: false, message: 'SÜRESİ GEÇMİŞ QR! LÜTFEN EKRANI YENİLEYİNİZ.' };
+  }
+
+  // 2. PUANTAJ VERİTABANI İŞLEMLERİ
   const supabase = await createClient();
 
   try {
@@ -57,15 +95,14 @@ export async function processAttendanceScan(
     }
 
     const activeBranchId = branchId || employee.branch_id;
-    const now = new Date();
     
     // ⚠️ Vercel Bağımsız TRT Gece Yarısı ve "TAVAN LİMİT" Hesaplaması
     const trDateNow = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Istanbul' }));
     
-    // 1. Bugünün Başlangıcı (Alt Sınır)
+    // Bugünün Başlangıcı (Alt Sınır)
     const startOfDayTrt = new Date(`${getTrtYMD(trDateNow)}T00:00:00+03:00`).toISOString();
     
-    // 2. Yarının Başlangıcı (Üst Sınır) - İleri tarihli izinlerin bugünü bozmaması için!
+    // Yarının Başlangıcı (Üst Sınır)
     trDateNow.setDate(trDateNow.getDate() + 1);
     const startOfTomorrowTrt = new Date(`${getTrtYMD(trDateNow)}T00:00:00+03:00`).toISOString();
 
@@ -78,7 +115,7 @@ export async function processAttendanceScan(
     // ==========================================
     if (actionType === 'IN') {
       
-      // HAYALET OTURUM KONTROLÜ (Dünden kalma açık mesai)
+      // HAYALET OTURUM KONTROLÜ
       const { data: activeSession } = await supabase
         .from('attendance')
         .select('id, check_in_time')
@@ -93,7 +130,7 @@ export async function processAttendanceScan(
           await supabase
             .from('attendance')
             .update({ 
-              check_out_time: startOfDayTrt, // Gece yarısı sistem kapattı
+              check_out_time: startOfDayTrt,
               status: 'AUTO_CLOSED_MISSING_OUT' 
             })
             .eq('id', activeSession.id);
@@ -105,13 +142,12 @@ export async function processAttendanceScan(
         }
       }
 
-      // ⚠️ GÜNDE 1 KAYIT KURALI FİXİ: Sadece bugünü tarar, ileri tarihli (yıllık izin) kayıtları görmezden gelir!
       const { data: existingTodayIn } = await supabase
         .from('attendance')
         .select('id')
         .eq('employee_id', employee.id)
         .gte('check_in_time', startOfDayTrt)
-        .lt('check_in_time', startOfTomorrowTrt) // <--- KRİTİK DÜZELTME BURADA
+        .lt('check_in_time', startOfTomorrowTrt)
         .limit(1)
         .maybeSingle();
 
@@ -154,7 +190,7 @@ export async function processAttendanceScan(
 
       return { 
         success: true, 
-        message: `GİRİŞ BAŞARILI: ${employee.full_name.toUpperCase()}` 
+        message: `GİRİŞ ONAYLANDI: ${employee.full_name.toUpperCase()}` 
       };
     }
 
@@ -168,7 +204,7 @@ export async function processAttendanceScan(
         .select('id, rounded_check_in')
         .eq('employee_id', employee.id)
         .is('check_out_time', null)
-        .lt('check_in_time', startOfTomorrowTrt) // İleri tarihli izinleri yanlışlıkla "açık kayıt" sanmasını engeller
+        .lt('check_in_time', startOfTomorrowTrt)
         .order('check_in_time', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -201,7 +237,7 @@ export async function processAttendanceScan(
 
       return { 
         success: true, 
-        message: `ÇIKIŞ BAŞARILI: ${employee.full_name.toUpperCase()} (${netWorkingHours.toFixed(1)} Saat Net Çalışma)` 
+        message: `ÇIKIŞ ONAYLANDI: ${employee.full_name.toUpperCase()} (${netWorkingHours.toFixed(1)} Saat)` 
       };
     }
 
