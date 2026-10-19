@@ -132,12 +132,6 @@ export default function ManagementDashboard() {
         {/* Mobilde ekranı tam kaplaması için min-h-[80vh] kullanıldı */}
         <main className="flex-1 w-full flex flex-col items-center justify-center min-h-[80vh] p-4">
           <div className="flex flex-col items-center justify-center animate-in fade-in duration-500">
-            <div className="relative flex items-center justify-center mb-6">
-              {/* Arkadaki ping animasyonu */}
-              <div className="absolute inset-0 border-4 border-[#dc3545]/20 rounded-xl animate-ping"></div>
-            </div>
-            
-            
             {/* 3 Noktalı Bouncing Animasyonu */}
             <div className="flex items-center gap-2 mb-2">
               <div className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>

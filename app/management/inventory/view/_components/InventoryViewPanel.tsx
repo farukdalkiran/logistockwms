@@ -1,13 +1,39 @@
-'use client';
 
-import { useState, useRef, useEffect, useMemo } from 'react';
-import { Search, Loader2, Barcode, Box, Layers, Activity, FileSpreadsheet, Filter, ChevronLeft, ChevronRight, AlertTriangle,Database } from 'lucide-react';
-import StockHistoryModal from './StockHistoryModal';
-import { getAggregatedInventoryServer } from '@/app/actions/inventory'; 
-import * as XLSX from 'xlsx';
+"use client";
+
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
+import { createBrowserClient } from "@supabase/ssr";
+import {
+  Activity,
+  AlertCircle,
+  AlertTriangle,
+  Barcode,
+  ChevronLeft,
+  ChevronRight,
+  FileSpreadsheet,
+  Filter,
+  Layers,
+  Loader2,
+  MapPin,
+  Package,
+  RefreshCw,
+  Search,
+  X,
+} from "lucide-react";
+import * as XLSX from "xlsx";
+
+import { getAggregatedInventoryServer } from "@/app/actions/inventory";
+import StockHistoryModal from "./StockHistoryModal";
 
 type AggregatedProduct = {
-  product_id: string; // Sunucudan gelen ID alanı bu şekilde garanti altındadır
+  product_id: string;
   id?: string;
   name: string;
   sku: string | null;
@@ -19,410 +45,1327 @@ type AggregatedProduct = {
   has_damaged_shelf: boolean;
 };
 
-export default function InventoryViewPanel({ branchId, isGlobal }: { branchId: string | null, isGlobal: boolean }) {
+type Shelf = {
+  id: number;
+  name: string;
+  status: string;
+  branch_id: string;
+};
+
+type Stock = {
+  id: string;
+  product_id: string | null;
+  branch_id: string | null;
+  shelf_id: number | null;
+  shelf_location: string | null;
+  quantity: number;
+};
+
+type DisplayProduct = AggregatedProduct & {
+  selected_quantity: number;
+};
+
+type ReportFilter =
+  | "ALL"
+  | "COMMERCIAL"
+  | "CONSUMABLE"
+  | "DAMAGED"
+  | "ACTIVE_SHELF"
+  | "NO_STOCK";
+
+type SortType =
+  | "STOCK_DESC"
+  | "STOCK_ASC"
+  | "NAME";
+
+type ModalProduct = {
+  productId: string;
+  productName: string;
+  totalQuantity: number;
+  barcode: string;
+  sku: string | null;
+};
+
+const PAGE_SIZE = 15;
+const BATCH_SIZE = 500;
+
+const nf = new Intl.NumberFormat("tr-TR");
+
+const formatNumber = (value: number) =>
+  nf.format(Number(value) || 0);
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error
+    ? error.message
+    : "Beklenmeyen bir hata oluştu.";
+}
+
+function normalizeProduct(
+  item: AggregatedProduct
+): AggregatedProduct {
+  return {
+    ...item,
+    product_id: String(item.product_id || item.id || ""),
+    name: item.name || "İsimsiz Ürün",
+    barcode: item.barcode || "",
+    sku: item.sku || null,
+    category: item.category || null,
+    total_quantity: Number(item.total_quantity) || 0,
+    shelf_count: Number(item.shelf_count) || 0,
+    is_consumable: Boolean(item.is_consumable),
+    has_damaged_shelf: Boolean(item.has_damaged_shelf),
+  };
+}
+
+export default function InventoryViewPanel({
+  branchId,
+  isGlobal,
+}: {
+  branchId: string | null;
+  isGlobal: boolean;
+}) {
+  const supabase = useMemo(
+    () =>
+      createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      ),
+    []
+  );
+
+  // DATA
+  const [products, setProducts] = useState<AggregatedProduct[]>([]);
+  const [shelves, setShelves] = useState<Shelf[]>([]);
+  const [stocks, setStocks] = useState<Stock[]>([]);
+
+  // SEARCH
   const [searchTerm, setSearchTerm] = useState("");
-  const [results, setResults] = useState<AggregatedProduct[]>([]);
-  
-  const [isSearching, setIsSearching] = useState(false);
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
-  
-  // Rapor & Filtreleme
-  const [reportFilter, setReportFilter] = useState<"ALL" | "COMMERCIAL" | "CONSUMABLE" | "DAMAGED" | "ACTIVE_SHELF" | "NO_STOCK">("ALL");
-  
-  // Sayfalama (Pagination)
+  const [selectedShelfId, setSelectedShelfId] = useState("");
+
+  // FILTER
+  const [reportFilter, setReportFilter] =
+    useState<ReportFilter>("ALL");
+
+  // DEFAULT: EN YÜKSEK STOK
+  const [sortType, setSortType] =
+    useState<SortType>("STOCK_DESC");
+
   const [currentPage, setCurrentPage] = useState(1);
-  const PAGE_SIZE = 15;
 
-  const [historyModalData, setHistoryModalData] = useState<{ productId: string, productName: string } | null>(null);
+  // STATUS
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [searching, setSearching] = useState(false);
+  const [shelfLoading, setShelfLoading] = useState(false);
+  const [shelfReady, setShelfReady] = useState(false);
+
+  const [error, setError] = useState<string | null>(null);
+  const [shelfError, setShelfError] = useState<string | null>(null);
+
+  const [modalProduct, setModalProduct] =
+    useState<ModalProduct | null>(null);
+
   const inputRef = useRef<HTMLInputElement>(null);
+  const productRequestRef = useRef(0);
+  const shelfRequestRef = useRef(0);
 
-  useEffect(() => {
-    const fetchAllStock = async () => {
+  // --------------------------------------------------
+  // 1. PRODUCT QUERY
+  // --------------------------------------------------
+
+  const loadProducts = useCallback(
+    async (term: string, initial = false) => {
+      const requestId = ++productRequestRef.current;
+
+      if (initial) {
+        setInitialLoading(true);
+      } else {
+        setSearching(true);
+      }
+
+      setError(null);
+
       try {
-        const data = await getAggregatedInventoryServer("", branchId, isGlobal);
-        setResults(data as any);
+        const response = await getAggregatedInventoryServer(
+          term,
+          branchId,
+          isGlobal
+        );
+
+        if (requestId !== productRequestRef.current) return;
+
+        if (!Array.isArray(response)) {
+          throw new Error("Geçersiz ürün listesi alındı.");
+        }
+
+        const normalized = response
+          .map((item) =>
+            normalizeProduct(item as AggregatedProduct)
+          )
+          .filter((item) => item.product_id);
+
+        setProducts(normalized);
+        setCurrentPage(1);
       } catch (err) {
-        console.error("İlk Yükleme Hatası:", err);
+        if (requestId !== productRequestRef.current) return;
+
+        setError(
+          `Ürün sorgulaması başarısız: ${getErrorMessage(err)}`
+        );
       } finally {
-        setIsInitialLoading(false);
-        inputRef.current?.focus();
+        if (requestId === productRequestRef.current) {
+          setInitialLoading(false);
+          setSearching(false);
+        }
       }
-    };
-    fetchAllStock();
-  }, [branchId, isGlobal]);
+    },
+    [branchId, isGlobal]
+  );
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSearching(true);
-    setCurrentPage(1); 
+  // --------------------------------------------------
+  // 2. SHELF / STOCK QUERY
+  // --------------------------------------------------
+
+  const loadShelfData = useCallback(async () => {
+    const requestId = ++shelfRequestRef.current;
+
+    setShelfLoading(true);
+    setShelfReady(false);
+    setShelfError(null);
 
     try {
-      const aggregatedData = await getAggregatedInventoryServer(searchTerm, branchId, isGlobal);
-      setResults(aggregatedData as any);
+      if (!isGlobal && !branchId) {
+        throw new Error("Şube bilgisi bulunamadı.");
+      }
+
+      let shelfQuery = supabase
+        .from("shelves")
+        .select("id,name,status,branch_id")
+        .order("name", { ascending: true });
+
+      if (!isGlobal && branchId) {
+        shelfQuery = shelfQuery.eq("branch_id", branchId);
+      }
+
+      const { data: shelfData, error: shelfDbError } =
+        await shelfQuery;
+
+      if (shelfDbError) throw shelfDbError;
+
+      const allStocks: Stock[] = [];
+      let start = 0;
+
+      while (true) {
+        let stockQuery = supabase
+          .from("stocks")
+          .select(
+            "id,product_id,branch_id,shelf_id,shelf_location,quantity"
+          )
+          .order("id", { ascending: true })
+          .range(start, start + BATCH_SIZE - 1);
+
+        if (!isGlobal && branchId) {
+          stockQuery = stockQuery.eq("branch_id", branchId);
+        }
+
+        const { data, error: stockDbError } = await stockQuery;
+
+        if (stockDbError) throw stockDbError;
+
+        const batch = (data || []) as Stock[];
+        allStocks.push(...batch);
+
+        if (batch.length < BATCH_SIZE) break;
+
+        start += BATCH_SIZE;
+      }
+
+      if (requestId !== shelfRequestRef.current) return;
+
+      setShelves((shelfData || []) as Shelf[]);
+      setStocks(allStocks);
+      setShelfReady(true);
     } catch (err) {
-      alert("Sorgulama sırasında bir hata oluştu.");
+      if (requestId !== shelfRequestRef.current) return;
+
+      setShelfError(getErrorMessage(err));
+      setShelfReady(false);
     } finally {
-      setIsSearching(false);
-      setTimeout(() => inputRef.current?.focus(), 100);
+      if (requestId === shelfRequestRef.current) {
+        setShelfLoading(false);
+      }
     }
-  };
-
-  const handleClearSearch = async () => {
-    setSearchTerm("");
-    setIsSearching(true);
-    setCurrentPage(1);
-    try {
-      const data = await getAggregatedInventoryServer("", branchId, isGlobal);
-      setResults(data as any);
-    } finally {
-      setIsSearching(false);
-      inputRef.current?.focus();
-    }
-  };
-
-  const filteredResults = useMemo(() => {
-    return results.filter(item => {
-      if (reportFilter === "COMMERCIAL") return item.is_consumable === false;
-      if (reportFilter === "CONSUMABLE") return item.is_consumable === true;
-      if (reportFilter === "DAMAGED") return item.has_damaged_shelf === true;
-      if (reportFilter === "ACTIVE_SHELF") return item.shelf_count > 0 && !item.has_damaged_shelf;
-      if (reportFilter === "NO_STOCK") return item.total_quantity === 0;
-      return true; 
-    });
-  }, [results, reportFilter]);
-
-  const paginatedResults = useMemo(() => {
-    const startIndex = (currentPage - 1) * PAGE_SIZE;
-    return filteredResults.slice(startIndex, startIndex + PAGE_SIZE);
-  }, [filteredResults, currentPage]);
-
-  const totalPages = Math.ceil(filteredResults.length / PAGE_SIZE) || 1;
+  }, [supabase, branchId, isGlobal]);
 
   useEffect(() => {
-    setCurrentPage(1);
-  }, [reportFilter]);
+    void loadProducts("", true);
+    void loadShelfData();
 
-  const handleExportExcel = () => {
-    if (filteredResults.length === 0) return alert("Dışa aktarılacak veri bulunamadı.");
+    return () => {
+      productRequestRef.current += 1;
+      shelfRequestRef.current += 1;
+    };
+  }, [loadProducts, loadShelfData]);
 
-    const exportData = filteredResults.map(item => {
-      let rafDurumuText = item.has_damaged_shelf ? "HASARLI RAF TESPİT EDİLDİ" : (item.shelf_count > 0 ? "Sağlam / Aktif" : "Raflanmadı");
+  // --------------------------------------------------
+  // 3. STOCK AGGREGATION
+  // --------------------------------------------------
 
-      if (item.has_damaged_shelf) {
-        rafDurumuText = "KISMİ VEYA AĞIR HASARLI RAF"; 
+  const shelfMap = useMemo(() => {
+    return new Map(
+      shelves.map((shelf) => [shelf.id, shelf])
+    );
+  }, [shelves]);
+
+  const selectedShelf = useMemo(() => {
+    return shelves.find(
+      (shelf) => String(shelf.id) === selectedShelfId
+    );
+  }, [shelves, selectedShelfId]);
+
+  const stockByProduct = useMemo(() => {
+    const result = new Map<
+      string,
+      {
+        total: number;
+        shelfIds: Set<number>;
+        damaged: boolean;
+        selectedQuantity: number;
+      }
+    >();
+
+    for (const stock of stocks) {
+      if (!stock.product_id) continue;
+
+      const current = result.get(stock.product_id) || {
+        total: 0,
+        shelfIds: new Set<number>(),
+        damaged: false,
+        selectedQuantity: 0,
+      };
+
+      const quantity = Number(stock.quantity) || 0;
+
+      current.total += quantity;
+
+      if (stock.shelf_id !== null && quantity > 0) {
+        current.shelfIds.add(stock.shelf_id);
+
+        const shelf = shelfMap.get(stock.shelf_id);
+
+        if (shelf?.status === "hasarli") {
+          current.damaged = true;
+        }
       }
 
-      return {
-        "Ürün Barkodu": item.barcode,
-        "Ürün Kodu (SKU)": item.sku || "-",
-        "Ürün Adı": item.name,
-        "Kategori": item.category || "Tanımsız",
-        "Tür": item.is_consumable ? "Sarf Malzeme" : "Ticari Ürün",
-        "Raf Durumu": rafDurumuText,
-        "Toplam Raflı Stok (Adet)": item.total_quantity
-      };
+      if (
+        selectedShelfId &&
+        stock.shelf_id === Number(selectedShelfId)
+      ) {
+        current.selectedQuantity += quantity;
+      }
+
+      result.set(stock.product_id, current);
+    }
+
+    return result;
+  }, [stocks, shelfMap, selectedShelfId]);
+
+  // --------------------------------------------------
+  // 4. GLOBAL COUNTS
+  // --------------------------------------------------
+
+  // All accessible stock records.
+  // Independent of product search and report filters.
+  const warehouseTotalStock = useMemo(() => {
+    if (!shelfReady) return null;
+
+    return stocks.reduce(
+      (sum, stock) => sum + (Number(stock.quantity) || 0),
+      0
+    );
+  }, [stocks, shelfReady]);
+
+  const warehouseProductCount = useMemo(() => {
+    if (!shelfReady) return null;
+
+    return new Set(
+      stocks
+        .filter((stock) => Number(stock.quantity) > 0)
+        .map((stock) => stock.product_id)
+        .filter(Boolean)
+    ).size;
+  }, [stocks, shelfReady]);
+
+  const warehouseShelfCount = useMemo(() => {
+    if (!shelfReady) return null;
+
+    return new Set(
+      stocks
+        .filter(
+          (stock) =>
+            Number(stock.quantity) > 0 &&
+            stock.shelf_id !== null
+        )
+        .map((stock) => stock.shelf_id)
+    ).size;
+  }, [stocks, shelfReady]);
+
+  const warehouseSelectedShelfTotal = useMemo(() => {
+    if (!shelfReady || !selectedShelfId) return null;
+
+    return stocks.reduce((sum, stock) => {
+      if (stock.shelf_id === Number(selectedShelfId)) {
+        return sum + (Number(stock.quantity) || 0);
+      }
+
+      return sum;
+    }, 0);
+  }, [stocks, shelfReady, selectedShelfId]);
+
+  // --------------------------------------------------
+  // 5. PRODUCTS + FILTER
+  // --------------------------------------------------
+
+  const visibleProducts = useMemo<DisplayProduct[]>(() => {
+    const filtered = products
+      .map((product) => {
+        const info = stockByProduct.get(product.product_id);
+
+        return {
+          ...product,
+
+          total_quantity: shelfReady
+            ? info?.total ?? 0
+            : product.total_quantity,
+
+          shelf_count: shelfReady
+            ? info?.shelfIds.size ?? 0
+            : product.shelf_count,
+
+          has_damaged_shelf: shelfReady
+            ? info?.damaged ?? false
+            : product.has_damaged_shelf,
+
+          selected_quantity: info?.selectedQuantity ?? 0,
+        };
+      })
+      .filter((product) => {
+        if (selectedShelfId) {
+          if (
+            !shelfReady ||
+            product.selected_quantity <= 0
+          ) {
+            return false;
+          }
+        }
+
+        switch (reportFilter) {
+          case "COMMERCIAL":
+            return !product.is_consumable;
+
+          case "CONSUMABLE":
+            return product.is_consumable;
+
+          case "DAMAGED":
+            return product.has_damaged_shelf;
+
+          case "ACTIVE_SHELF":
+            return (
+              product.shelf_count > 0 &&
+              !product.has_damaged_shelf
+            );
+
+          case "NO_STOCK":
+            return product.total_quantity === 0;
+
+          default:
+            return true;
+        }
+      });
+
+    // DEFAULT SORT: HIGHEST STOCK FIRST
+    filtered.sort((a, b) => {
+      const qtyA = selectedShelfId
+        ? a.selected_quantity
+        : a.total_quantity;
+
+      const qtyB = selectedShelfId
+        ? b.selected_quantity
+        : b.total_quantity;
+
+      if (sortType === "STOCK_DESC") {
+        return (
+          qtyB - qtyA ||
+          a.name.localeCompare(b.name, "tr")
+        );
+      }
+
+      if (sortType === "STOCK_ASC") {
+        return (
+          qtyA - qtyB ||
+          a.name.localeCompare(b.name, "tr")
+        );
+      }
+
+      return a.name.localeCompare(b.name, "tr");
     });
 
-    const worksheet = XLSX.utils.json_to_sheet(exportData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Stok_Raporu");
-    
-    worksheet['!cols'] = [ { wch: 18 }, { wch: 15 }, { wch: 45 }, { wch: 18 }, { wch: 15 }, { wch: 25 }, { wch: 20 } ];
+    return filtered;
+  }, [
+    products,
+    stockByProduct,
+    selectedShelfId,
+    reportFilter,
+    sortType,
+    shelfReady,
+  ]);
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").split("T")[0];
-    XLSX.writeFile(workbook, `WMS_Stok_Raporu_${timestamp}.xlsx`);
+  // --------------------------------------------------
+  // 6. FILTERED TOTALS
+  // --------------------------------------------------
+
+  const filteredTotalStock = useMemo(() => {
+    return visibleProducts.reduce(
+      (sum, item) => sum + item.total_quantity,
+      0
+    );
+  }, [visibleProducts]);
+
+  const filteredSelectedShelfStock = useMemo(() => {
+    return visibleProducts.reduce(
+      (sum, item) => sum + item.selected_quantity,
+      0
+    );
+  }, [visibleProducts]);
+
+  const filteredInStockCount = useMemo(() => {
+    return visibleProducts.filter(
+      (item) => item.total_quantity > 0
+    ).length;
+  }, [visibleProducts]);
+
+  const filteredZeroStockCount = useMemo(() => {
+    return visibleProducts.filter(
+      (item) => item.total_quantity === 0
+    ).length;
+  }, [visibleProducts]);
+
+  // --------------------------------------------------
+  // 7. PAGINATION
+  // --------------------------------------------------
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(visibleProducts.length / PAGE_SIZE)
+  );
+
+  const safePage = Math.min(currentPage, totalPages);
+
+  const paginatedProducts = useMemo(() => {
+    const start = (safePage - 1) * PAGE_SIZE;
+
+    return visibleProducts.slice(
+      start,
+      start + PAGE_SIZE
+    );
+  }, [visibleProducts, safePage]);
+
+  const firstRecord =
+    visibleProducts.length === 0
+      ? 0
+      : (safePage - 1) * PAGE_SIZE + 1;
+
+  const lastRecord = Math.min(
+    safePage * PAGE_SIZE,
+    visibleProducts.length
+  );
+
+  // --------------------------------------------------
+  // 8. ACTIONS
+  // --------------------------------------------------
+
+  const handleSearch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    void loadProducts(searchTerm.trim());
   };
 
-  if (isInitialLoading) {
-    return (
-      <div className="w-full flex flex-col items-center justify-center p-20 gap-4">
-         <Loader2 size={40} className="animate-spin text-[#dc3545]" />
-         <span className="text-[12px] font-black text-slate-500 uppercase tracking-widest">Envanter Arşivi Derleniyor...</span>
-      </div>
+  const handleClear = () => {
+    setSearchTerm("");
+    setSelectedShelfId("");
+    setReportFilter("ALL");
+    setSortType("STOCK_DESC");
+    setCurrentPage(1);
+
+    void loadProducts("");
+
+    inputRef.current?.focus();
+  };
+
+  const handleRefresh = () => {
+    void loadProducts(searchTerm.trim());
+    void loadShelfData();
+  };
+
+  const exportExcel = () => {
+    if (!visibleProducts.length) return;
+
+    const rows = visibleProducts.map((item, index) => ({
+      "Sıra": index + 1,
+      "Barkod": item.barcode,
+      "SKU": item.sku || "-",
+      "Ürün Adı": item.name,
+      "Kategori": item.category || "-",
+      "Tür": item.is_consumable
+        ? "Sarf Malzeme"
+        : "Ticari Ürün",
+      "Toplam Stok": item.total_quantity,
+      "Raf Sayısı": item.shelf_count,
+      "Hasarlı Raf": item.has_damaged_shelf
+        ? "Evet"
+        : "Hayır",
+      ...(selectedShelfId
+        ? {
+            "Seçili Raf": selectedShelf?.name || "-",
+            "Seçili Raf Adedi": item.selected_quantity,
+          }
+        : {}),
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+
+    worksheet["!cols"] = [
+      { wch: 8 },
+      { wch: 22 },
+      { wch: 20 },
+      { wch: 55 },
+      { wch: 24 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 14 },
+      { wch: 15 },
+      { wch: 28 },
+      { wch: 20 },
+    ];
+
+    const workbook = XLSX.utils.book_new();
+
+    XLSX.utils.book_append_sheet(
+      workbook,
+      worksheet,
+      "Stok_Raporu"
     );
-  }
+
+    const date = new Date().toLocaleDateString("en-CA", {
+      timeZone: "Europe/Istanbul",
+    });
+
+    XLSX.writeFile(
+      workbook,
+      `WMS_Stok_Raporu_${date}.xlsx`
+    );
+  };
+
+  const isBusy = initialLoading || searching || shelfLoading;
+
+  const getStatValue = (value: number | null) => {
+    if (value === null) return "—";
+
+    return formatNumber(value);
+  };
+
+  // --------------------------------------------------
+  // 9. RENDER
+  // --------------------------------------------------
 
   return (
-    <div className="w-full flex flex-col gap-5 animate-in fade-in duration-300">
-      
-{/* ========================================================= */}
-      {/* 1. BİRLEŞİK HERO & KONTROL MERKEZİ (DARK-INDUSTRIAL) */}
-      {/* ========================================================= */}
-      <div className="w-full flex flex-col bg-slate-900 border border-slate-700 rounded-sm shadow-xl overflow-hidden mb-2 relative">
-        
-        {/* --- ÜST KISIM: GÖRSELLİ HERO ALANI --- */}
-        <div className="relative w-full min-h-[200px] p-6 md:p-8 flex flex-col lg:flex-row justify-between gap-8">
-          {/* Arka Plan Görseli ve Karartma */}
-          <img 
-            src="https://img.magnific.com/free-photo/spacious-warehouse-with-rows-shelves-forklift_84443-74085.jpg?t=st=1779108507~exp=1779112107~hmac=834c43fbd471b0766ff07fba31ef7c5cc6527409831e16ab7112e2dc4f5c9ac6&w=1480"
-            alt="Inventory Management"
-            className="absolute inset-0 w-full h-full object-cover opacity-[0.25] mix-blend-luminosity"
-          />
-          <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-900/90 to-transparent"></div>
-          <div className="absolute right-0 top-0 w-96 h-96 bg-purple-600/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none"></div>
-          
-          {/* Sol Alan: Başlık ve Sistem Bilgi Kartı */}
-          <div className="relative z-10 flex flex-col gap-5 w-full lg:max-w-2xl justify-center">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-[#dc3545] border border-red-400/50 rounded-sm shadow-[0_0_20px_rgba(220,53,69,0.3)]">
-                <Layers className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tight">Canlı Stok ve Raf İzleme</h1>
-                <p className="text-[#dc3545] text-[10px] sm:text-xs font-bold uppercase tracking-widest mt-0.5">Real-Time Envanter Sorgu Merkezi</p>
-              </div>
+    <div className="flex w-full flex-col gap-5 text-slate-800">
+
+      {/* HEADER */}
+      <section className="overflow-hidden border border-slate-700 bg-[#111c2f] text-white shadow-sm">
+        <div className="flex flex-col justify-between gap-5 p-5 lg:flex-row lg:items-center lg:p-7">
+          <div className="flex items-start gap-4">
+            <div className="border border-red-400/30 bg-[#dc3545] p-3">
+              <Layers size={24} />
             </div>
 
-            {/* Endüstriyel Info Kartı */}
-            <div className="bg-slate-800/80 backdrop-blur-md border border-slate-700 border-l-4 border-l-[#dc3545] p-4 rounded-sm flex gap-3 items-start shadow-inner">
-              <Activity className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
-              <div className="flex flex-col gap-1">
-                <h4 className="text-slate-200 text-[10px] font-black uppercase tracking-widest">Arama ve Log Bilgilendirmesi</h4>
-                <p className="text-slate-400 text-[11px] font-semibold leading-relaxed">
-                  Bu panel, bulunduğunuz şubedeki (veya global yetkideki) ürün stoklarını canlı listeler. Barkod/SKU ile arama yapabilir, stoku "0" olanları görebilir ve <strong className="text-slate-200">Mevcut Stok</strong> rakamlarına tıklayarak detaylı <strong className="text-slate-200">Raf Geçmiş Loglarını</strong> izleyebilirsiniz.
-                </p>
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.16em] text-red-300">
+                LOGISTOCK WMS / ENVANTER YÖNETİMİ
               </div>
+
+              <h1 className="mt-2 text-2xl text-white md:text-3xl">
+                Canlı Stok ve Raf Sorgulama
+              </h1>
+
+              <p className="mt-2 max-w-2xl text-xs leading-6 text-slate-300">
+                Barkod, SKU veya ürün adına göre arama yapın.
+                Raf seçerek lokasyon bazlı stokları görüntüleyin.
+                Stoklar varsayılan olarak en yüksek adetten
+                en düşük adede doğru sıralanır.
+              </p>
             </div>
           </div>
 
-          {/* Sağ Alan: Statü Paneli */}
-          <div className="relative z-10 w-full lg:w-72 flex flex-col justify-center">
-            <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700 p-5 rounded-sm shadow-2xl">
-              <div className="flex items-center justify-between mb-4 border-b border-slate-700 pb-3">
-                <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Envanter Veri Motoru</label>
-                <span className="flex items-center gap-1.5 text-[9px] font-black text-green-400 uppercase tracking-widest">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                  </span>
-                  Aktif
-                </span>
-              </div>
-              <div className="w-full flex items-center justify-center gap-2 h-10 px-4 bg-slate-950 border border-slate-800 text-slate-300 rounded-sm text-[10px] font-black uppercase tracking-widest shadow-inner">
-                <Database size={14} className="text-emerald-500" />
-                Yetki: {isGlobal ? 'Global / Merkez' : 'Şube İçi İzole'}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* --- ORTA KISIM: WMS ÇIKTI VE FİLTRELEME (DARK BAR) --- */}
-        <div className="relative z-20 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 px-6 py-4 bg-[#0a101d]/80 border-t border-b border-slate-800 backdrop-blur-sm">
           <div className="flex items-center gap-3">
-             <div className="p-1.5 bg-[#dc3545]/20 rounded-sm border border-[#dc3545]/30">
-               <FileSpreadsheet size={14} className="text-[#dc3545]" /> 
-             </div>
-             <div className="flex flex-col">
-               <h3 className="text-[12px] font-black text-white uppercase tracking-[0.2em]">WMS Çıktı Merkezi</h3>
-               <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Filtreye uyan <strong className="text-white">{filteredResults.length}</strong> kaydı Excel'e aktar</p>
-             </div>
-          </div>
+            <div className="border border-slate-600 bg-slate-800 px-4 py-3">
+              <span className="block text-[10px] text-slate-400">
+                ERİŞİM KAPSAMI
+              </span>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
-            <div className="flex items-center gap-2 px-3 h-9 border border-slate-700 bg-slate-800 rounded-sm w-full sm:w-56 focus-within:border-purple-500 focus-within:ring-1 focus-within:ring-purple-500/30 transition-all">
-               <Filter size={14} className="text-purple-400 shrink-0" />
-               <select 
-                 value={reportFilter}
-                 onChange={(e) => setReportFilter(e.target.value as any)}
-                 className="bg-transparent text-[10px] font-black text-slate-200 uppercase tracking-widest outline-none cursor-pointer w-full appearance-none"
-               >
-                 <option value="ALL">Tüm Stokları Listele</option>
-                 <option value="ACTIVE_SHELF">Sağlam / Aktif Raflar</option>
-                 <option value="DAMAGED">Hasarlı Raftakiler (Tümü)</option>
-                 <option value="COMMERCIAL">Sadece Ticari Ürünler</option>
-                 <option value="CONSUMABLE">Sadece Sarf Malzemeler</option>
-                 <option value="NO_STOCK">Stoku Sıfırlananlar</option>
-               </select>
+              <span className="mt-1 block text-sm text-white">
+                {isGlobal
+                  ? "Global / Merkez"
+                  : "Şube Envanteri"}
+              </span>
             </div>
 
-            <button 
-              onClick={handleExportExcel}
-              disabled={filteredResults.length === 0}
-              className="w-full sm:w-auto h-9 flex items-center justify-center gap-2 px-5 bg-gradient-to-r from-purple-700 to-[#dc3545] hover:from-purple-600 hover:to-red-500 disabled:from-slate-700 disabled:to-slate-800 disabled:text-slate-500 text-white font-black text-[10px] uppercase tracking-widest rounded-sm transition-all shadow-[0_0_10px_rgba(220,53,69,0.2)] shrink-0 active:scale-95"
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={isBusy}
+              className="flex h-[60px] items-center gap-2 border border-slate-600 bg-slate-800 px-4 text-xs text-white transition-colors hover:bg-slate-700 disabled:opacity-50"
             >
-              <FileSpreadsheet size={14} /> EXCEL İNDİR
+              <RefreshCw
+                size={16}
+                className={isBusy ? "animate-spin" : ""}
+              />
+              Yenile
             </button>
           </div>
         </div>
 
-        {/* --- ALT KISIM: ARAMA MOTORU (YÜKSEK KONTRAST) --- */}
-        <div className="p-4 bg-slate-50">
-          <form onSubmit={handleSearch} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-             <div className="flex-1 relative w-full">
-               <div className="absolute left-3 top-1/2 -translate-y-1/2 text-purple-600">
-                  <Barcode size={18} />
-               </div>
-               <input 
-                 ref={inputRef}
-                 type="text" 
-                 value={searchTerm}
-                 onChange={(e) => setSearchTerm(e.target.value)}
-                 placeholder="Katalogda Spesifik Bir Barkod veya SKU Arayın..."
-                 className="w-full h-11 pl-10 pr-3 bg-white border border-slate-300 focus:border-purple-600 focus:ring-1 focus:ring-purple-600 text-[12px] font-black uppercase tracking-widest text-[#0f172b] outline-none transition-all placeholder:text-slate-400 rounded-sm shadow-sm"
-               />
-             </div>
-             
-             <div className="flex items-center gap-2 w-full sm:w-auto">
-               {searchTerm && (
-                 <button type="button" onClick={handleClearSearch} className="h-11 px-5 text-[10px] bg-white border border-slate-300 font-black text-slate-500 uppercase hover:text-[#dc3545] hover:border-red-200 hover:bg-red-50 transition-colors w-full sm:w-auto rounded-sm shadow-sm">
-                   TEMİZLE
-                 </button>
-               )}
+        <div className="h-[3px] bg-[#dc3545]" />
+      </section>
 
-               <button 
-                 type="submit" 
-                 disabled={isSearching || !searchTerm.trim()}
-                 className="h-11 w-full sm:w-auto bg-[#0f172b] hover:bg-[#dc3545] disabled:bg-slate-300 px-8 text-white font-black uppercase tracking-[0.2em] text-[10px] flex items-center justify-center transition-all active:scale-95 shadow-sm rounded-sm shrink-0"
-               >
-                 {isSearching ? <Loader2 size={16} className="animate-spin" /> : <><Search size={14} className="mr-1.5"/> BUL</>}
-               </button>
-             </div>
-          </form>
+      {/* ERRORS */}
+      {error && (
+        <div className="flex items-start gap-3 border border-red-200 bg-red-50 p-4 text-xs text-red-800">
+          <AlertCircle size={17} className="shrink-0" />
+          {error}
         </div>
-      </div>
+      )}
 
-      {/* 3. ANA STOK TABLOSU */}
-      <div className="bg-white border border-slate-300 shadow-md flex flex-col overflow-hidden rounded-sm">
-        <div className="bg-slate-100 p-3 border-b border-slate-200 flex justify-between items-center">
-          <h3 className="text-[11px] font-black text-[#0f172b] uppercase tracking-[0.15em] flex items-center gap-2">
-            <Box size={14} className="text-[#dc3545]" /> DEPO STOK LİSTESİ
-          </h3>
-          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest bg-white border border-slate-300 px-2.5 py-0.5 shadow-sm rounded-sm">
-            {filteredResults.length} SONUÇ
-          </span>
+      {shelfError && (
+        <div className="flex items-start gap-3 border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
+          <AlertTriangle size={17} className="shrink-0" />
+
+          <div>
+            <div>Raf verileri okunamadı.</div>
+            <div className="mt-1">{shelfError}</div>
+            <div className="mt-1">
+              Ürün sorgulaması kullanılabilir; ancak genel
+              depo toplamı ve raf dağılımı doğrulanamadı.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SEARCH */}
+      <section className="border border-slate-300 bg-white shadow-sm">
+        <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-100 px-5 py-3">
+          <Search size={16} className="text-[#dc3545]" />
+
+          <h2 className="text-sm text-slate-900">
+            Gelişmiş Envanter Arama
+          </h2>
         </div>
 
-        <div className="overflow-x-auto min-h-[350px]">
-          <table className="w-full text-left border-collapse min-w-[850px]">
-            <thead className="bg-[#0f172b] text-slate-300 text-[9px] uppercase tracking-[0.15em]">
+        <form onSubmit={handleSearch} className="p-4 md:p-5">
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_280px_auto]">
+
+            <div>
+              <label
+                htmlFor="inventory-search"
+                className="mb-2 block text-[11px] text-slate-600"
+              >
+                Ürün Adı / Barkod / SKU
+              </label>
+
+              <div className="relative">
+                <Barcode
+                  size={17}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+
+                <input
+                  id="inventory-search"
+                  ref={inputRef}
+                  value={searchTerm}
+                  onChange={(event) =>
+                    setSearchTerm(event.target.value)
+                  }
+                  placeholder="Ürün adı, barkod veya SKU giriniz..."
+                  className="h-11 w-full border border-slate-300 bg-white pl-10 pr-10 text-sm text-slate-900 outline-none focus:border-[#dc3545]"
+                />
+
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm("")}
+                    aria-label="Aramayı temizle"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#dc3545]"
+                  >
+                    <X size={16} />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label
+                htmlFor="inventory-shelf"
+                className="mb-2 block text-[11px] text-slate-600"
+              >
+                Raf / Lokasyon
+              </label>
+
+              <div className="relative">
+                <MapPin
+                  size={16}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-[#dc3545]"
+                />
+
+                <select
+                  id="inventory-shelf"
+                  value={selectedShelfId}
+                  disabled={!shelfReady || shelfLoading}
+                  onChange={(event) => {
+                    setSelectedShelfId(event.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="h-11 w-full appearance-none border border-slate-300 bg-white pl-10 pr-3 text-sm text-slate-800 outline-none focus:border-[#dc3545] disabled:bg-slate-100"
+                >
+                  <option value="">
+                    {shelfLoading
+                      ? "Raflar yükleniyor..."
+                      : "Tüm Raflar"}
+                  </option>
+
+                  {shelves.map((shelf) => (
+                    <option key={shelf.id} value={shelf.id}>
+                      {shelf.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-end gap-2">
+              <button
+                type="submit"
+                disabled={searching}
+                className="flex h-11 flex-1 items-center justify-center gap-2 bg-[#111c2f] px-6 text-xs text-white hover:bg-[#dc3545] disabled:opacity-50 lg:flex-none"
+              >
+                {searching ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <Search size={16} />
+                )}
+                SORGULA
+              </button>
+
+              <button
+                type="button"
+                onClick={handleClear}
+                className="h-11 border border-slate-300 bg-slate-100 px-4 text-xs text-slate-700 hover:bg-slate-200"
+              >
+                TEMİZLE
+              </button>
+            </div>
+          </div>
+        </form>
+      </section>
+
+      {/* WAREHOUSE TOTALS */}
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {[
+          {
+            label: "GENEL TOPLAM RAF STOĞU",
+            value: warehouseTotalStock,
+            icon: Layers,
+            note: "Erişilebilir tüm stok kayıtları",
+          },
+          {
+            label: "STOKLU ÜRÜN ÇEŞİDİ",
+            value: warehouseProductCount,
+            icon: Package,
+            note: "Stokta bulunan farklı ürünler",
+          },
+          {
+            label: selectedShelfId
+              ? "SEÇİLİ RAF TOPLAMI"
+              : "KULLANILAN RAF",
+            value: selectedShelfId
+              ? warehouseSelectedShelfTotal
+              : warehouseShelfCount,
+            icon: MapPin,
+            note: selectedShelfId
+              ? selectedShelf?.name || "Seçili raf"
+              : "Stok bulunan raf sayısı",
+          },
+          {
+            label: "FİLTRELİ STOK TOPLAMI",
+            value: initialLoading || searching
+              ? null
+              : filteredTotalStock,
+            icon: Activity,
+            note: "Listede filtreye uyan ürünler",
+          },
+        ].map((stat) => (
+          <div
+            key={stat.label}
+            className="border border-slate-300 bg-white p-4 shadow-sm"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] text-slate-500">
+                {stat.label}
+              </span>
+
+              <stat.icon
+                size={17}
+                className="text-[#dc3545]"
+              />
+            </div>
+
+            <div className="mt-3 text-2xl text-slate-900">
+              {shelfLoading &&
+              stat.label !== "FİLTRELİ STOK TOPLAMI"
+                ? "..."
+                : getStatValue(stat.value)}
+            </div>
+
+            <div className="mt-1 truncate text-[10px] text-slate-400">
+              {stat.note}
+            </div>
+          </div>
+        ))}
+      </section>
+
+      {/* TABLE */}
+      <section className="overflow-hidden border border-slate-300 bg-white shadow-sm">
+
+        {/* TABLE TOOLBAR */}
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-300 bg-slate-100 px-4 py-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <Package
+                size={17}
+                className="text-[#dc3545]"
+              />
+
+              <h2 className="text-sm text-slate-900">
+                Depo Stok Listesi
+              </h2>
+            </div>
+
+            <p className="mt-1 text-[11px] text-slate-500">
+              {formatNumber(visibleProducts.length)} ürün
+              {" · "}
+              {formatNumber(filteredTotalStock)} adet toplam
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Filter size={15} className="text-slate-500" />
+
+            <select
+              value={reportFilter}
+              onChange={(event) => {
+                setReportFilter(
+                  event.target.value as ReportFilter
+                );
+                setCurrentPage(1);
+              }}
+              className="h-9 border border-slate-300 bg-white px-3 text-xs text-slate-700 outline-none"
+            >
+              <option value="ALL">Tüm Ürünler</option>
+              <option value="ACTIVE_SHELF">
+                Sağlam / Aktif Raf
+              </option>
+              <option value="DAMAGED">
+                Hasarlı Raftakiler
+              </option>
+              <option value="COMMERCIAL">
+                Ticari Ürünler
+              </option>
+              <option value="CONSUMABLE">
+                Sarf Malzemeler
+              </option>
+              <option value="NO_STOCK">
+                Stoku Sıfır Olanlar
+              </option>
+            </select>
+
+            <select
+              value={sortType}
+              onChange={(event) => {
+                setSortType(event.target.value as SortType);
+                setCurrentPage(1);
+              }}
+              className="h-9 border border-slate-300 bg-white px-3 text-xs text-slate-700 outline-none"
+            >
+              <option value="STOCK_DESC">
+                Stok: Çoktan Aza
+              </option>
+              <option value="STOCK_ASC">
+                Stok: Azdan Çoğa
+              </option>
+              <option value="NAME">
+                Ürün Adına Göre
+              </option>
+            </select>
+
+            <button
+              type="button"
+              onClick={exportExcel}
+              disabled={!visibleProducts.length || searching}
+              className="flex h-9 items-center gap-2 border border-emerald-700 bg-emerald-700 px-4 text-xs text-white hover:bg-emerald-800 disabled:opacity-40"
+            >
+              <FileSpreadsheet size={15} />
+              EXCEL
+            </button>
+          </div>
+        </div>
+
+        {/* SELECTED SHELF */}
+        {selectedShelf && (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-red-200 bg-red-50 px-4 py-3">
+            <div className="flex items-center gap-2 text-xs text-red-800">
+              <MapPin size={15} />
+
+              <span>
+                Seçilen Raf: {selectedShelf.name}
+              </span>
+
+              <span className="text-red-600">
+                / {formatNumber(
+                  warehouseSelectedShelfTotal ?? 0
+                )} adet
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedShelfId("");
+                setCurrentPage(1);
+              }}
+              className="text-xs text-red-700 underline"
+            >
+              Raf filtresini kaldır
+            </button>
+          </div>
+        )}
+
+        {/* TABLE CONTENT */}
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1050px] border-collapse text-left">
+            <thead className="bg-[#172338] text-[11px] text-white">
               <tr>
-                <th className="px-3 py-2.5 border-r border-slate-800">Ürün Bilgisi</th>
-                <th className="px-3 py-2.5 border-r border-slate-800 text-center">Barkod / SKU</th>
-                <th className="px-3 py-2.5 border-r border-slate-800 text-center w-36">Raf Durumu</th>
-                <th className="px-3 py-2.5 text-center text-purple-400 bg-gradient-to-b from-purple-950/40 to-slate-900 w-48">Mevcut Stok<br/><span className="text-[7px] text-slate-400 tracking-wider font-normal">(Hareket Logu İzle)</span></th>
+                <th className="w-12 border-r border-slate-700 px-3 py-4 text-center">
+                  #
+                </th>
+
+                <th className="border-r border-slate-700 px-4 py-4">
+                  Ürün / Kategori
+                </th>
+
+                <th className="border-r border-slate-700 px-4 py-4">
+                  Barkod / SKU
+                </th>
+
+                <th className="border-r border-slate-700 px-4 py-4 text-center">
+                  Ürün Türü
+                </th>
+
+                <th className="border-r border-slate-700 px-4 py-4 text-center">
+                  Raf Durumu
+                </th>
+
+                <th className="w-36 border-r border-slate-700 px-4 py-4 text-center">
+                  Toplam Stok
+                </th>
+
+                {selectedShelfId && (
+                  <th className="w-32 border-r border-slate-700 px-4 py-4 text-center">
+                    Seçili Raf
+                  </th>
+                )}
+
+                <th className="w-32 px-4 py-4 text-center">
+                  İşlem
+                </th>
               </tr>
             </thead>
-            <tbody className="text-[11px] font-bold text-slate-800 divide-y divide-slate-100">
-              {paginatedResults.length === 0 ? (
+
+            <tbody className="divide-y divide-slate-200">
+              {initialLoading || searching || shelfLoading ? (
                 <tr>
-                  <td colSpan={4} className="p-12 text-center flex-col justify-center gap-3">
-                    <span className="text-[12px] font-black text-slate-400 uppercase tracking-widest block">BU FİLTRE VE ARAMAYA UYGUN STOK BULUNAMADI.</span>
+                  <td
+                    colSpan={selectedShelfId ? 8 : 7}
+                    className="px-4 py-20 text-center"
+                  >
+                    <Loader2
+                      size={26}
+                      className="mx-auto animate-spin text-[#dc3545]"
+                    />
+
+                    <div className="mt-3 text-xs text-slate-500">
+                      Stok kayıtları hazırlanıyor...
+                    </div>
+                  </td>
+                </tr>
+              ) : selectedShelfId && !shelfReady ? (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="px-4 py-16 text-center text-sm text-amber-700"
+                  >
+                    Raf verileri okunamadığı için raf
+                    sonuçları gösterilemiyor.
+                  </td>
+                </tr>
+              ) : paginatedProducts.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={selectedShelfId ? 8 : 7}
+                    className="px-4 py-20 text-center"
+                  >
+                    <Search
+                      size={27}
+                      className="mx-auto text-slate-300"
+                    />
+
+                    <div className="mt-3 text-sm text-slate-500">
+                      Arama kriterlerine uygun stok bulunamadı.
+                    </div>
                   </td>
                 </tr>
               ) : (
-                paginatedResults.map((item, idx) => (
-                  <tr key={`${item.product_id}-${idx}`} className="hover:bg-slate-50 transition-colors">
-                    
-                    <td className="px-3 py-2 border-r border-slate-100 align-middle">
-                      <div className="flex flex-col">
-                        <span className="text-[12px] font-black uppercase text-slate-900 leading-tight mb-0.5 truncate max-w-[300px]" title={item.name}>{item.name}</span>
-                        <div className="flex items-center gap-1.5">
-                            <span className="text-[9px] text-slate-500 uppercase tracking-widest">{item.category || 'Kategori Yok'}</span>
-                            {item.is_consumable && <span className="text-[8px] bg-amber-100 text-amber-700 px-1 py-0.5 rounded-sm uppercase tracking-widest border border-amber-200 leading-none">Sarf</span>}
-                        </div>
-                      </div>
-                    </td>
-                    
-                    <td className="px-3 py-2 border-r border-slate-100 text-center font-mono align-middle">
-                      <div className="flex flex-col items-center gap-1">
-                        <span className="text-[11px] font-black text-[#dc3545] bg-red-50 px-1.5 py-0.5 border border-red-100 tracking-widest rounded-sm">{item.barcode}</span>
-                        {item.sku && <span className="text-[9px] text-slate-500 tracking-widest bg-slate-100 px-1.5 py-0.5 rounded-sm border border-slate-200">{item.sku}</span>}
-                      </div>
-                    </td>
-                    
-                    <td className="px-3 py-2 border-r border-slate-100 text-center align-middle">
-                      {item.has_damaged_shelf ? (
-                         <div className="flex flex-col items-center gap-0.5 text-[#dc3545]">
-                           <AlertTriangle size={14} />
-                           <span className="text-[9px] font-black uppercase tracking-widest bg-red-50 text-[#dc3545] px-1.5 py-0.5 border border-red-200 shadow-sm rounded-sm">HASARLI RAF</span>
-                         </div>
-                      ) : item.shelf_count > 0 ? (
-                         <div className="flex flex-col items-center gap-0.5 text-slate-600">
-                           <Layers size={14} className="text-emerald-500" />
-                           <span className="text-[9px] font-black uppercase tracking-widest bg-emerald-50 text-emerald-700 px-1.5 py-0.5 border border-emerald-100 rounded-sm">
-                             {item.shelf_count} Aktif Raf
-                           </span>
-                         </div>
-                      ) : (
-                         <div className="flex flex-col items-center gap-0.5 text-slate-400">
-                           <Layers size={14} className="opacity-50" />
-                           <span className="text-[9px] font-black uppercase tracking-widest">RAFTAN DÜŞMÜŞ</span>
-                         </div>
-                      )}
-                    </td>
-                    
-                    {/* WMS: VURGULU STOK / LOG İZLEME ALANI: Açılmama Hatası (ID Problemi) Buradan Çözüldü */}
-                    <td className="p-0 text-center align-middle bg-slate-50/50 w-48 h-full">
-                      <button 
-                        onClick={() => setHistoryModalData({ productId: item.product_id || item.id || '', productName: item.name })}
-                        className={`w-full h-full flex items-center justify-between px-4 py-2 border-2 border-transparent transition-all group cursor-pointer shadow-sm active:scale-95 rounded-none ${
-                          item.total_quantity === 0 
-                            ? 'bg-red-50/50 hover:bg-red-100 hover:border-red-400' 
-                            : 'bg-white hover:border-purple-500 hover:shadow-[0_0_10px_rgba(107,33,168,0.15)]'
-                        }`}
-                        title="Raf Geçmişini Görüntüle"
-                      >
-                          <span className={`text-[24px] font-black font-mono tracking-tighter transition-colors leading-none w-16 text-left ${
-                            item.total_quantity === 0 ? 'text-[#dc3545]' : 'text-[#0f172b] group-hover:text-purple-700'
-                          }`}>
-                            {item.total_quantity}
-                          </span>
-                          
-                          <div className={`flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-sm transition-colors border ${
-                            item.total_quantity === 0 
-                              ? 'bg-red-100 border-red-200 group-hover:bg-[#dc3545] group-hover:border-[#dc3545]' 
-                              : 'bg-slate-100 border-slate-200 group-hover:bg-purple-600 group-hover:border-purple-600'
-                          }`}>
-                            <Activity size={12} className={item.total_quantity === 0 ? "text-red-700 group-hover:text-white" : "text-slate-500 group-hover:text-white"} />
-                            <span className={`text-[9px] font-black uppercase tracking-[0.2em] ${item.total_quantity === 0 ? 'text-red-700 group-hover:text-white' : 'text-slate-500 group-hover:text-white'}`}>LOG İZLE</span>
-                          </div>
-                      </button>
+                paginatedProducts.map((item, index) => (
+                  <tr
+                    key={item.product_id}
+                    className="transition-colors hover:bg-slate-50"
+                  >
+                    {/* ROW NUMBER */}
+                    <td className="border-r border-slate-100 px-3 py-4 text-center text-[11px] text-slate-400">
+                      {(safePage - 1) * PAGE_SIZE + index + 1}
                     </td>
 
+                    {/* PRODUCT */}
+                    <td className="border-r border-slate-100 px-4 py-4">
+                      <div
+                        className="max-w-[350px] text-[13px] leading-5 text-slate-900"
+                        title={item.name}
+                      >
+                        {item.name}
+                      </div>
+
+                      <div className="mt-1 text-[11px] text-slate-500">
+                        {item.category || "Kategorisiz"}
+                      </div>
+                    </td>
+
+                    {/* BARCODE */}
+                    <td className="border-r border-slate-100 px-4 py-4">
+                      <div className="text-xs text-[#dc3545]">
+                        {item.barcode}
+                      </div>
+
+                      <div className="mt-1 text-[11px] text-slate-500">
+                        {item.sku || "SKU Yok"}
+                      </div>
+                    </td>
+
+                    {/* TYPE */}
+                    <td className="border-r border-slate-100 px-4 py-4 text-center">
+                      <span
+                        className={`inline-block border px-2 py-1 text-[11px] ${
+                          item.is_consumable
+                            ? "border-amber-200 bg-amber-50 text-amber-800"
+                            : "border-slate-200 bg-slate-100 text-slate-700"
+                        }`}
+                      >
+                        {item.is_consumable
+                          ? "Sarf Malzeme"
+                          : "Ticari Ürün"}
+                      </span>
+                    </td>
+
+                    {/* SHELF */}
+                    <td className="border-r border-slate-100 px-4 py-4 text-center">
+                      <div className="text-sm text-slate-900">
+                        {item.shelf_count} Raf
+                      </div>
+
+                      <div
+                        className={`mt-1 text-[11px] ${
+                          item.has_damaged_shelf
+                            ? "text-red-600"
+                            : item.shelf_count > 0
+                            ? "text-emerald-700"
+                            : "text-slate-400"
+                        }`}
+                      >
+                        {item.has_damaged_shelf
+                          ? "Hasarlı Raf"
+                          : item.shelf_count > 0
+                          ? "Aktif Raf"
+                          : "Raf Kaydı Yok"}
+                      </div>
+                    </td>
+
+                    {/* TOTAL QUANTITY */}
+                    <td className="border-r border-slate-100 bg-slate-50/60 px-4 py-4 text-center">
+                      <div
+                        className={`text-[23px] leading-none ${
+                          item.total_quantity === 0
+                            ? "text-red-600"
+                            : "text-slate-900"
+                        }`}
+                      >
+                        {formatNumber(item.total_quantity)}
+                      </div>
+
+                      <div className="mt-1 text-[10px] text-slate-400">
+                        Adet
+                      </div>
+                    </td>
+
+                    {/* SELECTED SHELF QUANTITY */}
+                    {selectedShelfId && (
+                      <td className="border-r border-slate-100 bg-red-50/50 px-4 py-4 text-center">
+                        <div className="text-xl text-[#dc3545]">
+                          {formatNumber(item.selected_quantity)}
+                        </div>
+
+                        <div className="mt-1 text-[10px] text-slate-500">
+                          Adet
+                        </div>
+                      </td>
+                    )}
+
+                    {/* ACTION */}
+                    <td className="px-4 py-4 text-center">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setModalProduct({
+                            productId: item.product_id,
+                            productName: item.name,
+                            totalQuantity: item.total_quantity,
+                            barcode: item.barcode,
+                            sku: item.sku,
+                          })
+                        }
+                        className="inline-flex items-center gap-2 border border-slate-300 bg-white px-3 py-2 text-[11px] text-slate-700 transition-colors hover:border-[#dc3545] hover:text-[#dc3545]"
+                      >
+                        <Activity size={14} />
+                        Detay / Log
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
             </tbody>
+
+            {/* TABLE TOTAL */}
+            {!isBusy && paginatedProducts.length > 0 && (
+              <tfoot className="border-t-2 border-slate-300 bg-slate-100">
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-4 py-4 text-xs text-slate-700"
+                  >
+                    Filtreye Uyan Toplam
+                    {" · "}
+                    {formatNumber(visibleProducts.length)} ürün
+                    {" · "}
+                    {formatNumber(filteredInStockCount)} stoklu
+                    {" · "}
+                    {formatNumber(filteredZeroStockCount)} stoksuz
+                  </td>
+
+                  <td className="px-4 py-4 text-center text-lg text-slate-900">
+                    {formatNumber(filteredTotalStock)}
+                  </td>
+
+                  {selectedShelfId && (
+                    <td className="px-4 py-4 text-center text-lg text-[#dc3545]">
+                      {formatNumber(filteredSelectedShelfStock)}
+                    </td>
+                  )}
+
+                  <td className="px-4 py-4 text-center text-[11px] text-slate-500">
+                    ADET
+                  </td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
 
-        {/* SAYFALAMA */}
-        {totalPages > 1 && (
-          <div className="bg-slate-100 border-t border-slate-200 p-3 flex items-center justify-between">
-            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest bg-white border border-slate-300 px-2.5 py-1 shadow-sm rounded-sm">
-              SAYFA {currentPage} / {totalPages}
-            </span>
-            <div className="flex items-center gap-1.5">
-              <button 
-                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-                className="flex items-center gap-1 px-3 py-1.5 bg-[#0f172b] text-white disabled:bg-slate-300 disabled:text-slate-500 text-[9px] font-black uppercase tracking-widest hover:bg-[#dc3545] transition-colors shadow-sm active:scale-95 rounded-sm"
-              >
-                <ChevronLeft size={12} /> ÖNCEKİ
-              </button>
-              <button 
-                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                disabled={currentPage === totalPages}
-                className="flex items-center gap-1 px-3 py-1.5 bg-[#0f172b] text-white disabled:bg-slate-300 disabled:text-slate-500 text-[9px] font-black uppercase tracking-widest hover:bg-[#dc3545] transition-colors shadow-sm active:scale-95 rounded-sm"
-              >
-                SONRAKİ <ChevronRight size={12} />
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+        {/* PAGINATION */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-300 bg-slate-50 px-4 py-3">
+          <div className="text-[11px] text-slate-500">
+            {formatNumber(firstRecord)} -{" "}
+            {formatNumber(lastRecord)}
+            {" / "}
+            {formatNumber(visibleProducts.length)} kayıt
 
-      {/* DOM'DAN SÖK-TAK İLE ÇALIŞAN MODAL YAPISI (Eski Veri Görünme Hatasını Engeller) */}
-      {historyModalData && (
-        <StockHistoryModal 
+            <span className="ml-3">
+              Sayfa {safePage} / {totalPages}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={safePage === 1}
+              onClick={() =>
+                setCurrentPage(safePage - 1)
+              }
+              className="flex items-center gap-1 border border-slate-300 bg-white px-3 py-2 text-xs hover:bg-slate-100 disabled:opacity-30"
+            >
+              <ChevronLeft size={15} />
+              Önceki
+            </button>
+
+            <button
+              type="button"
+              disabled={safePage >= totalPages}
+              onClick={() =>
+                setCurrentPage(safePage + 1)
+              }
+              className="flex items-center gap-1 border border-slate-300 bg-white px-3 py-2 text-xs hover:bg-slate-100 disabled:opacity-30"
+            >
+              Sonraki
+              <ChevronRight size={15} />
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* MODAL */}
+      {modalProduct && (
+        <StockHistoryModal
+          key={modalProduct.productId}
           branchId={branchId}
           isGlobal={isGlobal}
-          productId={historyModalData.productId} 
-          productName={historyModalData.productName}
-          onClose={() => setHistoryModalData(null)} 
+          productId={modalProduct.productId}
+          productName={modalProduct.productName}
+          productBarcode={modalProduct.barcode}
+          productSku={modalProduct.sku}
+          expectedTotal={modalProduct.totalQuantity}
+          selectedShelfId={
+            selectedShelfId
+              ? Number(selectedShelfId)
+              : null
+          }
+          onClose={() => setModalProduct(null)}
         />
       )}
-
     </div>
   );
 }
