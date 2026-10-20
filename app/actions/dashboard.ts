@@ -272,6 +272,8 @@ export async function getDashboardDataServer(userId: string) {
     return { success: false, error: "Veritabanı bağlantı hatası." };
   }
 }
+// app/actions/dashboard.ts (En alttaki getTransferDetailsServer fonksiyonu)
+
 export async function getTransferDetailsServer(transferId: string) {
   try {
     if (!transferId) {
@@ -289,7 +291,7 @@ export async function getTransferDetailsServer(transferId: string) {
       return { success: false, error: "Transfer kaydı bulunamadı." };
     }
 
-    // 2. Sözlük (Dictionary) Verilerini ve Kalemleri Paralel Çek (Raf sorgusu kaldırıldı)
+    // 2. Sözlük (Dictionary) Verilerini ve Kalemleri Paralel Çek
     const [
       { data: branches },
       { data: employees },
@@ -330,7 +332,7 @@ export async function getTransferDetailsServer(transferId: string) {
       carrierMap[c.id] = { name: c.name, type: c.type || "Kargo/Araç" };
     });
 
-    // 3. Sadece Ürün Detaylarını Çek (Raf eşleşmesi kaldırıldı)
+    // 3. Ürün Detaylarını Çek
     const productIds = (rawItems || [])
       .map((i: any) => i.product_id)
       .filter(Boolean);
@@ -347,33 +349,62 @@ export async function getTransferDetailsServer(transferId: string) {
       });
     }
 
-    // 4. Oluşturan, Toplayan ve Sayımı Tamamlayan Personelleri Çözümle
+    // 4. Statü Kontrolü ve Sorumlu Personellerin Doğru Çözümlenmesi (ID'ler Gizli)
+    const normStatus = (transfer.status || "").toUpperCase().replace("İ", "I");
+    const isCompleted =
+      normStatus === "TAMAMLANDI" || normStatus === "COMPLETED";
+
+    // A) 1. Kutu: Oluşturan (Creator)
+    const createLog = (txLogs || []).find((l) => {
+      const act = (l.action_type || "").toUpperCase();
+      return (
+        act.includes("CREATE") ||
+        act.includes("OLUSTUR") ||
+        act.includes("ORDER") ||
+        act.includes("TALEP")
+      );
+    });
+
     const creatorId =
       transfer.created_by_employee_id ||
       transfer.created_by ||
       transfer.requester_id ||
-      txLogs?.[0]?.employee_id;
+      createLog?.employee_id ||
+      null;
 
-    const pickerId = transfer.picker_employee_id;
-
-    const completionLog = [...(txLogs || [])].reverse().find((l) => {
+    // B) 2. Kutu: Depoda Toplayan / Hazırlayan (Picker)
+    const pickLog = (txLogs || []).find((l) => {
       const act = (l.action_type || "").toUpperCase();
       return (
-        act.includes("COMPLETE") ||
-        act.includes("RECEIVE") ||
-        act.includes("CHECK_IN") ||
-        act.includes("TAMAM") ||
-        act.includes("TESLIM")
+        act.includes("PICK") || act.includes("TOPLA") || act.includes("HAZIR")
       );
     });
 
-    const receiverId =
-      transfer.receiver_employee_id ||
-      transfer.completed_by_employee_id ||
-      completionLog?.employee_id ||
-      (transfer.status?.toUpperCase().replace("İ", "I") === "TAMAMLANDI"
-        ? pickerId
-        : null);
+    const pickerId =
+      transfer.picker_employee_id || pickLog?.employee_id || null;
+    const isPicked = Boolean(pickerId);
+
+    // C) 3. Kutu: Teslim Alıp Sayımı Tamamlayan (Completer / Receiver)
+    // SADECE transfer TAMAMLANDI statüsündeyse dolar! Aksi halde kesinlikle boş kalır.
+    const completionLog = isCompleted
+      ? [...(txLogs || [])].reverse().find((l) => {
+          const act = (l.action_type || "").toUpperCase();
+          return (
+            act.includes("COMPLETE") ||
+            act.includes("RECEIVE") ||
+            act.includes("CHECK_IN") ||
+            act.includes("TAMAM") ||
+            act.includes("TESLIM")
+          );
+        })
+      : null;
+
+    const receiverId = isCompleted
+      ? transfer.receiver_employee_id ||
+        transfer.completed_by_employee_id ||
+        completionLog?.employee_id ||
+        null
+      : null;
 
     // 5. Kalemleri Ürün Adına Göre Formatla
     const formattedItems = (rawItems || [])
@@ -401,13 +432,12 @@ export async function getTransferDetailsServer(transferId: string) {
       })
       .sort((a, b) => a.name.localeCompare(b.name, "tr"));
 
-    // 6. Operasyon Log Geçmişini Formatla
+    // 6. Operasyon Log Geçmişini Formatla (employee_id dışarı sızdırılmaz)
     const formattedTimeline = (txLogs || []).map((log) => ({
       id: log.id,
       action_type: log.action_type,
       description: log.description,
       created_at: log.created_at,
-      employee_id: log.employee_id,
       employee_name:
         employeeMap[log.employee_id]?.full_name || "Sistem / Otomatik",
     }));
@@ -428,33 +458,39 @@ export async function getTransferDetailsServer(transferId: string) {
         carrier_type: carrierMap[transfer.carrier_id]?.type || "Lojistik",
         actors: {
           creator: {
-            id: creatorId || "-",
+            isAssigned: true,
             name: creatorId
-              ? employeeMap[creatorId]?.full_name || "Merkez Yöneticisi"
-              : "Sistem / Mağaza Talebi",
+              ? employeeMap[creatorId]?.full_name || "Yetkili Yönetici"
+              : `${branchMap[transfer.from_branch_id]?.name || "Merkez"} Talebi`,
             title: creatorId
               ? employeeMap[creatorId]?.title
-              : "Sipariş Oluşturucu",
+              : "Transfer Başlatıcı",
             time: transfer.created_at,
           },
           picker: {
-            id: pickerId || "-",
-            name: pickerId
-              ? employeeMap[pickerId]?.full_name || "Bilinmiyor"
-              : "Henüz Atanmadı",
-            title: pickerId
-              ? employeeMap[pickerId]?.title
-              : "Depo Toplama Operatörü",
+            isAssigned: isPicked,
+            name: isPicked
+              ? employeeMap[pickerId!]?.full_name || "Depo Operatörü"
+              : "Atama Bekleniyor",
+            title: isPicked
+              ? employeeMap[pickerId!]?.title
+              : "Henüz toplama işlemi başlamadı",
           },
           completer: {
-            id: receiverId || "-",
-            name: receiverId
-              ? employeeMap[receiverId]?.full_name || "Onaylandı"
-              : "Sayım Bekleniyor",
-            title: receiverId
-              ? employeeMap[receiverId]?.title
-              : "Teslimat & Sayım Sorumlusu",
-            time: completionLog?.created_at || transfer.updated_at || null,
+            isCompleted: isCompleted,
+            name: isCompleted
+              ? receiverId
+                ? employeeMap[receiverId]?.full_name || "Mağaza Yetkilisi"
+                : "Teslim Alındı (Onaylı)"
+              : "Sayım Yapılmadı",
+            title: isCompleted
+              ? receiverId
+                ? employeeMap[receiverId]?.title
+                : "Teslimat Onaylandı"
+              : "Transfer henüz teslim alınmadı",
+            time: isCompleted
+              ? completionLog?.created_at || transfer.updated_at || null
+              : null,
           },
         },
         items: formattedItems,

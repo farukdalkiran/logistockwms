@@ -22,7 +22,8 @@ import {
   Activity,
   FileText,
   Layers,
-  Download
+  Download,
+  Clock
 } from "lucide-react";
 import { getTransferDetailsServer } from "@/app/actions/dashboard";
 
@@ -63,9 +64,9 @@ interface TransferFullDetail {
   carrier_name: string;
   carrier_type: string;
   actors: {
-    creator: { id: string; name: string; title: string; time: string };
-    picker: { id: string; name: string; title: string };
-    completer: { id: string; name: string; title: string; time: string | null };
+    creator: { isAssigned: boolean; name: string; title: string; time: string };
+    picker: { isAssigned: boolean; name: string; title: string };
+    completer: { isCompleted: boolean; name: string; title: string; time: string | null };
   };
   items: TransferItemDetail[];
   timeline: {
@@ -73,7 +74,6 @@ interface TransferFullDetail {
     action_type: string;
     description: string;
     created_at: string;
-    employee_id: string;
     employee_name: string;
   }[];
 }
@@ -188,7 +188,7 @@ export function TransferCenterSection({
     URL.revokeObjectURL(url);
   };
 
-  // 2. SEÇİLİ TRANSFERİN DETAYLI ÜRÜN VE PERSONEL LİSTESİNİ EXCEL OLARAK İNDİRME
+  // 2. SEÇİLİ TRANSFERİN DETAYLI ÜRÜN VE PERSONEL LİSTESİNİ EXCEL OLARAK İNDİRME (ID'SİZ)
   const handleExportDetailItemsExcel = () => {
     if (!transferDetail) return;
 
@@ -196,17 +196,18 @@ export function TransferCenterSection({
       ["TRANSFER DETAY RAPORU", transferDetail.transfer_code],
       ["Rota", `${transferDetail.from_branch} -> ${transferDetail.to_branch}`],
       ["Durum", getStatusText(transferDetail.status)],
+      ["1. Oluşturan", transferDetail.actors.creator.name],
       [
-        "1. Oluşturan Personel",
-        `${transferDetail.actors.creator.name}`
+        "2. Depoda Toplayan",
+        transferDetail.actors.picker.isAssigned
+          ? transferDetail.actors.picker.name
+          : "Henüz Atanmadı"
       ],
       [
-        "2. Toplayan Personel",
-        `${transferDetail.actors.picker.name}`
-      ],
-      [
-        "3. Sayımı Tamamlayan",
-        `${transferDetail.actors.completer.name}`
+        "3. Teslim Sayımını Tamamlayan",
+        transferDetail.actors.completer.isCompleted
+          ? transferDetail.actors.completer.name
+          : "-"
       ],
       []
     ];
@@ -234,7 +235,9 @@ export function TransferCenterSection({
       item.approved_qty,
       item.sent_qty,
       item.received_qty,
-      item.received_qty - item.sent_qty
+      transferDetail.actors.completer.isCompleted
+        ? item.received_qty - item.sent_qty
+        : "-"
     ]);
 
     const csvContent =
@@ -267,7 +270,7 @@ export function TransferCenterSection({
       acc.sent += item.sent_qty;
       acc.received += item.received_qty;
       if (
-        normalizeStatus(transferDetail.status) === "TAMAMLANDI" &&
+        transferDetail.actors.completer.isCompleted &&
         item.sent_qty !== item.received_qty
       ) {
         acc.discrepancies += 1;
@@ -465,7 +468,7 @@ export function TransferCenterSection({
           </div>
         </div>
 
-        {/* 4. Detaylı Transfer Tablosu (min-h-0 flex-1 ile garantili dikey scroll) */}
+        {/* 4. Detaylı Transfer Tablosu */}
         <div className="flex-1 min-h-0 overflow-x-auto overflow-y-auto w-full bg-white">
           <table className="w-full text-left border-collapse min-w-[720px]">
             <thead className="bg-slate-100 border-b-2 border-slate-200 sticky top-0 z-10">
@@ -572,7 +575,7 @@ export function TransferCenterSection({
       </div>
 
       {/* =====================================================================
-          AÇILIR TRANSFER DETAY POP-UP (GARANTİLİ SCROLL + EXCEL İNDİRME)
+          AÇILIR TRANSFER DETAY POP-UP (ID GİZLİLİĞİ + GERÇEK STATÜ KUTULARI)
           ===================================================================== */}
       {isModalOpen && (
         <div
@@ -634,7 +637,7 @@ export function TransferCenterSection({
               </div>
             </div>
 
-            {/* MODAL SCROLLABLE BODY (min-h-0 flex-1 overflow-y-auto) */}
+            {/* MODAL SCROLLABLE BODY */}
             {modalLoading ? (
               <div className="flex-1 min-h-0 flex flex-col items-center justify-center gap-3 bg-slate-50">
                 <div className="flex items-center gap-2">
@@ -654,9 +657,9 @@ export function TransferCenterSection({
               </div>
             ) : transferDetail ? (
               <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-5 p-4 sm:p-6 bg-slate-50">
-                {/* 1. OPERASYONEL SORUMLULUK ZİNCİRİ */}
+                {/* 1. OPERASYONEL SORUMLULUK ZİNCİRİ (ID'SİZ & GERÇEK DURUM DUYARLI) */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0">
-                  {/* OLUŞTURAN */}
+                  {/* KUTU 1: OLUŞTURAN */}
                   <div className="bg-white border border-slate-300 border-l-4 border-l-blue-600 rounded-sm p-3.5 shadow-xs flex flex-col justify-between gap-2">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest font-mono">
@@ -669,10 +672,7 @@ export function TransferCenterSection({
                         {transferDetail.actors.creator.name}
                       </p>
                       <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">
-                        {transferDetail.actors.creator.title} •{" "}
-                        <span className="font-mono text-slate-700">
-                          ID: {transferDetail.actors.creator.id}
-                        </span>
+                        {transferDetail.actors.creator.title}
                       </p>
                     </div>
                     <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] font-mono text-slate-500">
@@ -685,26 +685,55 @@ export function TransferCenterSection({
                     </div>
                   </div>
 
-                  {/* TOPLAYAN (PICKER) */}
-                  <div className="bg-white border border-slate-300 border-l-4 border-l-purple-600 rounded-sm p-3.5 shadow-xs flex flex-col justify-between gap-2">
+                  {/* KUTU 2: TOPLAYAN (PICKER) - Atanmadıysa soluk/boş görünür */}
+                  <div
+                    className={`rounded-sm p-3.5 flex flex-col justify-between gap-2 transition-all ${
+                      transferDetail.actors.picker.isAssigned
+                        ? "bg-white border border-slate-300 border-l-4 border-l-purple-600 shadow-xs"
+                        : "bg-slate-100/70 border border-dashed border-slate-300 border-l-4 border-l-slate-400 opacity-80"
+                    }`}
+                  >
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black text-purple-600 uppercase tracking-widest font-mono">
+                      <span
+                        className={`text-[10px] font-black uppercase tracking-widest font-mono ${
+                          transferDetail.actors.picker.isAssigned
+                            ? "text-purple-600"
+                            : "text-slate-500"
+                        }`}
+                      >
                         2. DEPO TOPLAMA / HAZIRLAYAN
                       </span>
-                      <Package size={15} className="text-purple-600" />
+                      <Package
+                        size={15}
+                        className={
+                          transferDetail.actors.picker.isAssigned
+                            ? "text-purple-600"
+                            : "text-slate-400"
+                        }
+                      />
                     </div>
                     <div>
-                      <p className="text-sm font-black text-slate-900 uppercase truncate">
-                        {transferDetail.actors.picker.name}
-                      </p>
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">
-                        {transferDetail.actors.picker.title} •{" "}
-                        <span className="font-mono text-slate-700">
-                          ID: {transferDetail.actors.picker.id}
-                        </span>
-                      </p>
+                      {transferDetail.actors.picker.isAssigned ? (
+                        <>
+                          <p className="text-sm font-black text-slate-900 uppercase truncate">
+                            {transferDetail.actors.picker.name}
+                          </p>
+                          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">
+                            {transferDetail.actors.picker.title}
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm font-black text-slate-400 uppercase italic">
+                            — Henüz Atanmadı —
+                          </p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">
+                            Toplama işlemi bekleniyor
+                          </p>
+                        </>
+                      )}
                     </div>
-                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] font-mono text-slate-500">
+                    <div className="pt-2 border-t border-slate-200/70 flex items-center justify-between text-[10px] font-mono text-slate-500">
                       <span>Lojistik / Araç:</span>
                       <span className="font-bold text-slate-700 truncate max-w-[150px]">
                         {transferDetail.carrier_name}
@@ -712,33 +741,68 @@ export function TransferCenterSection({
                     </div>
                   </div>
 
-                  {/* SAYIMI / TESLİMATI TAMAMLAYAN */}
-                  <div className="bg-white border border-slate-300 border-l-4 border-l-emerald-600 rounded-sm p-3.5 shadow-xs flex flex-col justify-between gap-2">
+                  {/* KUTU 3: SAYIMI & TESLİMATI TAMAMLAYAN - Sadece TAMAMLANDI ise dolu görünür, değilse boş kalır */}
+                  <div
+                    className={`rounded-sm p-3.5 flex flex-col justify-between gap-2 transition-all ${
+                      transferDetail.actors.completer.isCompleted
+                        ? "bg-white border border-slate-300 border-l-4 border-l-emerald-600 shadow-xs"
+                        : "bg-slate-100/70 border border-dashed border-slate-300 border-l-4 border-l-slate-300 opacity-75"
+                    }`}
+                  >
                     <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest font-mono">
-                        3. SAYIMI & TESLİMATI TAMAMLAYAN
+                      <span
+                        className={`text-[10px] font-black uppercase tracking-widest font-mono ${
+                          transferDetail.actors.completer.isCompleted
+                            ? "text-emerald-600"
+                            : "text-slate-400"
+                        }`}
+                      >
+                        3. TESLİM SAYIMINI TAMAMLAYAN
                       </span>
-                      <UserCheck size={15} className="text-emerald-600" />
+                      {transferDetail.actors.completer.isCompleted ? (
+                        <UserCheck size={15} className="text-emerald-600" />
+                      ) : (
+                        <Clock size={15} className="text-slate-400" />
+                      )}
                     </div>
-                    <div>
-                      <p className="text-sm font-black text-slate-900 uppercase truncate">
-                        {transferDetail.actors.completer.name}
-                      </p>
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">
-                        {transferDetail.actors.completer.title} •{" "}
-                        <span className="font-mono text-slate-700">
-                          ID: {transferDetail.actors.completer.id}
-                        </span>
-                      </p>
-                    </div>
-                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] font-mono text-slate-500">
-                      <span>Tamamlanma:</span>
-                      <span className="font-bold text-slate-700">
-                        {transferDetail.actors.completer.time
-                          ? new Date(transferDetail.actors.completer.time).toLocaleString("tr-TR")
-                          : "Bekleniyor"}
-                      </span>
-                    </div>
+
+                    {transferDetail.actors.completer.isCompleted ? (
+                      <>
+                        <div>
+                          <p className="text-sm font-black text-slate-900 uppercase truncate">
+                            {transferDetail.actors.completer.name}
+                          </p>
+                          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">
+                            {transferDetail.actors.completer.title}
+                          </p>
+                        </div>
+                        <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] font-mono text-slate-500">
+                          <span>Tamamlanma:</span>
+                          <span className="font-bold text-emerald-700">
+                            {transferDetail.actors.completer.time
+                              ? new Date(transferDetail.actors.completer.time).toLocaleString(
+                                  "tr-TR"
+                                )
+                              : "Tamamlandı"}
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="py-1">
+                          <p className="text-xs font-black text-slate-400 uppercase tracking-wider italic">
+                            — Henüz Teslim Sayımı Yapılmadı —
+                          </p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">
+                            Varış şubesinde barkod okutulması bekleniyor
+                          </p>
+                        </div>
+                        <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px] font-mono text-slate-400">
+                          <span>Tamamlanma:</span>
+                          <span>-</span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -791,7 +855,9 @@ export function TransferCenterSection({
                         Sayılan (Teslim)
                       </span>
                       <span className="text-sm font-black font-mono text-emerald-600">
-                        {itemTotals.received} Adet
+                        {transferDetail.actors.completer.isCompleted
+                          ? `${itemTotals.received} Adet`
+                          : "-"}
                       </span>
                     </div>
                   </div>
@@ -838,7 +904,7 @@ export function TransferCenterSection({
                   </div>
                 )}
 
-                {/* 3. SEKME İÇERİĞİ: ÜRÜN MATRİSİ (RAF SÜTUNU KALDIRILDI) */}
+                {/* 3. SEKME İÇERİĞİ: ÜRÜN MATRİSİ VEYA LOGLAR */}
                 {activeTab === "ITEMS" ? (
                   <div className="bg-white border border-slate-300 rounded-sm overflow-hidden shadow-xs shrink-0">
                     <div className="overflow-x-auto max-h-[380px] overflow-y-auto">
@@ -868,8 +934,7 @@ export function TransferCenterSection({
                         </thead>
                         <tbody className="divide-y divide-slate-100 text-xs font-bold text-slate-700">
                           {transferDetail.items.map((item, index) => {
-                            const isCompleted =
-                              normalizeStatus(transferDetail.status) === "TAMAMLANDI";
+                            const isCompleted = transferDetail.actors.completer.isCompleted;
                             const hasDiff =
                               isCompleted && item.sent_qty !== item.received_qty;
 
@@ -925,7 +990,7 @@ export function TransferCenterSection({
                                   {item.sent_qty}
                                 </td>
                                 <td className="py-2.5 px-3 text-center border-r border-slate-100 font-mono text-emerald-700 font-black">
-                                  {item.received_qty}
+                                  {isCompleted ? item.received_qty : "-"}
                                 </td>
 
                                 <td className="py-2.5 px-3 text-right">
@@ -938,8 +1003,8 @@ export function TransferCenterSection({
                                       TAM EŞLEŞTİ
                                     </span>
                                   ) : (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-600 border border-slate-300 rounded-sm text-[9px] font-black uppercase">
-                                      SÜREÇTE
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-500 border border-slate-300 rounded-sm text-[9px] font-black uppercase">
+                                      BEKLENİYOR
                                     </span>
                                   )}
                                 </td>
@@ -973,9 +1038,6 @@ export function TransferCenterSection({
                             <div className="flex items-center gap-2">
                               <span className="text-[11px] font-black text-slate-900 uppercase">
                                 {log.employee_name}
-                              </span>
-                              <span className="text-[10px] font-mono bg-white border border-slate-300 px-1.5 py-0.5 rounded-sm text-slate-600">
-                                ID: {log.employee_id || "SİSTEM"}
                               </span>
                               <span className="text-[9px] font-black uppercase bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded-sm">
                                 {log.action_type}
