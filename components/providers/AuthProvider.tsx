@@ -1,6 +1,7 @@
+// components/providers/AuthProvider.tsx
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 
 type UserProfile = {
@@ -26,56 +27,92 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Oturumun tekrar tekrar yüklenmesini önleyen bellek kilidi
+  const isInitializedRef = useRef(false);
+
   useEffect(() => {
     let isMounted = true;
 
-    const fetchProfile = async () => {
-      setIsLoading(true);
+    const fetchProfile = async (userId: string, email?: string, meta?: any) => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role, branch_id, branches(name)")
+          .eq("id", userId)
+          .single();
 
-        if (session?.user && isMounted) {
-          const { data: profile } = await supabase
-            .from("profiles")
-            .select("role, branch_id, branches(name)")
-            .eq("id", session.user.id)
-            .single();
+        if (profile && isMounted) {
+          const branchData = profile.branches as any;
+          const resolvedBranchName = Array.isArray(branchData)
+            ? branchData[0]?.name
+            : branchData?.name;
 
-          if (profile && isMounted) {
-            // TypeScript'in dizi (Array) veya nesne (Object) algılama karmaşasını çözen güvenli okuma bloğu
-            const branchData = profile.branches as any;
-            const resolvedBranchName = Array.isArray(branchData) 
-              ? branchData[0]?.name 
-              : branchData?.name;
-
-            setUserProfile({
-              id: session.user.id,
-              email: session.user.email || "",
-              fullName: session.user.user_metadata?.full_name || "Faruk Dalkıran",
-              role: profile.role || "Developer",
-              branchName: resolvedBranchName || "Şube Tanımsız",
-              isGlobalAdmin: profile.role === "Developer" || profile.role === "Admin",
-            });
-          }
+          setUserProfile({
+            id: userId,
+            email: email || "",
+            fullName: meta?.full_name || "Faruk Dalkıran",
+            role: profile.role || "Developer",
+            branchName: resolvedBranchName || "Şube Tanımsız",
+            isGlobalAdmin: profile.role === "Developer" || profile.role === "Admin",
+          });
         } else if (isMounted) {
           setUserProfile(null);
         }
       } catch (error) {
         console.error("Auth Provider Error:", error);
+        if (isMounted) setUserProfile(null);
       } finally {
-        if (isMounted) setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+          isInitializedRef.current = true;
+        }
       }
     };
 
-    fetchProfile();
+    const initAuth = async () => {
+      // Eğer daha önceden yüklenmişse bir daha loading state'ine sokma
+      if (isInitializedRef.current) return;
 
-    // Kullanıcı çıkış yaparsa veya sekme değiştirirse anında yakala
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!session && isMounted) {
-        setUserProfile(null);
-        setIsLoading(false);
-      } else if (_event === 'SIGNED_IN') {
-        fetchProfile();
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          await fetchProfile(session.user.id, session.user.email, session.user.user_metadata);
+        } else if (isMounted) {
+          setUserProfile(null);
+          setIsLoading(false);
+          isInitializedRef.current = true;
+        }
+      } catch (err) {
+        if (isMounted) {
+          setIsLoading(false);
+          isInitializedRef.current = true;
+        }
+      }
+    };
+
+    initAuth();
+
+    // Dinleyici: Sekme değişimlerinde, TOKEN_REFRESHED olaylarını ve gereksiz tetiklemeleri tamamen yalıt
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // Tarayıcı sekmesine dönüldüğünde veya token yenilendiğinde asla yükleniyor ekranına düşme!
+      if (event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION") return;
+
+      if (!session?.user) {
+        if (isMounted) {
+          setUserProfile(null);
+          setIsLoading(false);
+          isInitializedRef.current = false;
+        }
+        return;
+      }
+
+      // Eğer kullanıcı zaten oturum açmışsa ve ID aynıysa tablodan tekrar profil çekme (Sekme odaklanma koruması)
+      if (isInitializedRef.current && userProfile?.id === session.user.id) {
+        return;
+      }
+
+      if (isMounted) {
+        await fetchProfile(session.user.id, session.user.email, session.user.user_metadata);
       }
     });
 
@@ -83,7 +120,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       isMounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [userProfile?.id]);
 
   return (
     <AuthContext.Provider value={{ userProfile, isLoading }}>
@@ -92,5 +129,4 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   );
 };
 
-// İstediğimiz bileşenden anında userProfile'ı çekmek için özel hook
 export const useAuth = () => useContext(AuthContext);
