@@ -18,7 +18,7 @@ function db() {
   if (!key) throw new Error("Sunucu anahtarı eksik");
   return createAdmin(process.env.NEXT_PUBLIC_SUPABASE_URL!, key, { auth:{persistSession:false,autoRefreshToken:false} });
 }
-const asDay = (d: Date) => new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Istanbul",year:"numeric",month:"2-digit",day:"2-digit"}).format(d);
+const asDay = (d: Date) => { const p = new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/Istanbul",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(d); const part=(type:string)=>p.find(x=>x.type===type)?.value||"";return `${part("year")}-${part("month")}-${part("day")}`; };
 const dateOnly = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d);
 function monthBounds() {
   const day=asDay(new Date()), ym=day.slice(0,7);
@@ -40,7 +40,8 @@ export async function getEmreBotFeed() {
       .select("id,order_code,branch_id,requested_by,status,created_at,branches!orders_branch_id_fkey(name)")
       .eq("status","PENDING").order("created_at",{ascending:false}).limit(35);
     if(oe)throw oe;
-    const visible=(headers||[]).filter(h=>s.global || (s.branch && h.branch_id===s.branch));
+    // Warehouse approvers review store orders across branches; store roles do not receive the feed.
+    const visible=(headers||[]).filter(h=>isManager);
     if(visible.length){
       const ids=visible.map(x=>x.id), requesters=[...new Set(visible.map(x=>x.requested_by).filter(Boolean))];
       const [{data:items},{data:people}]=await Promise.all([
