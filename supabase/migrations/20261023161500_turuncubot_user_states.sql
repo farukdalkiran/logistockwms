@@ -11,3 +11,13 @@ grant select on public.bot_user_states to authenticated;
 create policy "bot_user_states_own_read" on public.bot_user_states
  for select to authenticated using (user_id=(select auth.uid()));
 create index if not exists bot_user_states_updated_idx on public.bot_user_states (updated_at desc);
+
+-- Realtime events contain order IDs only. Depot accounts read details through protected server actions.
+create policy "bot_signals_online_depot_read" on public.bot_order_signals
+for select to authenticated using (
+ exists (
+  select 1 from public.profiles p
+  join public.branches b on b.id=p.branch_id
+  where p.id=(select auth.uid()) and lower(b.name)='online depo' and b.type='Depo'
+ )
+);
