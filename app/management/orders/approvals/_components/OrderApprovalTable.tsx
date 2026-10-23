@@ -486,7 +486,7 @@ export default function OrderApprovalTable({
           <button
             aria-label="Sonraki sayfa"
             disabled={loading || !!error || current >= totalPages}
-            onClick={() => change({ page: n + 1 })}
+            onClick={() => change({ page: current + 1 })}
           >
             <ChevronRight size={15} />
           </button>
