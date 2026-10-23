@@ -21,16 +21,24 @@ export default function OrderReviewPanel({ order, stocks, warehouses, activeWare
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setLoading(true);
-    
+    if (loading) return;
+    const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
     const formData = new FormData(e.currentTarget);
-    const result = await processOrderApproval(formData);
-    
-    setLoading(false);
-    if (result.success) {
-      alert(result.message); // UI kitinize göre (Örn: react-hot-toast) değiştirebilirsiniz.
-    } else {
-      alert(result.error);
+    // FormData(form) alone omits the clicked submit button name/value.
+    formData.set("intent", submitter?.value === "approve_all" ? "approve_all" : "review");
+    setLoading(true);
+    try {
+      const result = await processOrderApproval(formData);
+      if (result.success) {
+        alert(result.message);
+        router.refresh();
+      } else {
+        alert(result.error);
+      }
+    } catch {
+      alert("Sipariş onayı sırasında bağlantı hatası oluştu. Tekrar deneyin.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -181,7 +189,34 @@ export default function OrderReviewPanel({ order, stocks, warehouses, activeWare
 
         {/* Aksiyon Footer */}
         {isEditable && (
-          <div className="p-4 bg-slate-900 border-t-4 border-[#dc3545] flex items-center justify-between mt-auto">
+          <div className="p-4 bg-slate-900 border-t-4 border-[#dc3545] flex flex-col gap-4 mt-auto">
+            <div className="grid grid-cols-1 md:grid-cols-[180px_1fr] gap-3">
+              <label className="text-xs font-bold text-slate-200">
+                İşlemi Yapan Sicil No
+                <input
+                  name="employee_id"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]{1,5}"
+                  maxLength={5}
+                  required
+                  autoComplete="off"
+                  placeholder="Personel sicil no"
+                  className="mt-1 block w-full rounded-md border border-slate-600 bg-white px-3 py-2 text-sm text-slate-900"
+                />
+              </label>
+              <label className="text-xs font-bold text-slate-200">
+                İşlem Notu (isteğe bağlı)
+                <input
+                  name="review_note"
+                  type="text"
+                  maxLength={2000}
+                  placeholder="Onay veya revizyon açıklaması"
+                  className="mt-1 block w-full rounded-md border border-slate-600 bg-white px-3 py-2 text-sm text-slate-900"
+                />
+              </label>
+            </div>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="text-white">
               <strong className="block text-sm">İşlemi Tamamla</strong>
               <span className="text-[10px] text-slate-400">Azaltılan veya kaldırılan ürünlerde sebep belirtmek zorunludur.</span>
@@ -205,6 +240,7 @@ export default function OrderReviewPanel({ order, stocks, warehouses, activeWare
               >
                 <CheckCheck size={16} /> Kararları Kaydet
               </button>
+            </div>
             </div>
           </div>
         )}
