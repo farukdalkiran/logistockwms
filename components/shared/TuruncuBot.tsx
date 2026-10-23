@@ -11,7 +11,7 @@ import type { BotCard, BotResponse, Intent, Mood } from "@/lib/turuncubot/engine
 
 type Order={id:string;code:string;branch:string;requester:string;quantity:number;lines:number;createdAt:string};
 type Notice={id:string;title:string;body:string;category:string;starts_at:string;action_href:string|null;action_label:string|null;read:boolean;show_missing_attendance:boolean};
-type Feed={orders:Order[];announcements:Notice[];canAttendance:boolean;canOrders:boolean;sugar:number;lastIntent:string};
+type Feed={orders:Order[];announcements:Notice[];canAttendance:boolean;canOrders:boolean;canApprove:boolean;sugar:number;lastIntent:string};
 type ChatLine={id:number;from:"bot"|"user";text:string;cards?:BotCard[];suggestions?:string[];intent?:Intent};
 type GapReport={month:string;through:string;rows:{id:string;name:string;days:string[];pending:string[];halfDays:string[]}[];note:string};
 type Tab="chat"|"orders"|"announcements";
@@ -178,7 +178,7 @@ export default function TuruncuBot(){
          {feed?.orders.map(o=><div key={o.id} className="rounded-xl bg-white p-3 border-l-[3px] border-l-orange-500 border border-slate-200 shadow-sm">
            <div className="flex items-start justify-between gap-2"><div className="min-w-0"><div className="uppercase text-[10px] text-orange-600 font-black tracking-wide flex items-center gap-1"><Zap size={12}/> MAĞAZA TALEBİ</div><h3 className="font-black text-sm text-slate-900 mt-1 truncate">{o.code}</h3></div><div className="rounded-lg bg-orange-50 px-3 py-2 text-center shrink-0"><strong className="text-lg text-orange-600">{number(o.quantity)}</strong><div className="text-[9px] text-orange-800">ADET</div></div></div>
            <p className="mt-1 text-[12px] text-slate-600">🏬 {o.branch}</p><p className="mt-1 text-[12px] text-slate-600">👤 Talep: {o.requester}</p><p className="mt-1 text-[11px] text-slate-500">📦 {o.lines} kalem · {dateTime(o.createdAt)}</p>
-           <button type="button" onClick={()=>navigate("/management/orders/approvals")} className="mt-3 flex w-full gap-1 items-center justify-center rounded-lg bg-slate-950 hover:bg-orange-600 text-white text-xs font-bold p-2.5 transition-colors">Talebi İncele <ArrowRight size={14}/></button>
+           {feed.canApprove&&<button type="button" onClick={()=>navigate("/management/orders/approvals")} className="mt-3 flex w-full gap-1 items-center justify-center rounded-lg bg-slate-950 hover:bg-orange-600 text-white text-xs font-bold p-2.5 transition-colors">Talebi İncele <ArrowRight size={14}/></button>}
          </div>)}
        </>}
        {tab==="announcements"&&<>
