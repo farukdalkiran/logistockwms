@@ -40,6 +40,5 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Sipariş Yönetim Modülünü Komple Hariç Tut
-app/management/orders/
-app/terminal/orders/
+# Orders module is source code and must remain tracked.
+# Keep sensitive environment files excluded by the rules above.

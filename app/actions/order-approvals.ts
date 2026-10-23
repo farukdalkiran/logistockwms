@@ -1,6 +1,7 @@
 "use server";
 
 import { cookies } from "next/headers";
+import { revalidatePath } from "next/cache";
 import { createServerClient } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 import type {
@@ -177,5 +178,108 @@ export async function decideApproval(
     return { ok: true, data: data as { id: string; status: string } };
   } catch (e) {
     return { ok: false, error: message(e) };
+  }
+}
+
+
+/**
+ * Compatibility action for the existing /management/orders/store-orders form.
+ * Uses the SAME authenticated approval RPC as the main approvals screen.
+ * The client does not decide the trusted order quantities or warehouse identity.
+ */
+export async function processOrderApproval(
+  formData: FormData,
+): Promise<
+  | { success: true; message: string; error?: never }
+  | { success: false; error: string; message?: never }
+> {
+  try {
+    const id = String(formData.get("order_id") ?? "");
+    const employeeId = String(formData.get("employee_id") ?? "").trim();
+    const note = String(formData.get("review_note") ?? "").trim();
+    const intent = String(formData.get("intent") ?? "review");
+    const warehouseId = String(formData.get("warehouse_id") ?? "");
+
+    if (!UUID.test(id)) throw new Error("Sipariş kimliği geçersiz.");
+    if (!/^\d{1,5}$/.test(employeeId))
+      throw new Error("İşlemi yapan personelin 1-5 haneli sicil numarasını girin.");
+    if (note.length > 2000) throw new Error("İşlem notu çok uzun.");
+    if (intent !== "review" && intent !== "approve_all")
+      throw new Error("Geçersiz onay işlemi.");
+
+    // The warehouse used by wms_decide_approval is taken from the
+    // authenticated actor, NOT from the untrusted HTML form.
+    const context = await getApprovalContext();
+    if (!context.ok) throw new Error(context.error);
+    if (warehouseId && warehouseId !== context.data.warehouseId)
+      throw new Error(
+        "Seçilen depo, yetkili olduğunuz depo ile eşleşmiyor. Onay merkezinden doğru depoyu kullanın.",
+      );
+
+    const detail = await getApprovalDetail(id);
+    if (!detail.ok) throw new Error(detail.error);
+    if (detail.data.status !== "PENDING")
+      throw new Error("Bu sipariş artık onay beklemiyor. Listeyi yenileyin.");
+    if (!detail.data.items.length)
+      throw new Error("Onaylanacak ürün kalemi bulunamadı.");
+
+    const items = detail.data.items.map((item) => {
+      const requested = item.requested_qty;
+      if (!Number.isSafeInteger(requested) || requested < 0)
+        throw new Error("Sipariş kalem miktarı geçersiz.");
+
+      const choice =
+        intent === "approve_all"
+          ? "APPROVE"
+          : String(formData.get("decision_" + item.id) ?? "APPROVE");
+      if (!["APPROVE", "REVISE", "REMOVE"].includes(choice))
+        throw new Error("Ürün kararı geçersiz.");
+
+      let qty = requested;
+      if (choice === "REMOVE") qty = 0;
+      if (choice === "REVISE") {
+        const raw = String(formData.get("qty_" + item.id) ?? "");
+        if (!/^\d+$/.test(raw))
+          throw new Error("Revize miktarı sıfır veya pozitif tam sayı olmalı.");
+        qty = Number(raw);
+      }
+      if (!Number.isSafeInteger(qty) || qty < 0 || qty > requested)
+        throw new Error("Onay miktarı talep edilen adedi aşamaz.");
+
+      const selectedReason = String(
+        formData.get("reason_" + item.id) ?? "",
+      ).trim();
+      const extra = String(formData.get("note_" + item.id) ?? "").trim();
+      const reason =
+        qty === requested
+          ? ""
+          : selectedReason === "Diğer"
+            ? extra
+              ? "Diğer: " + extra
+              : ""
+            : [selectedReason, extra].filter(Boolean).join(" — ");
+      if (qty < requested && !reason)
+        throw new Error("Azaltılan veya kaldırılan ürün için gerekçe belirtin.");
+      if (reason.length > 500)
+        throw new Error("Ürün revizyon gerekçesi 500 karakteri aşamaz.");
+
+      return { id: item.id, qty, reason };
+    });
+
+    const decision = await decideApproval({
+      orderId: id,
+      employeeId,
+      action: "APPROVE",
+      items,
+      note,
+    });
+    if (!decision.ok) throw new Error(decision.error);
+
+    revalidatePath("/management/orders/store-orders");
+    revalidatePath("/management/orders/approvals");
+    revalidatePath("/management/orders/myorders");
+    return { success: true, message: "Sipariş kararı başarıyla kaydedildi." };
+  } catch (error) {
+    return { success: false, error: message(error) };
   }
 }
