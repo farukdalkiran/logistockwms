@@ -42,4 +42,3 @@ next-env.d.ts
 
 # Sipariş Yönetim Modülünü Komple Hariç Tut
 app/management/orders/
-app/terminal/orders/
