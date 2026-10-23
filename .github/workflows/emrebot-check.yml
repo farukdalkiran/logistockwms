@@ -1,8 +1,9 @@
-name: emreBOT build check
+name: turuncuBOT build check
 on:
   push:
     branches:
-      - feature/emrebot-realtime-announcements
+      - feature/turuncubot-operations-v2
+      - main
   pull_request:
     branches:
       - main

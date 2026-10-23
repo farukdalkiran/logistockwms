@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "react-hot-toast";
-import EmreBot from "@/components/shared/EmreBot";
+import TuruncuBot from "@/components/shared/TuruncuBot";
 import { AuthProvider } from "@/components/providers/AuthProvider";
 
 // WMS Güvenlik Duvarı ve Supabase Sunucu İstemcisi
@@ -74,7 +74,7 @@ export default async function RootLayout({
           <WmsSessionProvider session={sessionData}>
             <Toaster position="top-right" />
             {children}
-            <EmreBot />
+            <TuruncuBot />
           </WmsSessionProvider>
         </AuthProvider>
       </body>
