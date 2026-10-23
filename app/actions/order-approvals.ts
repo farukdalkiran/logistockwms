@@ -1,92 +1,181 @@
-'use server'
+"use server";
 
-import { createClient } from "@/lib/supabase/server";
-import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
+import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
+import type {
+  Context,
+  Decision,
+  Filters,
+  ListResult,
+  OrderDetail,
+  Result,
+} from "@/lib/order-approvals/types";
 
-export async function processOrderApproval(formData: FormData) {
-  const db = await createClient();
-  const { data: session } = await db.auth.getUser();
-  if (!session.user) return { success: false, error: 'Oturum bulunamadı.' };
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-  const orderId = String(formData.get('order_id'));
-  const warehouseId = String(formData.get('warehouse_id'));
-  const isApproveAll = formData.get('intent') === 'approve_all';
+async function authorized() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const publicKey =
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const secret = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !publicKey || !secret)
+    throw new Error("Supabase sunucu bağlantı ayarları eksik.");
+  const jar = await cookies();
+  const userClient = createServerClient(url, publicKey, {
+    cookies: {
+      getAll: () => jar.getAll(),
+      setAll: (values) => {
+        values.forEach(({ name, value, options }) =>
+          jar.set(name, value, options),
+        );
+      },
+    },
+  });
+  const { data, error } = await userClient.auth.getUser();
+  if (error || !data.user)
+    throw new Error("Oturumunuz sona ermiş. Yeniden giriş yapınız.");
+  const admin = createClient(url, secret, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  const { data: profile, error: profileError } = await admin
+    .from("profiles")
+    .select("role,branch_id")
+    .eq("id", data.user.id)
+    .single();
+  if (
+    profileError ||
+    !profile?.branch_id ||
+    !["ADMIN", "DEVELOPER", "ADMNWH"].includes(profile.role.toUpperCase())
+  )
+    throw new Error(
+      "Sipariş onay yönetimi için depo yöneticisi yetkisi gerekiyor.",
+    );
+  // Every RPC also checks the persisted role and warehouse type.
+  return { admin, actor: data.user.id };
+}
 
+function message(e: unknown) {
+  return e instanceof Error
+    ? e.message
+    : "İşlem tamamlanamadı. Lütfen yeniden deneyiniz.";
+}
+function validDate(value: string) {
+  if (!value) return true;
+  const d = new Date(value + "T00:00:00Z");
+  return (
+    /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    !Number.isNaN(d.getTime()) &&
+    d.toISOString().slice(0, 10) === value
+  );
+}
+
+export async function getApprovalContext(): Promise<Result<Context>> {
   try {
-    // 1. Siparişin mevcut durumunu çek
-    const { data: order, error: orderError } = await db
-      .from('orders')
-      .select('status, order_items(id, product_id, requested_qty)')
-      .eq('id', orderId)
-      .single();
+    const { admin, actor } = await authorized();
+    const { data, error } = await admin.rpc("wms_approval_context", {
+      p_actor: actor,
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true, data: data as Context };
+  } catch (e) {
+    return { ok: false, error: message(e) };
+  }
+}
 
-    if (orderError || order.status !== 'PENDING') {
-      throw new Error('Sipariş bulunamadı veya işlem yetkiniz yok (Zaten onaylanmış olabilir).');
-    }
+export async function getApprovalOrders(
+  input: Filters,
+): Promise<Result<ListResult>> {
+  try {
+    if (
+      !input ||
+      typeof input.search !== "string" ||
+      input.search.length > 120 ||
+      !["ALL", "PENDING", "PREPARING", "READY_TO_SHIP", "REJECTED"].includes(
+        input.status,
+      ) ||
+      !["ALL", "PRODUCT", "CONSUMABLE", "MIXED"].includes(input.kind) ||
+      !["oldest", "newest", "quantity"].includes(input.sort) ||
+      ![10, 20, 50].includes(input.pageSize) ||
+      !Number.isSafeInteger(input.page) ||
+      input.page < 1 ||
+      input.page > 1000000 ||
+      (input.branch && !UUID.test(input.branch)) ||
+      !validDate(input.from) ||
+      !validDate(input.to) ||
+      (input.from && input.to && input.from > input.to)
+    )
+      throw new Error("Filtreleri ve tarih aralığını kontrol ediniz.");
+    const { admin, actor } = await authorized();
+    const { data, error } = await admin.rpc("wms_list_approvals", {
+      p_actor: actor,
+      p_filter: input,
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true, data: data as ListResult };
+  } catch (e) {
+    return { ok: false, error: message(e) };
+  }
+}
 
-    const items = order.order_items || [];
-    let totalApproved = 0;
-    const updates = [];
+export async function getApprovalDetail(
+  orderId: string,
+): Promise<Result<OrderDetail>> {
+  try {
+    if (!UUID.test(orderId)) throw new Error("Geçersiz sipariş.");
+    const { admin, actor } = await authorized();
+    const { data, error } = await admin.rpc("wms_approval_detail", {
+      p_actor: actor,
+      p_order: orderId,
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true, data: data as OrderDetail };
+  } catch (e) {
+    return { ok: false, error: message(e) };
+  }
+}
 
-    // 2. Her bir kalem için kararları topla
-    for (const item of items) {
-      const mode = isApproveAll ? 'APPROVE' : String(formData.get(`decision_${item.id}`));
-      let approvedQty = 0;
-      let revisionReason = null;
-
-      if (mode === 'APPROVE') {
-        approvedQty = item.requested_qty;
-      } else if (mode === 'REVISE') {
-        approvedQty = Number(formData.get(`qty_${item.id}`));
-        const reason = String(formData.get(`reason_${item.id}`));
-        const note = String(formData.get(`note_${item.id}`));
-        revisionReason = note ? `${reason} — ${note}` : reason;
-        
-        if (approvedQty >= item.requested_qty || approvedQty < 1) {
-            throw new Error('Revize adedi hatalı. (1 ile talep edilen miktar arasında olmalı)');
-        }
-      } else if (mode === 'REMOVE') {
-        approvedQty = 0;
-        const reason = String(formData.get(`reason_${item.id}`));
-        const note = String(formData.get(`note_${item.id}`));
-        revisionReason = note ? `${reason} — ${note}` : reason;
-      }
-
-      totalApproved += approvedQty;
-
-      updates.push({
-        id: item.id,
-        order_id: orderId,
-        product_id: item.product_id,
-        requested_qty: item.requested_qty,
-        approved_qty: approvedQty,
-        revision_reason: revisionReason
-      });
-    }
-
-    // 3. Stok Kontrolü (Eğer onaylanan miktar varsa, depodaki stok yetiyor mu?)
-    // Not: Bu aşamada sadece kontrol yapıyoruz, stoktan düşme işlemi "Toplama/Transfer" aşamasında yapılacak.
-    // Ancak depoda olmayan malı onaylatmamak için burada bir kontrol bloku eklenebilir.
-
-    // 4. Veritabanına Kalemleri Kaydet
-    const { error: itemsError } = await db.from('order_items').upsert(updates);
-    if (itemsError) throw itemsError;
-
-    // 5. Sipariş Ana Durumunu Güncelle
-    const finalStatus = totalApproved === 0 ? 'REJECTED' : 
-                       (totalApproved === items.reduce((sum, i) => sum + i.requested_qty, 0) ? 'APPROVED' : 'PARTIALLY_APPROVED');
-
-    const { error: updateOrderError } = await db
-      .from('orders')
-      .update({ status: finalStatus })
-      .eq('id', orderId);
-
-    if (updateOrderError) throw updateOrderError;
-
-    revalidatePath('/management/orders/store-orders');
-    return { success: true, message: `Sipariş başarıyla işlendi. Yeni Durum: ${finalStatus}` };
-
-  } catch (error: any) {
-    return { success: false, error: error.message || 'İşlem sırasında bir hata oluştu.' };
+export async function decideApproval(
+  input: Decision,
+): Promise<Result<{ id: string; status: string }>> {
+  try {
+    if (
+      !input ||
+      !UUID.test(input.orderId) ||
+      !["APPROVE", "REJECT"].includes(input.action) ||
+      typeof input.employeeId !== "string" ||
+      !/^\d{1,5}$/.test(input.employeeId.trim()) ||
+      typeof input.note !== "string" ||
+      input.note.length > 2000 ||
+      !Array.isArray(input.items) ||
+      input.items.length > 5000
+    )
+      throw new Error("Sipariş ve personel bilgilerini kontrol ediniz.");
+    if (
+      input.items.some(
+        (i) =>
+          !UUID.test(i.id) ||
+          !Number.isSafeInteger(i.qty) ||
+          i.qty < 0 ||
+          i.qty > 2147483647 ||
+          typeof i.reason !== "string" ||
+          i.reason.length > 500,
+      )
+    )
+      throw new Error("Ürün miktarlarını ve gerekçeleri kontrol ediniz.");
+    const { admin, actor } = await authorized();
+    const { data, error } = await admin.rpc("wms_decide_approval", {
+      p_actor: actor,
+      p_order: input.orderId,
+      p_employee: input.employeeId.trim(),
+      p_action: input.action,
+      p_items: input.items,
+      p_note: input.note.trim(),
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true, data: data as { id: string; status: string } };
+  } catch (e) {
+    return { ok: false, error: message(e) };
   }
 }

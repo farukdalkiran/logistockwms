@@ -70,29 +70,75 @@ export async function deleteArasFile(fileId?: string) {
  * BARKOD ARAMA MOTORU 
  * HATA DÜZELTİLDİ: "file_id" tablodan kaldırıldığı için Select sorgusundan da çıkarıldı.
  */
-export async function getShipmentsByDeliveryNumber(deliveryNumber: string, fileId?: string) {
+export async function getShipmentsByDeliveryNumber(
+  deliveryNumber: string,
+  fileId?: string
+) {
   try {
-    let query = supabaseAdmin
-      .from("erp_raw_shipments")
-      .select("id, customer_name, mobile_number, street, street_2, city, region, postal_code, delivery_number, aras_tracking_number, is_processed_aras, sd_document")
-      .ilike("delivery_number", `%${deliveryNumber.trim()}%`);
+    const search = deliveryNumber.trim();
 
-    // DİKKAT: Veritabanında file_id sütunu yoksa ve kullanıcı panelden dosya seçerse bu sorgu patlar.
-    // Şimdilik sadece sütun eklendiyse çalışması için yoruma alabilirsin, ancak Profil bazlı filtreleme için DB'de file_id ŞART.
-    if (fileId && fileId.trim() !== "") {
-      query = query.eq("file_id", fileId);
+    if (!search) {
+      return {
+        success: false,
+        error: "Delivery Number boş olamaz.",
+      };
     }
 
-    const { data, error } = await query;
-    
-    // Hataları UI'a direkt gönderiyoruz ki maskelenmesin
-    if (error) return { success: false, error: `DB SORGUSU ÇÖKTÜ: ${error.message}` };
-    
-    if (!data || data.length === 0) return { success: false, error: "SİPARİŞ BULUNAMADI! Barkodu kontrol edin." };
+    let query = supabaseAdmin
+      .from("erp_raw_shipments")
+      .select(`
+        id,
+        file_id,
+        shipment_number,
+        customer_name,
+        mobile_number,
+        street,
+        street_2,
+        city,
+        region,
+        postal_code,
+        delivery_number,
+        aras_tracking_number,
+        is_processed_aras,
+        sd_document
+      `)
+      .eq("delivery_number", search);
 
-    return { success: true, data };
-  } catch (err: any) {
-    return { success: false, error: "Sunucu bağlantı hatası." };
+    if (fileId?.trim()) {
+      query = query.eq("file_id", fileId.trim());
+    }
+
+    const { data, error } = await query.order(
+      "created_at",
+      { ascending: false }
+    );
+
+    if (error) {
+      return {
+        success: false,
+        error: `Veritabanı sorgu hatası: ${error.message}`,
+      };
+    }
+
+    if (!data?.length) {
+      return {
+        success: false,
+        error: "Bu Delivery Number için gönderi bulunamadı.",
+      };
+    }
+
+    return {
+      success: true,
+      data,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "Gönderi sorgulanırken hata oluştu.",
+    };
   }
 }
 

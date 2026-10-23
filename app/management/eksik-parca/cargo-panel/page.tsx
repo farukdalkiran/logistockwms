@@ -1,1981 +1,498 @@
-
 "use client";
 
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  useState,
-  useRef,
-  useEffect,
-  useCallback,
-  type FormEvent,
-} from "react";
-
+  AlertCircle, AlertTriangle, ArrowRight, BadgeCheck, Barcode, Check,
+  CheckCircle2, ChevronDown, Clipboard, Copy, Download, FileSpreadsheet,
+  FileUp, FolderCog, Hash, Loader2, MapPin, Package, PackageCheck,
+  PackageOpen, Phone, RefreshCcw, RotateCcw, ScanLine, Search, ShieldAlert,
+  ShieldCheck, Trash2, Truck, UserRound, X, XCircle,
+} from "lucide-react";
 import {
   getShipmentsByDeliveryNumber,
-  saveArasTracking,
   getProcessedExportData,
   getExactOriginalExportData,
   getKargoStats,
   getArasFiles,
   deleteArasFile,
 } from "@/app/actions/aras-integration";
-
+import {
+  getCargoPanelExistingRecord,
+  saveCargoPanelRecord,
+  type CargoProcessType,
+} from "@/app/actions/aras-panel-v2";
 import ExcelUploadDrawer from "./ExcelUploadDrawer";
 
-import {
-  Activity,
-  AlertTriangle,
-  BarChart3,
-  Check,
-  CheckCircle2,
-  ChevronDown,
-  Copy,
-  Download,
-  FileSpreadsheet,
-  FolderOpen,
-  Loader2,
-  MapPin,
-  Package,
-  PackageCheck,
-  PackageOpen,
-  Phone,
-  RefreshCw,
-  ScanLine,
-  Search,
-  ShieldAlert,
-  Trash2,
-  Truck,
-  UploadCloud,
-  UserRound,
-  X,
-  Zap,
-  type LucideIcon,
-} from "lucide-react";
-
-/* ============================================================
-   TYPES
-============================================================ */
-
-interface ArasTrackingPanelProps {
-  employeeId: string;
-}
-
-interface ShipmentData {
+type Shipment = {
   id: string;
-  file_id: string;
-  customer_name: string;
-  mobile_number: string;
-  street: string;
-  street_2: string;
-  city: string;
-  region: string;
-  postal_code: string;
+  file_id: string | null;
+  customer_name: string | null;
+  mobile_number: string | null;
+  street: string | null;
+  street_2: string | null;
+  city: string | null;
+  region: string | null;
+  postal_code: string | null;
   delivery_number: string;
-  sd_document: string;
+  sd_document: string | null;
   aras_tracking_number: string | null;
-  is_processed_aras: boolean;
-}
-
-interface ActiveGroupData {
-  records: ShipmentData[];
+  is_processed_aras: boolean | null;
+};
+type Profile = { id: string; filename: string; created_at?: string | null };
+type Group = {
+  records: Shipment[];
+  primary: Shipment;
+  fileId: string;
   count: number;
-  primary: ShipmentData;
-  sdDocumentsMatch: boolean;
-  uniqueSdDocuments: string[];
-  isUpdateMode: boolean;
-}
-
-interface KargoFile {
-  id: string;
-  filename: string;
-  created_at: string;
-}
-
-interface Stats {
-  totalFiles: number;
-  totalRecords: number;
-  processed: number;
-  remaining: number;
-  today: number;
-}
-
-type StatusType =
-  | "idle"
-  | "success"
-  | "error"
-  | "warning"
-  | "update";
-
-type Accent = "blue" | "green" | "orange" | "purple" | "red";
-
-const INITIAL_STATS: Stats = {
-  totalFiles: 0,
-  totalRecords: 0,
-  processed: 0,
-  remaining: 0,
-  today: 0,
+  uniqueSd: string[];
+  processed: boolean;
 };
+type Stats = { totalFiles: number; total: number; processed: number; today: number };
+type Notice = { message: string; type: "success" | "error" | "info" } | null;
+type Option = { value: string; label: string };
 
-/* ============================================================
-   HELPERS
-============================================================ */
+const CARD = "rounded-[5px] border border-slate-200 bg-white shadow-sm";
+const LABEL = "block text-xs font-semibold uppercase tracking-[.07em] text-slate-500";
+const INPUT = "h-11 w-full rounded-[4px] border border-slate-300 bg-white px-3 text-[14px] text-slate-900 outline-none transition focus:border-rose-500 focus:ring-2 focus:ring-rose-100 disabled:bg-slate-100";
+const BTN = "inline-flex min-h-10 items-center justify-center gap-2 rounded-[4px] border px-3.5 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50";
+const BTN_OUTLINE = `${BTN} border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50`;
 
-const formatNumber = (value: number) =>
-  value.toLocaleString("tr-TR");
+const MISSING_OPTIONS: Option[] = [
+  { value: "address", label: "Eksik adres" },
+  { value: "neighborhood", label: "Mahalle bilgisi eksik" },
+  { value: "phone", label: "Telefon numarası eksik" },
+  { value: "phone_invalid", label: "Telefon numarası hatalı" },
+  { value: "building", label: "Apartman / kapı numarası eksik" },
+  { value: "district", label: "İl / ilçe uyuşmazlığı" },
+  { value: "street", label: "Sokak bilgisi eksik" },
+  { value: "postcode", label: "Posta kodu hatalı" },
+  { value: "other", label: "Diğer (açıklama gerekli)" },
+];
+const RETURN_OPTIONS: Option[] = [
+  { value: "undelivered", label: "Teslimat yapılamadı" },
+  { value: "refused", label: "Alıcı kabul etmedi" },
+  { value: "cancelled", label: "Gönderi iptal edildi" },
+  { value: "returned", label: "İade edildi" },
+  { value: "other", label: "Diğer iade sebebi" },
+];
+const MISSING_LABELS: Record<string, string> = {
+  address: "EKSİK ADRES", neighborhood: "EKSİK MAHALLE", phone: "TELEFON NUMARASI EKSİK",
+  phone_invalid: "TELEFON NUMARASI HATALI", building: "APARTMAN / KAPI NUMARASI EKSİK",
+  district: "İL / İLÇE UYUŞMAZLIĞI", street: "SOKAK BİLGİSİ EKSİK",
+  postcode: "POSTA KODU HATALI", other: "DİĞER EKSİK BİLGİ",
+};
+const RETURN_LABELS: Record<string, string> = {
+  undelivered: "TESLİMAT YAPILAMADI", refused: "ALICI KABUL ETMEDİ",
+  cancelled: "GÖNDERİ İPTAL EDİLDİ", returned: "İADE EDİLDİ", other: "DİĞER İADE SEBEBİ",
+};
+const TEXT_ISSUE = /(EKS[Iİ]K|ADRES|MAHALLE|TELEFON|POSTA KODU|[Iİ]L[CÇ]E|APARTMAN|YANLI[SŞ]|HATALI|İLETİŞİM)/i;
+const TRACKING_PATTERN = /^[A-Z0-9]{10,32}$/;
 
-function splitName(fullName?: string | null) {
-  if (!fullName) return { first: "", last: "" };
-
-  const parts = fullName.trim().split(/\s+/);
-
-  if (parts.length === 1) {
-    return { first: parts[0], last: "" };
+function normalizeResult<T>(res: unknown): T[] {
+  if (Array.isArray(res)) return res as T[];
+  if (res && typeof res === "object") {
+    const value = (res as { data?: unknown; rows?: unknown }).data ?? (res as { rows?: unknown }).rows;
+    if (Array.isArray(value)) return value as T[];
   }
-
-  return {
-    last: parts.pop() || "",
-    first: parts.join(" "),
-  };
+  return [];
 }
-
-function extractNeighborhood(
-  street1?: string | null,
-  street2?: string | null,
-) {
-  const address = `${street1 || ""} ${street2 || ""}`.trim();
-
-  const match = address.match(
-    /([a-zA-ZçğıöşüÇĞİÖŞÜ0-9\s.,-]+?)\s+(?:mahallesi|mah|mh)\b\.?/i,
-  );
-
-  if (!match?.[1]) return "MAHALLE BULUNAMADI";
-
-  let neighborhood = match[1].trim();
-
-  if (neighborhood.includes(",")) {
-    neighborhood =
-      neighborhood.split(",").pop()?.trim() || neighborhood;
-  }
-
-  return neighborhood.toLocaleUpperCase("tr-TR");
+function errorFrom(res: unknown, fallback = "İşlem gerçekleştirilemedi.") {
+  if (!res || typeof res !== "object") return fallback;
+  const e = (res as { error?: unknown }).error;
+  return typeof e === "string" ? e : fallback;
 }
-
-function formatPhone(phone?: string | null) {
-  if (!phone) return "";
-
-  const index = phone.indexOf("5");
-  return index !== -1 ? phone.substring(index) : phone;
+function hasFailure(res: unknown) {
+  return Boolean(res && typeof res === "object" && (res as { success?: boolean }).success === false);
 }
-
-function csvCell(value: unknown) {
-  const text = value == null ? "" : String(value);
-  return `"${text.replace(/"/g, '""')}"`;
+function fmtDate(s?: string | null) {
+  if (!s) return "—";
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString("tr-TR", { timeZone: "Europe/Istanbul", day: "2-digit", month: "2-digit", year: "numeric" });
 }
-
-function downloadCSV(content: string, filename: string) {
-  const blob = new Blob([content], {
-    type: "text/csv;charset=utf-8;",
-  });
-
-  const url = URL.createObjectURL(blob);
+function fullNameParts(value: string | null) {
+  const parts = String(value ?? "").trim().split(/\s+/).filter(Boolean);
+  return { first: parts.slice(0, -1).join(" ") || parts[0] || "", last: parts.length > 1 ? parts.at(-1) ?? "" : "" };
+}
+function extractNeighborhood(...addresses: Array<string | null>) {
+  const address = addresses.filter(Boolean).join(" ");
+  const match = address.match(/(?:^|[,.;])\s*([\p{L}0-9][\p{L}0-9\s'-]{1,45}?)\s+(?:mahallesi|mah\.?|mh\.?)(?=\s|,|\.|$)/iu);
+  return match?.[1]?.trim() ?? "";
+}
+function parseReason(note: string | null, status: CargoProcessType): { reason: string; detail: string } {
+  const raw = String(note ?? "").trim();
+  const labels = status === "missing" ? MISSING_LABELS : RETURN_LABELS;
+  const match = Object.entries(labels).find(([, label]) => raw.toLocaleUpperCase("tr-TR").startsWith(label.toLocaleUpperCase("tr-TR")));
+  return match
+    ? { reason: match[0], detail: raw.slice(match[1].length).replace(/^\s*[—:-]\s*/, "").trim() }
+    : { reason: "other", detail: raw };
+}
+function csvField(v: unknown) { return `"${String(v ?? "").replace(/"/g, '""')}"`; }
+function downloadCsv(filename: string, headers: string[], rows: unknown[][]) {
+  const csv = `\uFEFF${[headers, ...rows].map((values) => values.map(csvField).join(";")).join("\r\n")}`;
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   const anchor = document.createElement("a");
-
-  anchor.href = url;
-  anchor.download = filename;
-
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  anchor.href = url; anchor.download = filename; document.body.appendChild(anchor);
+  anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
 }
 
-/* ============================================================
-   THEME
-============================================================ */
+const ORIGINAL_COLUMNS: Array<[string, string]> = [
+  ["Shipment number", "shipment_number"], ["Customer name", "customer_name"], ["Email", "email"],
+  ["1st Mobile number", "mobile_number"], ["Street", "street"], ["Street 2", "street_2"],
+  ["City", "city"], ["Region", "region"], ["Postal Code", "postal_code"],
+  ["Country Code", "country"], ["Customer material", "customer_material"],
+  ["SD Document", "sd_document"], ["Delivery number", "delivery_number"],
+  ["Material", "material"], ["Text", "description_text"], ["Quantity", "quantity"],
+  ["UoM", "uom"], ["Export price", "export_price"],
+  ["Export price currency", "export_price_currency"],
+  ["in local currency rate 53,29", "local_currency_rate"],
+  ["Country of origin", "country_of_origin"],
+  ["Commodity Code from Plant", "commodity_code"],
+  ["Net Weight(gm)", "net_weight_gm"], ["Invoice", "invoice_number"],
+  ["Aras Kargo Takip No", "aras_tracking_number"],
+];
 
-const ACCENTS = {
-  blue: {
-    line: "border-blue-500",
-    text: "text-blue-300",
-    icon: "bg-blue-500/20 text-blue-300",
-  },
-  green: {
-    line: "border-emerald-500",
-    text: "text-emerald-300",
-    icon: "bg-emerald-500/20 text-emerald-300",
-  },
-  orange: {
-    line: "border-amber-500",
-    text: "text-amber-300",
-    icon: "bg-amber-500/20 text-amber-300",
-  },
-  purple: {
-    line: "border-violet-500",
-    text: "text-violet-300",
-    icon: "bg-violet-500/20 text-violet-300",
-  },
-  red: {
-    line: "border-rose-500",
-    text: "text-rose-300",
-    icon: "bg-rose-500/20 text-rose-300",
-  },
-};
-
-/* ============================================================
-   METRIC CARD
-============================================================ */
-
-function MetricCard({
-  title,
-  value,
-  icon: Icon,
-  accent,
-  subtitle,
-}: {
-  title: string;
-  value: number;
-  icon: LucideIcon;
-  accent: Accent;
-  subtitle: string;
-}) {
-  const theme = ACCENTS[accent];
-
-  return (
-    <div
-      className={`relative bg-[#192438] border-2 border-slate-600/70 border-t-[4px] ${theme.line} rounded-[4px] p-4 sm:p-5 shadow-md min-w-0`}
-    >
-      <div className="flex justify-between items-start gap-3">
-        <div className="min-w-0">
-          <p className="text-[10px] font-black uppercase tracking-widest text-slate-300">
-            {title}
-          </p>
-
-          <p
-            className={`mt-3 text-2xl sm:text-3xl font-black tabular-nums ${theme.text}`}
-          >
-            {formatNumber(value)}
-          </p>
-        </div>
-
-        <div
-          className={`w-10 h-10 shrink-0 flex items-center justify-center rounded-[3px] ${theme.icon}`}
-        >
-          <Icon className="w-5 h-5" />
-        </div>
-      </div>
-
-      <p className="mt-3 text-[10px] font-semibold text-slate-400">
-        {subtitle}
-      </p>
-    </div>
-  );
-}
-
-/* ============================================================
-   COPY FIELD
-============================================================ */
-
-function CopyField({
-  label,
-  value,
-  icon: Icon,
-  accent = "blue",
-  copied,
-  onCopy,
-  className = "",
-}: {
-  label: string;
-  value: string;
-  icon: LucideIcon;
-  accent?: Accent;
-  copied: boolean;
-  onCopy: (value: string) => void;
-  className?: string;
-}) {
-  const colors = {
-    blue: "text-blue-600 hover:bg-blue-600",
-    green: "text-emerald-600 hover:bg-emerald-600",
-    orange: "text-amber-600 hover:bg-amber-500",
-    purple: "text-violet-600 hover:bg-violet-600",
-    red: "text-rose-600 hover:bg-rose-600",
-  };
-
-  return (
-    <div className={`min-w-0 ${className}`}>
-      <div className="flex items-center gap-2 mb-2">
-        <Icon className="w-3.5 h-3.5 text-slate-500" />
-
-        <span className="text-[10px] font-black uppercase tracking-wider text-slate-600">
-          {label}
-        </span>
-      </div>
-
-      <div className="flex items-stretch min-h-[48px] bg-white border-2 border-slate-300 rounded-[3px] overflow-hidden">
-        <div className="flex-1 min-w-0 px-3 py-3 text-xs sm:text-sm font-extrabold text-slate-900 break-words select-text">
-          {value || "-"}
-        </div>
-
-        <button
-          type="button"
-          disabled={!value}
-          onClick={() => onCopy(value)}
-          title={`${label} kopyala`}
-          className={`w-11 shrink-0 flex items-center justify-center border-l-2 border-slate-300 transition-colors hover:text-white disabled:opacity-30 ${colors[accent]}`}
-        >
-          {copied ? (
-            <Check className="w-4 h-4" />
-          ) : (
-            <Copy className="w-4 h-4" />
-          )}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================
-   SECTION HEADER
-============================================================ */
-
-function SectionHeader({
-  icon: Icon,
-  title,
-  subtitle,
-  right,
-  accent = "red",
-}: {
-  icon: LucideIcon;
-  title: string;
-  subtitle?: string;
-  right?: React.ReactNode;
-  accent?: Accent;
-}) {
-  const lines = {
-    blue: "border-blue-500",
-    green: "border-emerald-500",
-    orange: "border-amber-500",
-    purple: "border-violet-500",
-    red: "border-[#dc3545]",
-  };
-
-  return (
-    <div
-      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 sm:px-5 py-4 bg-[#172033] border-b-[3px] ${lines[accent]}`}
-    >
-      <div className="flex items-center gap-3 min-w-0">
-        <div className="w-9 h-9 flex items-center justify-center bg-white/10 border border-white/10 rounded-[3px] shrink-0">
-          <Icon className="w-5 h-5 text-white" />
-        </div>
-
-        <div className="min-w-0">
-          <h2 className="text-xs sm:text-sm font-black uppercase tracking-wide text-white">
-            {title}
-          </h2>
-
-          {subtitle && (
-            <p className="text-[10px] sm:text-[11px] text-slate-400 font-semibold mt-1">
-              {subtitle}
-            </p>
-          )}
-        </div>
-      </div>
-
-      {right}
-    </div>
-  );
-}
-
-/* ============================================================
-   MAIN PANEL
-============================================================ */
-
-export default function ArasTrackingPanel({
-  employeeId,
-}: ArasTrackingPanelProps) {
-  const [isExcelOpen, setIsExcelOpen] = useState(false);
-  const [isWipeModalOpen, setIsWipeModalOpen] = useState(false);
-
-  const [files, setFiles] = useState<KargoFile[]>([]);
-  const [selectedFileId, setSelectedFileId] = useState("");
-
+export default function ArasTrackingPanel({ employeeId }: { employeeId: string }) {
+  const [files, setFiles] = useState<Profile[]>([]);
+  const [selectedFileId, setSelectedFileId] = useState(""); // "" = tum veritabaninda ara
+  const [stats, setStats] = useState<Stats>({ totalFiles: 0, total: 0, processed: 0, today: 0 });
   const [deliveryNo, setDeliveryNo] = useState("");
+  const [group, setGroup] = useState<Group | null>(null);
+  const [type, setType] = useState<CargoProcessType>("success");
+  const [reason, setReason] = useState("address");
   const [trackingNo, setTrackingNo] = useState("");
-
-  const [activeGroup, setActiveGroup] =
-    useState<ActiveGroupData | null>(null);
-
+  const [extraNote, setExtraNote] = useState("");
   const [loading, setLoading] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState<"short" | "original" | null>(null);
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [wipeConfirmation, setWipeConfirmation] = useState("");
+  const [showUploader, setShowUploader] = useState(false);
+  const [showProfiles, setShowProfiles] = useState(false);
+  const [confirm, setConfirm] = useState<{ id: string; name: string } | null>(null);
+  const [notice, setNotice] = useState<Notice>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const notificationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [stats, setStats] = useState<Stats>(INITIAL_STATS);
-
-  const [uiStatus, setUiStatus] = useState<StatusType>("idle");
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
-
-  const deliveryRef = useRef<HTMLInputElement>(null);
-  const trackingRef = useRef<HTMLInputElement>(null);
-
-  const selectedFileIdRef = useRef("");
-  const scanRequestRef = useRef(false);
-  const statsRequestRef = useRef(0);
-  const operationRef = useRef(false);
-
-  /* ========================================================
-     NOTIFICATIONS
-  ======================================================== */
-
-  const triggerFeedback = (
-    status: Exclude<StatusType, "idle">,
-    message: string,
-  ) => {
-    setUiStatus(status);
-    setStatusMessage(message);
-  };
-
-  useEffect(() => {
-    if (uiStatus !== "success" && uiStatus !== "error") return;
-
-    const timer = setTimeout(() => {
-      setUiStatus("idle");
-      setStatusMessage(null);
-    }, 3500);
-
-    return () => clearTimeout(timer);
-  }, [uiStatus, statusMessage]);
-
-  /* ========================================================
-     DATA FETCHING
-  ======================================================== */
-
-  const fetchStats = useCallback(async (fileId: string) => {
-    const requestId = ++statsRequestRef.current;
-
-    try {
-      const result = await getKargoStats(fileId);
-
-      if (requestId !== statsRequestRef.current) return;
-
-      if (result.success) {
-        setStats({
-          totalFiles: result.totalFiles ?? 0,
-          totalRecords: result.total ?? 0,
-          processed: result.processed ?? 0,
-          remaining: Math.max(
-            0,
-            (result.total ?? 0) - (result.processed ?? 0),
-          ),
-          today: result.today ?? 0,
-        });
-      }
-    } catch (error) {
-      console.error("İstatistik hatası:", error);
-    }
+  const toast = useCallback((message: string, kind: "success" | "error" | "info" = "info") => {
+    setNotice({ message, type: kind });
+    if (notificationTimer.current) clearTimeout(notificationTimer.current);
+    notificationTimer.current = setTimeout(() => setNotice(null), 6000);
   }, []);
+  useEffect(() => () => { if (notificationTimer.current) clearTimeout(notificationTimer.current); }, []);
 
-  const fetchInitialData = useCallback(async () => {
+  const loadFiles = useCallback(async () => {
     try {
       const result = await getArasFiles();
-
-      if (result.success && result.data) {
-        setFiles(result.data);
-
-        // Silinmiş bir dosya seçiliyse temizle.
-        const currentId = selectedFileIdRef.current;
-
-        if (
-          currentId &&
-          !result.data.some((file) => file.id === currentId)
-        ) {
-          selectedFileIdRef.current = "";
-          setSelectedFileId("");
-        }
-      }
-
-      await fetchStats(selectedFileIdRef.current);
-    } catch (error) {
-      console.error("Dosyalar alınamadı:", error);
+      if (hasFailure(result)) throw new Error(errorFrom(result, "Dosyalar alınamadı."));
+      setFiles(normalizeResult<Profile>(result));
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Profiller yüklenemedi.", "error");
     }
-  }, [fetchStats]);
-
-  useEffect(() => {
-    void fetchInitialData();
-  }, [fetchInitialData]);
-
-  useEffect(() => {
-    selectedFileIdRef.current = selectedFileId;
-    void fetchStats(selectedFileId);
-  }, [selectedFileId, fetchStats]);
-
-  useEffect(() => {
-    if (!isExcelOpen && !isWipeModalOpen && !activeGroup) {
-      deliveryRef.current?.focus();
-    }
-  }, [isExcelOpen, isWipeModalOpen, activeGroup]);
-
-  /* ========================================================
-     COPY
-  ======================================================== */
-
-  const handleCopy = async (value: string, field: string) => {
-    if (!value) return;
-
+  }, [toast]);
+  const loadStats = useCallback(async (fileId: string) => {
     try {
-      await navigator.clipboard.writeText(value);
-      setCopiedField(field);
-
-      setTimeout(() => {
-        setCopiedField((current) =>
-          current === field ? null : current,
-        );
-      }, 1800);
-    } catch {
-      triggerFeedback("error", "Kopyalama işlemi başarısız.");
-    }
-  };
-
-  /* ========================================================
-     PROFILE
-  ======================================================== */
-
-  const handleCancel = () => {
-    setActiveGroup(null);
-    setTrackingNo("");
-    setDeliveryNo("");
-    setUiStatus("idle");
-    setStatusMessage(null);
-
-    setTimeout(() => deliveryRef.current?.focus(), 50);
-  };
-
-  const handleProfileChange = (newFileId: string) => {
-    if (loading) return;
-
-    selectedFileIdRef.current = newFileId;
-    setSelectedFileId(newFileId);
-    handleCancel();
-  };
-
-  /* ========================================================
-     DELIVERY SCANNING + AUTO PROFILE
-  ======================================================== */
-
-  const loadDeliveryData = async (targetDeliveryNo: string) => {
-    if (scanRequestRef.current) return;
-
-    scanRequestRef.current = true;
-    setLoading(true);
-    setUiStatus("idle");
-    setStatusMessage(null);
-
-    try {
-      let currentFileId = selectedFileIdRef.current;
-
-      const result = await getShipmentsByDeliveryNumber(
-        targetDeliveryNo,
-        currentFileId,
-      );
-
-      if (!result.success || !result.data?.length) {
-        triggerFeedback(
-          "error",
-          result.error || "SİPARİŞ BULUNAMADI!",
-        );
-        setDeliveryNo("");
-        return;
-      }
-
-      let records = result.data as ShipmentData[];
-
-      if (!currentFileId) {
-        let detectedFileId = "";
-
-        // Önce gelen kayıt üzerindeki dosya kimliğini dene.
-        const validFileIds = new Set(files.map((f) => f.id));
-
-        const matchingRecord = records.find(
-          (record) =>
-            record.file_id &&
-            validFileIds.has(record.file_id),
-        );
-
-        if (matchingRecord) {
-          detectedFileId = matchingRecord.file_id;
-        }
-
-        // file_id gelmediyse dosya bazlı sorgulama.
-        if (!detectedFileId) {
-          const fileList =
-            files.length > 0
-              ? files
-              : ((await getArasFiles()).data ?? []);
-
-          for (const file of fileList) {
-            const fileResult =
-              await getShipmentsByDeliveryNumber(
-                targetDeliveryNo,
-                file.id,
-              );
-
-            if (
-              fileResult.success &&
-              fileResult.data?.length
-            ) {
-              detectedFileId = file.id;
-              records = fileResult.data as ShipmentData[];
-              break;
-            }
-          }
-        }
-
-        if (!detectedFileId) {
-          triggerFeedback(
-            "warning",
-            "Sipariş bulundu fakat ait olduğu Excel dosyası belirlenemedi.",
-          );
-          setDeliveryNo("");
-          return;
-        }
-
-        // Profil otomatik seçiliyor.
-        currentFileId = detectedFileId;
-
-        selectedFileIdRef.current = detectedFileId;
-        setSelectedFileId(detectedFileId);
-
-        // Seçili dosyanın kayıtlarını yeniden al.
-        const scopedResult =
-          await getShipmentsByDeliveryNumber(
-            targetDeliveryNo,
-            detectedFileId,
-          );
-
-        if (
-          !scopedResult.success ||
-          !scopedResult.data?.length
-        ) {
-          triggerFeedback(
-            "error",
-            "Sipariş profili doğrulanamadı.",
-          );
-          setDeliveryNo("");
-          return;
-        }
-
-        records = scopedResult.data as ShipmentData[];
-      }
-
-      const processedRecord = records.find(
-        (record) => record.is_processed_aras,
-      );
-
-      const uniqueSdDocuments = Array.from(
-        new Set(
-          records
-            .map((record) => record.sd_document)
-            .filter(Boolean),
-        ),
-      );
-
-      setActiveGroup({
-        records,
-        count: records.length,
-        primary: records[0],
-        sdDocumentsMatch: uniqueSdDocuments.length <= 1,
-        uniqueSdDocuments,
-        isUpdateMode: !!processedRecord,
+      const result = await getKargoStats(fileId);
+      if (hasFailure(result)) return;
+      const o = (result ?? {}) as Record<string, unknown>;
+      setStats({
+        totalFiles: Number(o.totalFiles ?? 0),
+        total: Number(o.total ?? o.totalRecords ?? 0),
+        processed: Number(o.processed ?? 0),
+        today: Number(o.today ?? 0),
       });
+    } catch { /* İstatistik arizasi operasyonu engellemesin. */ }
+  }, []);
+  useEffect(() => { void loadFiles(); }, [loadFiles]);
+  useEffect(() => { void loadStats(selectedFileId); }, [loadStats, selectedFileId]);
 
-      setTrackingNo(
-        processedRecord?.aras_tracking_number || "",
-      );
+  const selectedFileName = files.find((f) => f.id === selectedFileId)?.filename ?? "TÜM VERİTABANINDA ÇALIŞ";
+  const remaining = Math.max(stats.total - stats.processed, 0);
+  const percentage = stats.total > 0 ? Math.min(100, Math.round((stats.processed / stats.total) * 100)) : 0;
+  const names = useMemo(() => fullNameParts(group?.primary.customer_name ?? null), [group]);
+  const address = useMemo(() => {
+    const a = group?.primary;
+    if (!a) return { line: "", location: "", neighborhood: "" };
+    return {
+      line: [a.street, a.street_2].filter(Boolean).join(", "),
+      location: [a.region, a.city, a.postal_code].filter(Boolean).join(" / "),
+      neighborhood: extractNeighborhood(a.street, a.street_2),
+    };
+  }, [group]);
 
-      setDeliveryNo("");
+  const copy = useCallback(async (value: string, label: string) => {
+    if (!value.trim()) return toast("Kopyalanacak bilgi bulunamadı.", "error");
+    try { await navigator.clipboard.writeText(value); toast(`${label} kopyalandı.`, "success"); }
+    catch { toast("Kopyalama yapılamadı. Tarayıcı iznini kontrol edin.", "error"); }
+  }, [toast]);
 
-      if (processedRecord) {
-        triggerFeedback(
-          "update",
-          "Bu sipariş daha önce işlenmiş. Takip numarasını güncelleyebilirsiniz.",
-        );
-      }
+  const clearForm = useCallback(() => {
+    setGroup(null); setDeliveryNo(""); setType("success");
+    setTrackingNo(""); setReason("address"); setExtraNote("");
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
 
-      setTimeout(() => trackingRef.current?.focus(), 80);
-    } catch (error) {
-      console.error("Sipariş sorgulama hatası:", error);
-      triggerFeedback(
-        "error",
-        "Sipariş sorgulanırken hata oluştu.",
-      );
-    } finally {
-      scanRequestRef.current = false;
-      setLoading(false);
-    }
-  };
-
-  const handleDeliveryScan = async (event: FormEvent) => {
-    event.preventDefault();
-
-    if (!deliveryNo.trim() || loading) return;
-
-    await loadDeliveryData(deliveryNo.trim());
-  };
-
-  /* ========================================================
-     TRACKING SAVE
-  ======================================================== */
-
-  const handleTrackingScan = async (event: FormEvent) => {
-    event.preventDefault();
-
-    if (!activeGroup || !trackingNo.trim() || loading) return;
-
-    setLoading(true);
-
+  const lookup = useCallback(async () => {
+    const target = deliveryNo.trim().replace(/\s/g, "");
+    if (!/^\d{7,20}$/.test(target)) return toast("Geçerli Delivery Number okutun.", "error");
+    setLoading(true); setGroup(null); setTrackingNo(""); setExtraNote(""); setReason("address");
     try {
-      const result = await saveArasTracking(
-        activeGroup.primary.delivery_number,
-        trackingNo.trim(),
-        employeeId,
-        selectedFileIdRef.current,
-      );
+      const result = await getShipmentsByDeliveryNumber(target, selectedFileId);
+      if (hasFailure(result)) throw new Error(errorFrom(result, "Gönderi bulunamadı."));
+      const records = normalizeResult<Shipment>(result);
+      if (!records.length) throw new Error("Bu Delivery Number için kayıt bulunamadı.");
+      const autoFile = records[0]?.file_id || selectedFileId;
+      if (!autoFile) throw new Error("Gönderinin bağlı olduğu dosya profili belirlenemedi.");
+      if (!selectedFileId && autoFile) setSelectedFileId(autoFile); // Otomatik profil seçimi korunur.
+      const related = records.filter((r) => !r.file_id || r.file_id === autoFile);
+      const primary = related[0];
+      const uniqueSd = [...new Set(related.map((r) => r.sd_document?.trim()).filter((x): x is string => Boolean(x)))];
+      setGroup({ records: related, primary, fileId: autoFile, count: related.length, uniqueSd, processed: related.some((r) => r.is_processed_aras === true) });
 
-      if (result.success) {
-        triggerFeedback(
-          "success",
-          activeGroup.isUpdateMode
-            ? "KARGO TAKİP NUMARASI GÜNCELLENDİ!"
-            : "BARKOD EŞLEŞTİRMESİ TAMAMLANDI!",
-        );
-
-        setActiveGroup(null);
-        setTrackingNo("");
-
-        void fetchStats(selectedFileIdRef.current);
-
-        setTimeout(() => deliveryRef.current?.focus(), 80);
+      // Eski veride hata aciklamasi takip alanina yazilmisti: okumada tanı, yeni kayıtta tekrarlama.
+      const legacy = primary.aras_tracking_number?.trim() ?? "";
+      if (TEXT_ISSUE.test(legacy)) {
+        setType("missing");
+        setReason("other"); setExtraNote(legacy);
+      } else if (TRACKING_PATTERN.test(legacy.toUpperCase())) {
+        setType("success"); setTrackingNo(legacy);
       } else {
-        triggerFeedback(
-          "error",
-          result.error || "VERİTABANI YAZMA HATASI!",
-        );
-
-        trackingRef.current?.focus();
+        setType("success");
       }
-    } catch (error) {
-      console.error("Takip kaydetme hatası:", error);
-      triggerFeedback(
-        "error",
-        "Takip numarası kaydedilemedi.",
-      );
-    } finally {
-      setLoading(false);
-    }
+
+      const stored = await getCargoPanelExistingRecord(target, autoFile);
+      if (stored.success && stored.data) {
+        const r = stored.data;
+        const nextType: CargoProcessType = r.missing_address ? "missing" : r.is_returned ? "returned" : "success";
+        setType(nextType);
+        if (nextType === "success") {
+          const raw = (r.aras_tracking_number ?? "").trim();
+          setTrackingNo(TRACKING_PATTERN.test(raw.toUpperCase()) ? raw : "");
+          setExtraNote(r.note ?? "");
+        } else {
+          const parsed = parseReason(r.note, nextType);
+          setReason(parsed.reason);
+          setExtraNote(parsed.detail);
+        }
+      }
+      toast(`${related.length} satır eşleştirildi. ${related.some((r) => r.is_processed_aras) ? "Kayıt güncelleme modu." : "Yeni işlem."}`, "success");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Sorgu sırasında hata oluştu.", "error");
+    } finally { setLoading(false); }
+  }, [deliveryNo, selectedFileId, toast]);
+
+  const chooseType = (next: CargoProcessType) => {
+    setType(next); setExtraNote("");
+    setReason(next === "returned" ? "undelivered" : "address");
+  };
+  const isValidTracking = TRACKING_PATTERN.test(trackingNo.trim().toUpperCase()) && !TEXT_ISSUE.test(trackingNo);
+  const canSave = Boolean(group && !saving && !loading && (type !== "success" || isValidTracking) &&
+    (type === "success" || (reason !== "other" || extraNote.trim().length >= 3)));
+
+  const save = async () => {
+    if (!group || !canSave) return;
+    setSaving(true);
+    try {
+      const result = await saveCargoPanelRecord({
+        deliveryNumber: group.primary.delivery_number,
+        fileId: group.fileId,
+        status: type,
+        trackingNumber: type === "success" ? trackingNo.trim() : undefined,
+        reason: type === "success" ? undefined : reason,
+        extraNote: extraNote.trim(),
+      });
+      if (!result.success) throw new Error(result.error);
+      toast(result.updated ? "Gönderi kaydı güncellendi." : "Yeni kargo kaydı oluşturuldu.", "success");
+      await loadStats(selectedFileId);
+      clearForm();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Kayıt başarısız.", "error");
+    } finally { setSaving(false); }
   };
 
-  /* ========================================================
-     DELETE SELECTED PROFILE
-  ======================================================== */
-
-  const deleteSelectedFile = async () => {
-    if (!selectedFileIdRef.current || operationRef.current) return;
-
-    const fileId = selectedFileIdRef.current;
-
-    const file = files.find((item) => item.id === fileId);
-
-    const confirmed = window.confirm(
-      `DİKKAT!\n\n"${file?.filename || "Seçili profil"}" dosyası ve ilgili kayıtlar kalıcı olarak silinecek.\n\nBu işlemi onaylıyor musunuz?`,
-    );
-
-    if (!confirmed) return;
-
-    operationRef.current = true;
-    setLoading(true);
-
+  const exportCsv = async (mode: "short" | "original") => {
+    setExporting(mode);
     try {
-      const result = await deleteArasFile(fileId);
-
-      if (result.success) {
-        // Seçimi sıfırla.
-        selectedFileIdRef.current = "";
-        setSelectedFileId("");
-
-        // Aktif işlemi sıfırla.
-        handleCancel();
-
-        // Dosya listesini anında güncelle.
-        setFiles((previous) =>
-          previous.filter((item) => item.id !== fileId),
-        );
-
-        triggerFeedback(
-          "success",
-          "SEÇİLİ ÇALIŞMA PROFİLİ SİLİNDİ!",
-        );
-
-        await fetchInitialData();
+      const result = mode === "short"
+        ? await getProcessedExportData(selectedFileId)
+        : await getExactOriginalExportData(selectedFileId);
+      if (hasFailure(result)) throw new Error(errorFrom(result, "Dışa aktarma başarısız."));
+      const data = normalizeResult<Record<string, unknown> | unknown[]>(result);
+      if (!data.length) throw new Error("Dışa aktarılacak veri bulunamadı.");
+      const stamp = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Istanbul" });
+      const target = selectedFileId || "TUMU";
+      if (mode === "short") {
+        downloadCsv(`ARAS_CIKTI_${target}_${stamp}.csv`, ["Delivery Number", "Aras Takip No"],
+          data.map((row) => Array.isArray(row) ? [row[0], row[1]] : [row.delivery_number ?? row["Delivery Number"], row.aras_tracking_number ?? row["Aras Takip No"]]));
       } else {
-        triggerFeedback(
-          "error",
-          result.error || "PROFİL SİLİNEMEDİ!",
-        );
+        downloadCsv(`ORIJINAL_SABLON_${target}_${stamp}.csv`, ORIGINAL_COLUMNS.map(([title]) => title),
+          data.map((row) => Array.isArray(row) ? row : ORIGINAL_COLUMNS.map(([title, key]) => row[key] ?? row[title] ?? "")));
       }
-    } catch (error) {
-      console.error("Profil silme hatası:", error);
-      triggerFeedback(
-        "error",
-        "Profil silinirken hata oluştu.",
-      );
-    } finally {
-      operationRef.current = false;
-      setLoading(false);
-    }
+      toast(`${data.length} kayıt dışa aktarıldı.`, "success");
+    } catch (e) { toast(e instanceof Error ? e.message : "CSV oluşturulamadı.", "error"); }
+    finally { setExporting(null); }
   };
 
-  /* ========================================================
-     GLOBAL DATABASE WIPE
-  ======================================================== */
-
-  const handleGlobalWipe = async () => {
-    if (operationRef.current) return;
-
-    operationRef.current = true;
-    setLoading(true);
-
+  const deleteProfile = async () => {
+    if (!confirm || (!confirm.id && wipeConfirmation !== "SIFIRLA")) return;
+    setProfileBusy(true);
     try {
-      // Boş ID = mevcut backend'deki tüm verileri silme.
-      const result = await deleteArasFile("");
-
-      if (result.success) {
-        setIsWipeModalOpen(false);
-
-        selectedFileIdRef.current = "";
-        setSelectedFileId("");
-
-        setFiles([]);
-        setStats(INITIAL_STATS);
-
-        handleCancel();
-
-        triggerFeedback(
-          "success",
-          "TÜM KARGO VERİTABANI SIFIRLANDI!",
-        );
-
-        await fetchInitialData();
-      } else {
-        triggerFeedback(
-          "error",
-          result.error || "VERİTABANI SIFIRLANAMADI!",
-        );
-      }
-    } catch (error) {
-      console.error("Sıfırlama hatası:", error);
-      triggerFeedback(
-        "error",
-        "Sıfırlama sırasında hata oluştu.",
-      );
-    } finally {
-      operationRef.current = false;
-      setLoading(false);
-    }
+      const result = await deleteArasFile(confirm.id); // "" = tum profiller ve tum kayitlar.
+      if (hasFailure(result)) throw new Error(errorFrom(result, "Silme başarısız."));
+      const wasCurrent = !confirm.id || confirm.id === selectedFileId;
+      if (wasCurrent) { setSelectedFileId(""); clearForm(); }
+      await loadFiles(); await loadStats(wasCurrent ? "" : selectedFileId);
+      toast(confirm.id ? "Profil silindi." : "Tüm profiller / veriler sıfırlandı.", "success");
+      setConfirm(null); setWipeConfirmation("");
+    } catch (e) { toast(e instanceof Error ? e.message : "Silme işlemi başarısız.", "error"); }
+    finally { setProfileBusy(false); }
   };
-
-  /* ========================================================
-     TWO-COLUMN EXPORT
-  ======================================================== */
-
-  const exportTwoColumnExcel = async () => {
-    if (exporting) return;
-
-    setExporting(true);
-
-    try {
-      const fileId = selectedFileIdRef.current;
-      const result = await getProcessedExportData(fileId);
-
-      if (!result.success || !result.data?.length) {
-        triggerFeedback(
-          "warning",
-          "İndirilecek kayıt bulunamadı.",
-        );
-        return;
-      }
-
-      const headers = "Delivery Number;Aras Takip No\n";
-
-      const rows = result.data
-        .map(
-          (row) =>
-            `${csvCell(row.delivery_number)};${csvCell(row.aras_tracking_number)}`,
-        )
-        .join("\n");
-
-      const date = new Date().toISOString().split("T")[0];
-
-      const filename = fileId
-        ? `ARAS_CIKTI_PROFIL_${fileId}_${date}.csv`
-        : `ARAS_CIKTI_TUMU_${date}.csv`;
-
-      downloadCSV("\uFEFF" + headers + rows, filename);
-    } catch (error) {
-      console.error(error);
-      triggerFeedback(
-        "error",
-        "Excel çıktısı oluşturulamadı.",
-      );
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  /* ========================================================
-     EXACT ORIGINAL EXPORT
-  ======================================================== */
-
-  const exportExactOriginalExcel = async () => {
-    if (exporting) return;
-
-    setExporting(true);
-
-    try {
-      const fileId = selectedFileIdRef.current;
-      const result = await getExactOriginalExportData(fileId);
-
-      if (!result.success || !result.data?.length) {
-        triggerFeedback(
-          "warning",
-          "İndirilecek kayıt bulunamadı.",
-        );
-        return;
-      }
-
-      const originalHeaders = [
-        "Shipment number",
-        "Customer name",
-        "Email",
-        "1st Mobile number",
-        "Street",
-        "Street 2",
-        "City",
-        "Region",
-        "Postal Code",
-        "Country Code",
-        "Customer material",
-        "SD Document",
-        "Delivery number",
-        "Material",
-        "Text",
-        "Quantity",
-        "UoM",
-        "Export price",
-        "Export price currency",
-        "in local currency rate 53,29",
-        "Country of origin",
-        "Commodity Code from Plant",
-        "Net Weight(gm)",
-        "Invoice",
-        "Aras Kargo Takip No",
-      ];
-
-      const rows = result.data
-        .map((row: any) => {
-          const values = [
-            row.shipment_number,
-            row.customer_name,
-            row.email,
-            row.mobile_number,
-            row.street,
-            row.street_2,
-            row.city,
-            row.region,
-            row.postal_code,
-            row.country,
-            row.customer_material,
-            row.sd_document,
-            row.delivery_number,
-            row.material,
-            row.description_text,
-            row.quantity,
-            row.uom,
-            row.export_price,
-            row.export_price_currency,
-            row.local_currency_rate,
-            row.country_of_origin,
-            row.commodity_code,
-            row.net_weight_gm,
-            row.invoice_number,
-            row.aras_tracking_number,
-          ];
-
-          return values.map(csvCell).join(";");
-        })
-        .join("\n");
-
-      const date = new Date().toISOString().split("T")[0];
-
-      const filename = fileId
-        ? `ORIJINAL_SABLON_PROFIL_${fileId}_${date}.csv`
-        : `ORIJINAL_SABLON_TUMU_${date}.csv`;
-
-      downloadCSV(
-        "\uFEFF" + originalHeaders.join(";") + "\n" + rows,
-        filename,
-      );
-    } catch (error) {
-      console.error(error);
-      triggerFeedback(
-        "error",
-        "Tam çıktı oluşturulamadı.",
-      );
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  /* ========================================================
-     DERIVED VALUES
-  ======================================================== */
-
-  const progressPercent =
-    stats.totalRecords > 0
-      ? Math.min(
-          100,
-          Math.round(
-            (stats.processed / stats.totalRecords) * 100,
-          ),
-        )
-      : 0;
-
-  const selectedFile = files.find(
-    (file) => file.id === selectedFileId,
-  );
-
-  const customer = activeGroup?.primary;
-
-  const customerName = splitName(customer?.customer_name);
-
-  const fullAddress = customer
-    ? `${customer.street || ""} ${customer.street_2 || ""} - Posta Kodu: ${
-        customer.postal_code || "YOK"
-      }`.trim()
-    : "";
-
-  const notificationClasses = {
-    idle: "",
-    success: "bg-emerald-50 border-emerald-500 text-emerald-800",
-    error: "bg-red-50 border-red-500 text-red-800",
-    warning: "bg-amber-50 border-amber-500 text-amber-800",
-    update: "bg-blue-50 border-blue-500 text-blue-800",
-  };
-
-  /* ========================================================
-     RENDER
-  ======================================================== */
 
   return (
-    <>
-      <div className="w-full min-w-0 pb-12 font-['Quicksand'] space-y-5 text-slate-800">
-
-        {/* ==================================================
-            HEADER
-        ================================================== */}
-
-        <header className="relative overflow-hidden bg-[#111827] border-2 border-slate-700 border-l-[5px] border-l-[#dc3545] rounded-[4px] px-5 py-5 sm:px-7 sm:py-6 shadow-lg">
-          <div className="absolute right-0 top-0 h-full w-1/3 bg-gradient-to-l from-red-900/20 to-transparent pointer-events-none" />
-
-          <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 sm:w-14 sm:h-14 bg-[#dc3545] border border-red-400/30 rounded-[3px] flex items-center justify-center shadow-lg shrink-0">
-                <Truck className="w-7 h-7 text-white" />
-              </div>
-
-              <div>
-                <div className="flex items-center flex-wrap gap-3">
-                  <h1 className="text-xl sm:text-2xl font-black uppercase tracking-tight text-white">
-                    Eksik Parça{" "}
-                    <span className="text-[#ff5968]">B2C</span>
-                  </h1>
-
-                  <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-2 py-1 rounded-[2px]">
-                    Operasyon
-                  </span>
-                </div>
-
-                <p className="text-[11px] text-slate-400 font-bold mt-1">
-                  Aras Kargo Barkod Eşleştirme ve Sevkiyat Yönetimi
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 bg-slate-800 border border-slate-600 rounded-[3px] px-3 py-2 self-start sm:self-auto">
-              <span className="w-2 h-2 bg-emerald-400 rounded-[1px]" />
-              <span className="text-[10px] font-black uppercase text-slate-200 tracking-wider">
-                Panel Aktif
-              </span>
-            </div>
-          </div>
-        </header>
-
-        {/* ==================================================
-            METRICS
-        ================================================== */}
-
-        <section className="space-y-3">
-          <div className="flex justify-between items-center gap-2 px-1">
-            <div className="flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-[#dc3545]" />
-
-              <h2 className="text-xs font-black uppercase tracking-wider text-slate-700">
-                Operasyon İstatistikleri
-              </h2>
-            </div>
-
-            <span className="text-[10px] font-bold text-slate-500 uppercase">
-              {selectedFileId ? "Seçili Profil" : "Tüm Kayıtlar"}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <MetricCard
-              title="Toplam Kayıt"
-              value={stats.totalRecords}
-              icon={Package}
-              accent="blue"
-              subtitle="Toplam sevkiyat kalemi"
-            />
-
-            <MetricCard
-              title="Tamamlanan"
-              value={stats.processed}
-              icon={PackageCheck}
-              accent="green"
-              subtitle="Kargo barkodu eşleştirilen"
-            />
-
-            <MetricCard
-              title="Bekleyen"
-              value={stats.remaining}
-              icon={PackageOpen}
-              accent="orange"
-              subtitle="Henüz işlem yapılmayan"
-            />
-
-            <MetricCard
-              title="Bugünkü İşlem"
-              value={stats.today}
-              icon={Zap}
-              accent="purple"
-              subtitle="Günlük işlem performansı"
-            />
-          </div>
-
-          {/* PROGRESS */}
-
-          <div className="bg-[#192438] border-2 border-slate-600/70 rounded-[4px] px-4 py-4 sm:px-5">
-            <div className="flex items-center justify-between gap-2 mb-3">
-              <div className="flex items-center gap-2">
-                <Activity className="w-4 h-4 text-indigo-300" />
-
-                <span className="text-[11px] font-black uppercase tracking-wider text-slate-200">
-                  Genel İlerleme
-                </span>
-              </div>
-
-              <span className="text-lg font-black text-indigo-300 tabular-nums">
-                %{progressPercent}
-              </span>
-            </div>
-
-            <div className="w-full h-2.5 bg-slate-700 rounded-[2px] overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-indigo-500 via-violet-500 to-[#dc3545] transition-all duration-500 rounded-[2px]"
-                style={{ width: `${progressPercent}%` }}
-              />
-            </div>
-
-            <div className="flex justify-between mt-2 text-[10px] font-bold text-slate-400">
-              <span>{formatNumber(stats.processed)} tamamlandı</span>
-              <span>{formatNumber(stats.remaining)} bekliyor</span>
-            </div>
-          </div>
-        </section>
-
-        {/* ==================================================
-            FILE MANAGEMENT
-        ================================================== */}
-
-        <section className="bg-white border-2 border-slate-300 rounded-[4px] overflow-hidden shadow-sm">
-          <SectionHeader
-            icon={FolderOpen}
-            title="Çalışma Profili ve Dosya Yönetimi"
-            subtitle="Excel profili seçimi, yükleme ve çıktı işlemleri"
-            accent="purple"
-            right={
-              <span className="bg-violet-500/15 text-violet-200 border border-violet-500/30 text-[10px] font-black px-3 py-1.5 rounded-[2px]">
-                {files.length} DOSYA
-              </span>
-            }
-          />
-
-          <div className="p-4 sm:p-5 space-y-4">
-            <div className="flex flex-col xl:flex-row gap-3">
-              {/* PROFILE */}
-
-              <div className="flex-1 min-w-0">
-                <label
-                  htmlFor="aras-profile"
-                  className="block text-[10px] font-black text-slate-600 uppercase tracking-wider mb-2"
-                >
-                  Aktif Excel Profili
-                </label>
-
-                <div className="relative">
-                  <FileSpreadsheet
-                    className={`absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 pointer-events-none ${
-                      selectedFileId
-                        ? "text-emerald-600"
-                        : "text-indigo-600"
-                    }`}
-                  />
-
-                  <select
-                    id="aras-profile"
-                    value={selectedFileId}
-                    onChange={(event) =>
-                      handleProfileChange(event.target.value)
-                    }
-                    disabled={loading}
-                    className="w-full h-12 pl-11 pr-10 appearance-none bg-[#f1f5f9] border-2 border-slate-400 rounded-[3px] text-xs font-black text-slate-800 uppercase focus:outline-none focus:border-violet-600 focus:ring-2 focus:ring-violet-500/10 cursor-pointer disabled:opacity-50"
-                  >
-                    <option value="">
-                      TÜM VERİTABANINDA ARA
-                    </option>
-
-                    {files.map((file) => (
-                      <option key={file.id} value={file.id}>
-                        {file.filename}
-                      </option>
-                    ))}
-                  </select>
-
-                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600 pointer-events-none" />
-                </div>
-              </div>
-
-              {/* EXPORT ACTIONS */}
-
-              <div className="flex flex-col sm:flex-row xl:items-end gap-2 xl:pt-5">
-                <button
-                  type="button"
-                  onClick={() => setIsExcelOpen(true)}
-                  disabled={loading}
-                  className="h-12 px-5 bg-[#dc3545] hover:bg-red-700 text-white rounded-[3px] flex items-center justify-center gap-2 text-xs font-black uppercase tracking-wide transition-colors disabled:opacity-50 shadow-sm"
-                >
-                  <UploadCloud className="w-4 h-4" />
-                  Excel Yükle
-                </button>
-
-                <button
-                  type="button"
-                  onClick={exportTwoColumnExcel}
-                  disabled={loading || exporting}
-                  className="h-12 px-4 bg-[#172033] hover:bg-blue-700 text-white border-2 border-slate-600 rounded-[3px] flex items-center justify-center gap-2 text-[11px] font-black uppercase transition-colors disabled:opacity-50"
-                >
-                  {exporting ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Download className="w-4 h-4" />
-                  )}
-                  2 Kolon
-                </button>
-
-                <button
-                  type="button"
-                  onClick={exportExactOriginalExcel}
-                  disabled={loading || exporting}
-                  className="h-12 px-4 bg-[#172033] hover:bg-emerald-700 text-white border-2 border-slate-600 rounded-[3px] flex items-center justify-center gap-2 text-[11px] font-black uppercase transition-colors disabled:opacity-50"
-                >
-                  <Download className="w-4 h-4" />
-                  Tam Çıktı
-                </button>
-              </div>
-            </div>
-
-            {/* ACTIVE PROFILE INFO */}
-
-            <div
-              className={`border-l-[4px] rounded-[3px] px-4 py-3 flex items-center gap-3 ${
-                selectedFileId
-                  ? "bg-emerald-50 border-emerald-500"
-                  : "bg-indigo-50 border-indigo-500"
-              }`}
-            >
-              {selectedFileId ? (
-                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-              ) : (
-                <Search className="w-5 h-5 text-indigo-600 shrink-0" />
-              )}
-
-              <div className="min-w-0">
-                <p
-                  className={`text-[10px] font-black uppercase ${
-                    selectedFileId
-                      ? "text-emerald-700"
-                      : "text-indigo-700"
-                  }`}
-                >
-                  {selectedFileId
-                    ? "Aktif Çalışma Profili"
-                    : "Genel Arama Modu"}
-                </p>
-
-                <p className="text-xs font-bold text-slate-700 mt-1 break-all">
-                  {selectedFileId
-                    ? selectedFile?.filename || "Seçili dosya"
-                    : "İlk barkod okunduğunda ilgili profil otomatik seçilir."}
-                </p>
-              </div>
-            </div>
-
-            {/* DANGER ZONE */}
-
-            <div className="border-2 border-red-200 bg-red-50/50 rounded-[3px] overflow-hidden">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 px-4 py-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 bg-red-100 text-red-600 rounded-[3px] flex items-center justify-center shrink-0">
-                    <ShieldAlert className="w-5 h-5" />
-                  </div>
-
-                  <div>
-                    <p className="text-[11px] font-black uppercase text-red-800">
-                      Veri Yönetimi
-                    </p>
-
-                    <p className="text-[10px] font-semibold text-red-600 mt-0.5">
-                      Silme işlemleri kalıcıdır ve geri alınamaz.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex flex-col sm:flex-row gap-2">
-                  {/* DELETE PROFILE */}
-
-                  <button
-                    type="button"
-                    onClick={deleteSelectedFile}
-                    disabled={!selectedFileId || loading}
-                    className="h-10 px-4 flex items-center justify-center gap-2 bg-white border-2 border-red-300 hover:bg-red-100 text-red-700 rounded-[3px] text-[11px] font-black uppercase transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    Profili Sil
-                  </button>
-
-                  {/* GLOBAL WIPE */}
-
-                  <button
-                    type="button"
-                    onClick={() => setIsWipeModalOpen(true)}
-                    disabled={loading}
-                    className="h-10 px-4 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 border-2 border-red-600 text-white rounded-[3px] text-[11px] font-black uppercase transition-colors disabled:opacity-50"
-                  >
-                    <ShieldAlert className="w-4 h-4" />
-                    Veritabanını Sıfırla
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* ==================================================
-            NOTIFICATIONS
-        ================================================== */}
-
-        {statusMessage && (
-          <div
-            role="status"
-            className={`flex items-start gap-3 p-4 border-l-[5px] rounded-[3px] shadow-sm ${notificationClasses[uiStatus]}`}
-          >
-            {uiStatus === "success" ? (
-              <CheckCircle2 className="w-5 h-5 shrink-0" />
-            ) : uiStatus === "error" ||
-              uiStatus === "warning" ? (
-              <AlertTriangle className="w-5 h-5 shrink-0" />
-            ) : (
-              <RefreshCw className="w-5 h-5 shrink-0" />
-            )}
-
-            <span className="text-xs sm:text-sm font-black uppercase flex-1">
-              {statusMessage}
-            </span>
-
-            <button
-              type="button"
-              onClick={() => {
-                setStatusMessage(null);
-                setUiStatus("idle");
-              }}
-              className="opacity-60 hover:opacity-100"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        )}
-
-        {/* ==================================================
-            SCANNER
-        ================================================== */}
-
-        <section className="bg-white border-2 border-slate-300 rounded-[4px] overflow-hidden shadow-md">
-          <SectionHeader
-            icon={ScanLine}
-            title="Barkod İşlem Merkezi"
-            subtitle="Sipariş sorgulama ve Aras Kargo eşleştirme"
-            accent="red"
-            right={
-              <span
-                className={`text-[10px] font-black uppercase px-3 py-1.5 border rounded-[2px] ${
-                  activeGroup
-                    ? "bg-amber-500/15 text-amber-300 border-amber-500/30"
-                    : "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
-                }`}
-              >
-                {activeGroup ? "İşlem Devam Ediyor" : "Okumaya Hazır"}
-              </span>
-            }
-          />
-
-          <div className="p-4 sm:p-6 space-y-5">
-            {/* STEP 1 */}
-
+    <main className="mx-auto w-full min-w-0 max-w-[1400px] space-y-4 overflow-x-hidden bg-slate-50 px-3 py-3 text-slate-900 sm:px-5 sm:py-5 lg:px-7">
+      {/* HEAD - koyu, sade, köşeli. Yeni font yok. */}
+      <header className="rounded-[5px] border border-slate-900 bg-slate-900 p-4 text-white sm:p-6">
+        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+          <div className="flex items-start gap-3">
+            <div className="rounded-[4px] border border-rose-400/50 bg-rose-600 p-2.5"><Package className="h-6 w-6" /></div>
             <div>
-              <div className="flex items-center justify-between mb-3 gap-2">
-                <div className="flex items-center gap-2.5">
-                  <span
-                    className={`w-8 h-8 flex items-center justify-center rounded-[3px] text-xs font-black text-white ${
-                      activeGroup
-                        ? "bg-emerald-600"
-                        : "bg-indigo-600"
-                    }`}
-                  >
-                    {activeGroup ? (
-                      <Check className="w-4 h-4" />
-                    ) : (
-                      "01"
-                    )}
-                  </span>
-
-                  <label
-                    htmlFor="aras-delivery"
-                    className="text-xs sm:text-sm font-black uppercase tracking-wide text-slate-800"
-                  >
-                    Sipariş / Delivery Numarası
-                  </label>
-                </div>
-
-                {activeGroup && (
-                  <span className="text-[10px] font-black text-emerald-600 uppercase">
-                    Sipariş Bulundu
-                  </span>
-                )}
-              </div>
-
-              <form
-                onSubmit={handleDeliveryScan}
-                className="flex flex-col sm:flex-row gap-2"
-              >
-                <div className="relative flex-1 min-w-0">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 pointer-events-none" />
-
-                  <input
-                    id="aras-delivery"
-                    ref={deliveryRef}
-                    type="text"
-                    value={deliveryNo}
-                    onChange={(event) =>
-                      setDeliveryNo(event.target.value)
-                    }
-                    disabled={loading || !!activeGroup}
-                    placeholder="SİPARİŞ BARKODUNU OKUTUN..."
-                    autoComplete="off"
-                    className="w-full h-14 pl-12 pr-4 bg-[#f1f5f9] border-2 border-slate-400 rounded-[3px] text-base sm:text-lg font-black uppercase text-slate-900 placeholder:text-slate-400 placeholder:text-xs sm:placeholder:text-sm focus:outline-none focus:border-indigo-600 focus:bg-white disabled:opacity-50 transition-colors"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={
-                    loading ||
-                    !deliveryNo.trim() ||
-                    !!activeGroup
-                  }
-                  className="sm:w-40 h-14 flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:text-slate-500 text-white rounded-[3px] text-xs font-black uppercase tracking-wide transition-colors"
-                >
-                  {loading && !activeGroup ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Search className="w-4 h-4" />
-                  )}
-                  Sorgula
-                </button>
-              </form>
+              <div className="mb-1 text-[11px] font-bold uppercase tracking-[.14em] text-rose-300">WMS / B2C KARGO MODÜLÜ</div>
+              <h1 className="text-xl font-bold leading-tight sm:text-2xl">Eksik Parça · Aras Operasyon Paneli</h1>
+              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-300">Barkod eşleştirme, alıcı bilgileri, adres kontrolü ve işlem kaydı tek çalışma alanında.</p>
             </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-2 rounded-[4px] border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200"><ShieldCheck className="h-4 w-4 text-emerald-400" /> Yetkili işlem • {employeeId}</span>
+            <button type="button" className={`${BTN} border-slate-600 bg-slate-800 text-white hover:bg-slate-700`} onClick={() => { void loadFiles(); void loadStats(selectedFileId); }}><RefreshCcw className="h-4 w-4" /> Yenile</button>
+          </div>
+        </div>
+      </header>
 
-            {/* IDLE STATE */}
+      {/* KPI */}
+      <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        {[
+          { label: "Toplam gönderi", value: stats.total, icon: Package, accent: "border-l-slate-700", color: "text-slate-700" },
+          { label: "İşlenen", value: stats.processed, icon: PackageCheck, accent: "border-l-emerald-500", color: "text-emerald-600" },
+          { label: "Kalan", value: remaining, icon: PackageOpen, accent: "border-l-amber-500", color: "text-amber-600" },
+          { label: "Bugün işlenen", value: stats.today, icon: Truck, accent: "border-l-blue-500", color: "text-blue-600" },
+        ].map((item) => (
+          <div key={item.label} className={`${CARD} min-w-0 border-l-4 ${item.accent} p-3 sm:p-4`}>
+            <div className="mb-2 flex items-center justify-between gap-1 text-xs font-semibold text-slate-500"><span>{item.label}</span><item.icon className={`h-4 w-4 ${item.color}`} /></div>
+            <div className="text-xl font-bold tabular-nums sm:text-3xl">{item.value.toLocaleString("tr-TR")}</div>
+          </div>
+        ))}
+      </section>
 
-            {!activeGroup && (
-              <div className="border-2 border-dashed border-slate-300 bg-slate-50 rounded-[3px] px-5 py-10 flex flex-col items-center text-center">
-                <div className="w-14 h-14 bg-[#172033] rounded-[3px] flex items-center justify-center mb-4">
-                  <ScanLine className="w-7 h-7 text-indigo-300" />
-                </div>
+      <section className={`${CARD} p-4`}>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>Profil işlem ilerlemesi</span><span className="font-bold text-slate-700">%{percentage} tamamlandı</span></div>
+        <div className="h-2 overflow-hidden rounded-[3px] bg-slate-100"><div className="h-full bg-emerald-500 transition-all" style={{ width: `${percentage}%` }} /></div>
+      </section>
 
-                <h3 className="text-sm font-black text-slate-800 uppercase">
-                  Barkod Okutmaya Hazır
-                </h3>
-
-                <p className="mt-2 text-xs text-slate-500 max-w-md leading-relaxed font-medium">
-                  Sipariş veya teslimat barkodunu okutun.
-                  Müşteri bilgileri ve Aras Kargo eşleştirme
-                  alanı otomatik açılacaktır.
-                </p>
+      {/* Ana operasyon: her ekranda dikey akış. İşlem bölümü altta. */}
+      <section className="flex min-w-0 flex-col gap-4">
+          <div className={CARD}>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-100 px-3 py-3 sm:px-4">
+              <h2 className="flex items-center gap-2 text-sm font-bold"><ScanLine className="h-4 w-4 text-rose-600" /> 01 · Gönderi Sorgulama</h2>
+              <span className="text-[11px] text-slate-500">Barkod / Delivery Number</span>
+            </div>
+            <div className="space-y-3 p-3 sm:p-4">
+              <label className={LABEL} htmlFor="aras-file-select">Aktif dosya profili</label>
+              <div className="relative min-w-0">
+                <select id="aras-file-select" className={`${INPUT} appearance-none pr-9`} value={selectedFileId} onChange={(e) => { setSelectedFileId(e.target.value); clearForm(); }}>
+                  <option value="">TÜM VERİTABANINDA ÇALIŞ · Otomatik profil tespiti</option>
+                  {files.map((file) => <option value={file.id} key={file.id}>{file.filename}</option>)}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-3 top-3.5 h-4 w-4 text-slate-400" />
               </div>
-            )}
-
-            {/* ACTIVE ORDER */}
-
-            {activeGroup && customer && (
-              <div className="border-2 border-slate-300 rounded-[3px] overflow-hidden">
-
-                {/* ORDER HEADER */}
-
-                <div className="bg-[#172033] px-4 sm:px-5 py-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 flex items-center justify-center bg-white/10 border border-white/10 rounded-[3px] text-white">
-                      <Package className="w-6 h-6" />
-                    </div>
-
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                        Aktif Sipariş
-                      </p>
-
-                      <p className="text-base sm:text-lg font-black text-white break-all">
-                        {customer.delivery_number}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <div className="bg-white/10 border border-white/20 px-4 py-2 rounded-[3px]">
-                      <span className="text-2xl font-black text-white tabular-nums">
-                        {activeGroup.count}
-                      </span>
-
-                      <span className="ml-2 text-[10px] font-black uppercase text-slate-300">
-                        Kalem
-                      </span>
-                    </div>
-
-                    <span
-                      className={`px-3 py-3 text-[10px] font-black uppercase rounded-[3px] ${
-                        activeGroup.isUpdateMode
-                          ? "bg-blue-600 text-white"
-                          : "bg-emerald-600 text-white"
-                      }`}
-                    >
-                      {activeGroup.isUpdateMode
-                        ? "Güncelleme"
-                        : "Yeni Eşleştirme"}
-                    </span>
-                  </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="relative min-w-0 flex-1"><Barcode className="pointer-events-none absolute left-3 top-3 h-5 w-5 text-slate-400" />
+                  <input ref={inputRef} autoFocus value={deliveryNo} onChange={(e) => setDeliveryNo(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !loading) { e.preventDefault(); void lookup(); } }} placeholder="Delivery Number okutun..." inputMode="numeric" autoComplete="off" className={`${INPUT} pl-10`} aria-label="Delivery Number" />
                 </div>
+                <button type="button" disabled={loading} onClick={() => void lookup()} className={`${BTN} w-full border-rose-700 bg-rose-600 text-white hover:bg-rose-700 sm:w-auto sm:min-w-[145px]`}>
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Sorgula
+                </button>
+                <button type="button" onClick={clearForm} aria-label="Sorguyu temizle" className={`${BTN_OUTLINE} w-full sm:w-auto`}><RotateCcw className="h-4 w-4" /><span className="sm:hidden">Temizle</span></button>
+              </div>
+              <div className="flex items-start gap-2 text-xs leading-relaxed text-slate-500"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> Global modda ilk eşleşmede dosya profili otomatik seçilir; başka profilde aramak için global moda dönün.</div>
+            </div>
+          </div>
 
-                {/* SD DOCUMENT */}
-
-                <div
-                  className={`px-4 sm:px-5 py-3 flex items-start gap-3 border-b-2 ${
-                    activeGroup.sdDocumentsMatch
-                      ? "bg-emerald-50 border-emerald-200"
-                      : "bg-amber-50 border-amber-300"
-                  }`}
-                >
-                  {activeGroup.sdDocumentsMatch ? (
-                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                  ) : (
-                    <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
-                  )}
-
-                  <div className="min-w-0">
-                    <p
-                      className={`text-[10px] font-black uppercase tracking-wider ${
-                        activeGroup.sdDocumentsMatch
-                          ? "text-emerald-700"
-                          : "text-amber-700"
-                      }`}
-                    >
-                      {activeGroup.sdDocumentsMatch
-                        ? "SD Document Tam Eşleşme"
-                        : "Farklı SD Document Kodları"}
-                    </p>
-
-                    <p className="mt-1 text-xs sm:text-sm font-black font-mono text-slate-800 break-all">
-                      {activeGroup.uniqueSdDocuments.join(", ") ||
-                        "KOD YOK"}
-                    </p>
-                  </div>
+          <div className={CARD}>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-100 px-4 py-3"><h2 className="flex items-center gap-2 text-sm font-bold"><UserRound className="h-4 w-4 text-rose-600" /> 02 · Alıcı ve Gönderi Bilgileri</h2>{group && <span className="rounded-[3px] border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-600">{group.processed ? "Kayıt güncelleme" : "Yeni gönderi"}</span>}</div>
+            {!group ? (
+              <div className="flex min-h-[265px] flex-col items-center justify-center gap-3 p-6 text-center"><div className="rounded-[5px] bg-slate-100 p-4"><ScanLine className="h-9 w-9 text-slate-400" /></div><div className="font-semibold">Henüz gönderi seçilmedi</div><p className="max-w-sm text-sm leading-relaxed text-slate-500">Sorgudan sonra müşteri bilgileri, adres alanları, SD belgeleri ve kopyalama araçları burada görüntülenecek.</p></div>
+            ) : (
+              <div className="space-y-4 p-3 sm:p-4">
+                <div className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                  <InfoBox title="Müşteri" value={group.primary.customer_name || "—"} icon={<UserRound className="h-4 w-4" />} onCopy={() => void copy(group.primary.customer_name || "", "Müşteri adı")} />
+                  <InfoBox title="Telefon" value={group.primary.mobile_number || "—"} icon={<Phone className="h-4 w-4" />} onCopy={() => void copy(group.primary.mobile_number || "", "Telefon")} />
+                  <InfoBox title="Delivery Number" value={group.primary.delivery_number} icon={<Barcode className="h-4 w-4" />} onCopy={() => void copy(group.primary.delivery_number, "Delivery Number")} />
+                  <InfoBox title="SD Document" value={group.uniqueSd.join(" · ") || "—"} icon={<Hash className="h-4 w-4" />} onCopy={() => void copy(group.uniqueSd.join(", "), "SD Document")} />
                 </div>
-
-                {/* CUSTOMER DETAILS */}
-
-                <div className="p-4 sm:p-5 bg-[#f8fafc]">
-                  <div className="flex items-center gap-2 mb-4">
-                    <UserRound className="w-4 h-4 text-indigo-600" />
-
-                    <h3 className="text-xs font-black uppercase tracking-wide text-slate-800">
-                      Alıcı ve Teslimat Bilgileri
-                    </h3>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                    <CopyField
-                      label="Müşteri Adı"
-                      value={customerName.first}
-                      icon={UserRound}
-                      accent="blue"
-                      copied={copiedField === "first"}
-                      onCopy={(value) =>
-                        handleCopy(value, "first")
-                      }
-                    />
-
-                    <CopyField
-                      label="Soyadı"
-                      value={customerName.last}
-                      icon={UserRound}
-                      accent="purple"
-                      copied={copiedField === "last"}
-                      onCopy={(value) =>
-                        handleCopy(value, "last")
-                      }
-                    />
-
-                    <CopyField
-                      label="Telefon Numarası"
-                      value={formatPhone(customer.mobile_number)}
-                      icon={Phone}
-                      accent="green"
-                      copied={copiedField === "phone"}
-                      onCopy={(value) =>
-                        handleCopy(value, "phone")
-                      }
-                    />
-
-                    <CopyField
-                      label="Şehir / Bölge"
-                      value={`${customer.city || ""} / ${customer.region || ""}`}
-                      icon={MapPin}
-                      accent="blue"
-                      copied={copiedField === "city"}
-                      onCopy={(value) =>
-                        handleCopy(value, "city")
-                      }
-                    />
-
-                    <CopyField
-                      label="Mahalle"
-                      value={extractNeighborhood(
-                        customer.street,
-                        customer.street_2,
-                      )}
-                      icon={MapPin}
-                      accent="orange"
-                      copied={copiedField === "neighborhood"}
-                      onCopy={(value) =>
-                        handleCopy(value, "neighborhood")
-                      }
-                    />
-
-                    <CopyField
-                      label="Açık Adres"
-                      value={fullAddress}
-                      icon={MapPin}
-                      accent="red"
-                      copied={copiedField === "address"}
-                      onCopy={(value) =>
-                        handleCopy(value, "address")
-                      }
-                    />
-                  </div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  {[["Ad", names.first], ["Soyad", names.last], ["Mahalle", address.neighborhood]].map(([title, value]) => (
+                    <button type="button" key={title} onClick={() => void copy(value, title)} className="min-h-[68px] min-w-0 rounded-[4px] border border-slate-200 bg-slate-50 p-3 text-left transition hover:border-rose-300 hover:bg-rose-50">
+                      <div className="mb-1 flex items-center justify-between gap-1 text-[11px] font-bold uppercase text-slate-500">{title}<Copy className="h-3.5 w-3.5 shrink-0" /></div>
+                      <div className="break-words text-sm font-semibold leading-5 text-slate-800">{value || "—"}</div>
+                    </button>
+                  ))}
                 </div>
-
-                {/* TRACKING INPUT */}
-
-                <div
-                  className={`p-4 sm:p-5 border-t-[4px] ${
-                    activeGroup.isUpdateMode
-                      ? "border-blue-600 bg-blue-50/50"
-                      : "border-[#dc3545] bg-red-50/40"
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5 mb-3">
-                    <span
-                      className={`w-8 h-8 flex items-center justify-center rounded-[3px] text-white text-xs font-black ${
-                        activeGroup.isUpdateMode
-                          ? "bg-blue-600"
-                          : "bg-[#dc3545]"
-                      }`}
-                    >
-                      02
-                    </span>
-
-                    <label
-                      htmlFor="aras-tracking"
-                      className="text-xs sm:text-sm font-black uppercase tracking-wide text-slate-800"
-                    >
-                      {activeGroup.isUpdateMode
-                        ? "Aras Kargo Barkodunu Güncelle"
-                        : "Aras Kargo Barkodunu Okut"}
-                    </label>
-                  </div>
-
-                  <form
-                    onSubmit={handleTrackingScan}
-                    className="flex flex-col lg:flex-row gap-2"
-                  >
-                    <div className="relative flex-1 min-w-0">
-                      <ScanLine
-                        className={`absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 pointer-events-none ${
-                          activeGroup.isUpdateMode
-                            ? "text-blue-600"
-                            : "text-[#dc3545]"
-                        }`}
-                      />
-
-                      <input
-                        id="aras-tracking"
-                        ref={trackingRef}
-                        type="text"
-                        value={trackingNo}
-                        onChange={(event) =>
-                          setTrackingNo(event.target.value)
-                        }
-                        disabled={loading}
-                        placeholder="ARAS TAKİP NUMARASI..."
-                        autoComplete="off"
-                        className={`w-full h-14 pl-12 pr-4 bg-white border-2 rounded-[3px] font-mono text-lg sm:text-xl font-black tracking-wide text-slate-900 uppercase placeholder:text-slate-400 placeholder:text-xs focus:outline-none disabled:opacity-50 ${
-                          activeGroup.isUpdateMode
-                            ? "border-blue-300 focus:border-blue-600"
-                            : "border-red-300 focus:border-[#dc3545]"
-                        }`}
-                      />
-                    </div>
-
-                    <div className="flex gap-2">
-                      <button
-                        type="submit"
-                        disabled={
-                          loading || !trackingNo.trim()
-                        }
-                        className={`flex-1 lg:flex-none lg:min-w-[155px] h-14 px-5 rounded-[3px] text-white font-black uppercase text-xs flex items-center justify-center gap-2 transition-colors disabled:opacity-40 ${
-                          activeGroup.isUpdateMode
-                            ? "bg-blue-600 hover:bg-blue-700"
-                            : "bg-[#dc3545] hover:bg-red-700"
-                        }`}
-                      >
-                        {loading ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <CheckCircle2 className="w-4 h-4" />
-                        )}
-
-                        {activeGroup.isUpdateMode
-                          ? "Güncelle"
-                          : "Kaydet"}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleCancel}
-                        disabled={loading}
-                        className="h-14 px-5 bg-[#172033] hover:bg-slate-700 text-white rounded-[3px] text-xs font-black uppercase transition-colors disabled:opacity-50"
-                      >
-                        İptal
-                      </button>
-                    </div>
-                  </form>
-
-                  <div className="flex items-center gap-2 mt-3">
-                    <ScanLine className="w-3.5 h-3.5 text-slate-500" />
-
-                    <p className="text-[10px] sm:text-[11px] font-semibold text-slate-500">
-                      Barkodu okutun ve Enter tuşuna basarak işlemi tamamlayın.
-                    </p>
-                  </div>
+                <div className="min-w-0 rounded-[4px] border border-slate-200 bg-slate-50 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-3"><span className={LABEL}><MapPin className="mr-1 inline h-3.5 w-3.5" /> Adres bilgileri</span><button type="button" className="inline-flex items-center gap-1 text-xs font-semibold text-rose-700 hover:underline" onClick={() => void copy([address.line, address.location].filter(Boolean).join(" / "), "Adres")}><Copy className="h-3.5 w-3.5" /> Kopyala</button></div>
+                  <p className="break-words text-sm leading-6 text-slate-800">{address.line || "Adres satırı bulunamadı."}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-500">{address.location || "Konum bilgisi yok"}</p>
                 </div>
+                <div className="rounded-[4px] border border-slate-200"><div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold"><span>Gönderi Satırları</span><span>{group.count} satır / {group.uniqueSd.length} SD</span></div><div className="max-h-48 overflow-auto">{group.records.map((r, index) => <div key={r.id || index} className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2 text-xs last:border-b-0"><span className="font-mono text-slate-700">{r.sd_document || "SD belirtilmemiş"}</span><span className={r.is_processed_aras ? "font-semibold text-emerald-700" : "font-semibold text-amber-700"}>{r.is_processed_aras ? "İşlenmiş" : "Bekliyor"}</span></div>)}</div></div>
               </div>
             )}
           </div>
-        </section>
 
-        {/* ==================================================
-            FOOTER
-        ================================================== */}
-
-        <div className="flex items-center justify-between gap-3 px-1">
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 bg-emerald-500 rounded-[1px]" />
-
-            <p className="text-[10px] text-slate-500 font-bold">
-              Aras Kargo Entegrasyonu · Operasyon Yönetimi
-            </p>
-          </div>
-
-          <span className="text-[10px] font-black text-slate-400 uppercase">
-            B2C
-          </span>
-        </div>
-      </div>
-
-      {/* ======================================================
-          EXCEL UPLOAD DRAWER
-      ====================================================== */}
-
-      <ExcelUploadDrawer
-        isOpen={isExcelOpen}
-        onClose={() => {
-          setIsExcelOpen(false);
-          void fetchInitialData();
-        }}
-        employeeId={employeeId}
-      />
-
-      {/* ======================================================
-          GLOBAL WIPE CONFIRMATION MODAL
-      ====================================================== */}
-
-      {isWipeModalOpen && (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-950/75 backdrop-blur-sm p-4">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="aras-wipe-title"
-            className="w-full max-w-lg bg-white border-2 border-red-500 rounded-[4px] shadow-2xl overflow-hidden"
-          >
-            {/* MODAL HEADER */}
-
-            <div className="bg-[#172033] border-b-[4px] border-red-600 px-5 py-5 flex items-center gap-4">
-              <div className="w-12 h-12 shrink-0 bg-red-600 rounded-[3px] flex items-center justify-center">
-                <ShieldAlert className="w-7 h-7 text-white" />
-              </div>
-
-              <div className="flex-1">
-                <h2
-                  id="aras-wipe-title"
-                  className="text-base sm:text-lg font-black uppercase text-white tracking-wide"
-                >
-                  Veritabanını Sıfırla
-                </h2>
-
-                <p className="text-[11px] font-bold text-red-300 mt-1">
-                  Tüm veriler kalıcı olarak silinecek.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setIsWipeModalOpen(false)}
-                disabled={loading}
-                className="p-2 text-slate-400 hover:text-white disabled:opacity-50"
-                title="Kapat"
-              >
-                <X className="w-5 h-5" />
-              </button>
+        <div className={`${CARD} min-w-0 overflow-hidden`}>
+          <div className="border-b border-slate-200 bg-slate-900 px-4 py-3 text-white"><h2 className="flex items-center gap-2 text-sm font-bold"><Clipboard className="h-4 w-4 text-rose-400" /> 03 · İşlem Durumu ve Kayıt</h2><p className="mt-1 text-xs text-slate-300">İşlem tipine göre gereken alanlar otomatik belirlenir.</p></div>
+          <div className="space-y-4 p-3 sm:p-5">
+            <div><label className={LABEL} htmlFor="aras-status">İşlem türü</label><div className="relative mt-1.5"><select id="aras-status" value={type} disabled={!group || saving} onChange={(e) => chooseType(e.target.value as CargoProcessType)} className={`${INPUT} appearance-none pr-9`}><option value="success">Başarılı kargo gönderimi</option><option value="missing">Eksik / hatalı adres veya iletişim bilgisi</option><option value="returned">İade / gönderilemedi</option></select><ChevronDown className="pointer-events-none absolute right-3 top-3.5 h-4 w-4 text-slate-400" /></div></div>
+            <label className="flex cursor-pointer items-center gap-2 rounded-[4px] border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-700"><input type="checkbox" checked={type === "missing"} disabled={!group || saving} onChange={(e) => chooseType(e.target.checked ? "missing" : "success")} className="h-4 w-4 accent-rose-600" /><span>Eksik adres / iletişim bilgisi var</span></label>
+            <div className={`flex items-start gap-3 rounded-[4px] border p-3 ${type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : type === "missing" ? "border-amber-200 bg-amber-50 text-amber-900" : "border-rose-200 bg-rose-50 text-rose-900"}`}>
+              {type === "success" ? <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" /> : type === "missing" ? <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" /> : <XCircle className="mt-0.5 h-5 w-5 shrink-0" />}
+              <div><div className="text-sm font-bold">{type === "success" ? "Başarılı gönderim" : type === "missing" ? "Eksik bilgi kaydı" : "İade kaydı"}</div><p className="mt-1 text-xs leading-relaxed">{type === "success" ? "Geçerli takip numarası zorunlu. Hata açıklaması takip alanına kabul edilmez." : type === "missing" ? "missing_address = true kaydedilir. Açıklama yalnızca note alanına yazılır." : "is_returned = true kaydedilir. Hata gerekçesi note alanına yazılır."}</p></div>
             </div>
-
-            {/* MODAL BODY */}
-
-            <div className="p-5 sm:p-7">
-              <div className="flex items-start gap-3 border-l-[4px] border-red-500 bg-red-50 p-4 rounded-[3px]">
-                <AlertTriangle className="w-6 h-6 text-red-600 shrink-0" />
-
-                <div>
-                  <h3 className="text-sm font-black uppercase text-red-800">
-                    Dikkat! Bu işlem geri alınamaz.
-                  </h3>
-
-                  <p className="text-xs font-semibold text-red-700 mt-2 leading-relaxed">
-                    Sisteme yüklenen tüm Excel dosyaları ve
-                    yapılan Aras Kargo barkod eşleştirmeleri
-                    tamamen temizlenecektir.
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-5 border-2 border-slate-200 rounded-[3px] p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-bold text-slate-600">
-                    Yüklü Excel Dosyaları
-                  </span>
-
-                  <span className="text-lg font-black text-red-600">
-                    {formatNumber(files.length)}
-                  </span>
-                </div>
-
-                <div className="h-px bg-slate-200 my-3" />
-
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-bold text-slate-600">
-                    Toplam Kayıt
-                  </span>
-
-                  <span className="text-lg font-black text-red-600">
-                    {selectedFileId
-                      ? "Tümü"
-                      : formatNumber(stats.totalRecords)}
-                  </span>
-                </div>
-              </div>
-
-              <p className="mt-4 text-[11px] font-semibold text-slate-500 leading-relaxed">
-                Devam etmeden önce gerekli Excel çıktılarını
-                indirdiğinizden emin olun.
-              </p>
-
-              {/* MODAL BUTTONS */}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-6">
-                <button
-                  type="button"
-                  onClick={() => setIsWipeModalOpen(false)}
-                  disabled={loading}
-                  className="h-13 min-h-12 bg-slate-100 hover:bg-slate-200 border-2 border-slate-300 rounded-[3px] text-xs font-black uppercase text-slate-700 transition-colors disabled:opacity-50"
-                >
-                  Vazgeç
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleGlobalWipe}
-                  disabled={loading}
-                  className="h-13 min-h-12 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 border-2 border-red-600 text-white rounded-[3px] text-xs font-black uppercase transition-colors disabled:opacity-50"
-                >
-                  {loading ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="w-4 h-4" />
-                  )}
-
-                  {loading
-                    ? "SİLİNİYOR..."
-                    : "EVET, TÜMÜNÜ SİL"}
-                </button>
-              </div>
-            </div>
+            {type === "success" ? (
+              <div><label className={LABEL} htmlFor="aras-tracking">Aras takip numarası <span className="text-rose-600">*</span></label><input id="aras-tracking" disabled={!group || saving} autoComplete="off" className={`${INPUT} mt-1.5 ${trackingNo && !isValidTracking ? "border-rose-400" : ""}`} value={trackingNo} onChange={(e) => setTrackingNo(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void save(); } }} placeholder="Örn: CPR123456789012" /><p className="mt-1.5 text-xs text-slate-500">En az 10 karakter, yalnızca harf/rakam. 5-6 haneli dahili kodlar engellenir.</p></div>
+            ) : (
+              <div><label className={LABEL} htmlFor="aras-reason">{type === "missing" ? "Eksik bilgi gerekçesi" : "İade gerekçesi"} <span className="text-rose-600">*</span></label><div className="relative mt-1.5"><select id="aras-reason" disabled={!group || saving} value={reason} onChange={(e) => setReason(e.target.value)} className={`${INPUT} appearance-none pr-9`}>{(type === "missing" ? MISSING_OPTIONS : RETURN_OPTIONS).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select><ChevronDown className="pointer-events-none absolute right-3 top-3.5 h-4 w-4 text-slate-400" /></div></div>
+            )}
+            <div><label className={LABEL} htmlFor="aras-note">Ek açıklama {type !== "success" && reason === "other" ? "*" : "(isteğe bağlı)"}</label><textarea id="aras-note" value={extraNote} onChange={(e) => setExtraNote(e.target.value.slice(0, 500))} disabled={!group || saving} rows={3} placeholder="Açıklama yazın..." className="mt-1.5 w-full resize-y rounded-[4px] border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-100 disabled:bg-slate-100" /><div className="text-right text-[11px] text-slate-400">{extraNote.length}/500</div></div>
+            <div className="rounded-[4px] border border-dashed border-slate-300 bg-slate-50 px-3 py-2.5 text-xs leading-5 text-slate-600"><strong>Kayıt önizleme:</strong> {type === "success" ? `Takip no: ${trackingNo || "—"}` : type === "missing" ? `Eksik adres: EVET • ${MISSING_LABELS[reason] || "—"}` : `İade: EVET • ${RETURN_LABELS[reason] || "—"}`}</div>
+            <button type="button" disabled={!canSave} onClick={() => void save()} className={`${BTN} h-12 w-full border-rose-700 bg-rose-600 text-white hover:bg-rose-700`}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} {group?.processed ? "Kaydı Güncelle" : "İşlemi Kaydet"} <ArrowRight className="ml-auto h-4 w-4" />
+            </button>
+            <p className="text-center text-xs text-slate-500">Durum değişikliği, aktif profilin tüm eşleşen ERP satırlarına uygulanır.</p>
           </div>
         </div>
-      )}
-    </>
+      </section>
+
+      {/* DISA AKTARMA */}
+      <section className={`${CARD} p-4`}><div className="flex flex-col items-start justify-between gap-4 lg:flex-row lg:items-center"><div><h2 className="flex items-center gap-2 text-sm font-bold"><Download className="h-4 w-4 text-rose-600" /> Veri Dışa Aktarma</h2><p className="mt-1 text-xs leading-5 text-slate-500">Aktif profil: <span className="font-semibold text-slate-800">{selectedFileName}</span>. Mevcut dışa aktarma action'ları korunur.</p></div><div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:w-auto"><button type="button" disabled={Boolean(exporting)} onClick={() => void exportCsv("short")} className={BTN_OUTLINE}>{exporting === "short" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} 2 Sütun CSV</button><button type="button" disabled={Boolean(exporting)} onClick={() => void exportCsv("original")} className={BTN_OUTLINE}>{exporting === "original" ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />} Orijinal Şablon CSV</button></div></div></section>
+
+      {/* PROFIL ISLEMLERI ANA OPERASYONDAN AYRI */}
+      <section className="space-y-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><h2 className="text-base font-bold">Dosya ve Profil Yönetimi</h2><p className="mt-0.5 text-xs text-slate-500">Yeni dosya ekleme ve mevcut profilleri yönetme işlemleri ayrı tutulur.</p></div><span className="text-xs font-medium text-slate-500">{files.length} profil</span></div><div className="grid gap-3 sm:grid-cols-2"><div className={`${CARD} border-t-[3px] border-t-emerald-500 p-4`}><div className="flex items-start gap-3"><div className="rounded-[4px] bg-emerald-50 p-2.5 text-emerald-700"><FileUp className="h-5 w-5" /></div><div className="min-w-0 flex-1"><h3 className="text-sm font-bold">Yeni Profil Yükle</h3><p className="mt-1 text-xs leading-5 text-slate-500">Excel/CSV gönderi dosyanı mevcut yükleme modülüyle içe aktar.</p><button type="button" className={`${BTN_OUTLINE} mt-3`} onClick={() => setShowUploader(true)}><FileUp className="h-4 w-4" /> Dosya Yükle</button></div></div></div><div className={`${CARD} border-t-[3px] border-t-rose-500 p-4`}><div className="flex items-start gap-3"><div className="rounded-[4px] bg-rose-50 p-2.5 text-rose-700"><FolderCog className="h-5 w-5" /></div><div className="min-w-0 flex-1"><h3 className="text-sm font-bold">Profilleri Yönet</h3><p className="mt-1 text-xs leading-5 text-slate-500">Yüklenmiş dosyaları incele, tek profil sil veya tüm veritabanını sıfırla.</p><button type="button" className={`${BTN_OUTLINE} mt-3`} onClick={() => setShowProfiles(true)}><FolderCog className="h-4 w-4" /> Profil Yönetimi</button></div></div></div></div></section>
+
+      {/* BILDIRIM */}
+      {notice && <div role="status" className={`fixed bottom-4 right-4 z-[9999] flex max-w-[calc(100vw-2rem)] items-start gap-2 rounded-[5px] border bg-white p-3.5 text-sm shadow-xl sm:max-w-md ${notice.type === "success" ? "border-emerald-300 text-emerald-800" : notice.type === "error" ? "border-rose-300 text-rose-800" : "border-slate-300 text-slate-800"}`}>
+        {notice.type === "error" ? <AlertTriangle className="h-4 w-4 shrink-0" /> : <BadgeCheck className="h-4 w-4 shrink-0" />}
+        <span className="flex-1 leading-5">{notice.message}</span><button type="button" aria-label="Bildirimi kapat" onClick={() => setNotice(null)}><X className="h-4 w-4" /></button></div>}
+
+      {/* PROFIL YONETIM MODALI */}
+      {showProfiles && <div className="fixed inset-0 z-[9000] flex items-center justify-center bg-slate-950/65 p-3" onMouseDown={(e) => { if (e.target === e.currentTarget) setShowProfiles(false); }} role="presentation"><div role="dialog" aria-modal="true" aria-label="Profil yönetimi" className="flex max-h-[90dvh] w-full max-w-2xl flex-col overflow-hidden rounded-[5px] border border-slate-200 bg-white shadow-2xl"><div className="flex items-center justify-between bg-slate-900 px-4 py-3 text-white"><div><h3 className="font-bold">Profil Yönetimi</h3><p className="mt-0.5 text-xs text-slate-300">Yüklü dosyalar ve silme seçenekleri</p></div><button type="button" aria-label="Kapat" onClick={() => setShowProfiles(false)} className="rounded-[4px] p-1.5 hover:bg-slate-700"><X className="h-5 w-5" /></button></div><div className="min-h-0 flex-1 overflow-y-auto p-4"><div className="divide-y divide-slate-200 border border-slate-200">{files.length ? files.map((f) => <div key={f.id} className="flex flex-wrap items-center justify-between gap-3 p-3"><div className="min-w-0 flex-1"><div className="break-all text-sm font-semibold">{f.filename}</div><div className="mt-1 text-xs text-slate-500">{fmtDate(f.created_at)} {f.id === selectedFileId ? "• Aktif profil" : ""}</div></div><button type="button" onClick={() => setConfirm({ id: f.id, name: f.filename })} className={`${BTN} border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100`}><Trash2 className="h-4 w-4" /> Sil</button></div>) : <div className="p-8 text-center text-sm text-slate-500">Henüz profil yüklenmemiş.</div>}</div><div className="mt-5 rounded-[5px] border border-rose-200 bg-rose-50 p-3"><div className="flex items-start gap-2 text-sm font-semibold text-rose-900"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" /> Tehlikeli işlem</div><p className="my-2 text-xs leading-5 text-rose-800">Tüm veritabanını sıfırlama, mevcut <code>deleteArasFile("")</code> işlevini çalıştırır. Geri alınamaz.</p><button type="button" onClick={() => { setWipeConfirmation(""); setConfirm({ id: "", name: "TÜM PROFİLLER VE VERİLER" }); }} className={`${BTN} border-rose-700 bg-rose-700 text-white hover:bg-rose-800`}><Trash2 className="h-4 w-4" /> Tüm Veritabanını Sıfırla</button></div></div></div></div>}
+
+      {/* SILME ONAYI */}
+      {confirm && <div className="fixed inset-0 z-[9500] flex items-center justify-center bg-slate-950/75 p-4"><div role="alertdialog" aria-modal="true" aria-labelledby="aras-delete-title" className="w-full max-w-md rounded-[5px] border border-rose-300 bg-white p-5 shadow-2xl"><div className="mb-3 flex items-center gap-2 text-rose-700"><AlertTriangle className="h-5 w-5" /><h3 id="aras-delete-title" className="font-bold">Kalıcı Silme Onayı</h3></div><p className="break-words text-sm leading-6 text-slate-700"><strong>{confirm.name}</strong> için silme işlemi geri alınamaz. Devam etmek istediğinize emin misiniz?</p>{!confirm.id && <div className="mt-3"><label className={LABEL} htmlFor="aras-confirm-wipe">Tümünü silmek için SIFIRLA yazın</label><input id="aras-confirm-wipe" className={`${INPUT} mt-1`} value={wipeConfirmation} onChange={(e) => setWipeConfirmation(e.target.value)} placeholder="SIFIRLA" autoComplete="off" /></div>}<div className="mt-5 flex flex-wrap justify-end gap-2"><button type="button" disabled={profileBusy} onClick={() => setConfirm(null)} className={BTN_OUTLINE}>Vazgeç</button><button type="button" disabled={profileBusy || (!confirm.id && wipeConfirmation !== "SIFIRLA")} onClick={() => void deleteProfile()} className={`${BTN} border-rose-700 bg-rose-700 text-white hover:bg-rose-800`}>{profileBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Kalıcı Olarak Sil</button></div></div></div>}
+
+      {/* ESKI EXCEL YUKLEME FONKSIYONU KORUNDU */}
+      <ExcelUploadDrawer isOpen={showUploader} employeeId={employeeId} onClose={() => { setShowUploader(false); void loadFiles(); void loadStats(selectedFileId); }} />
+    </main>
   );
+}
+
+function InfoBox({ title, value, icon, onCopy }: { title: string; value: string; icon: React.ReactNode; onCopy: () => void }) {
+  return <div className="min-w-0 rounded-[4px] border border-slate-200 bg-white p-3"><div className="mb-1.5 flex items-center gap-2 text-xs font-semibold text-slate-500">{icon}{title}</div><div className="flex items-center gap-2"><span className="min-w-0 flex-1 break-all text-sm font-semibold leading-5 sm:break-words">{value}</span><button type="button" aria-label={`${title} kopyala`} onClick={onCopy} className="shrink-0 rounded-[3px] border border-slate-200 p-2 text-slate-500 hover:bg-slate-50 hover:text-rose-600"><Copy className="h-4 w-4" /></button></div></div>;
 }
