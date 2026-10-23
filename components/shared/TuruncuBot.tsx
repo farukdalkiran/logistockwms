@@ -190,7 +190,7 @@ export default function TuruncuBot(){
            <div className="flex flex-wrap gap-2 mt-3">
              {n.action_href&&<button type="button" onClick={()=>navigate(n.action_href!)} className="px-3 py-2 text-[11px] bg-slate-950 text-white rounded-lg font-bold">{n.action_label||"İncele"} →</button>}
              {n.show_missing_attendance&&feed?.canAttendance&&<button type="button" onClick={()=>void inspectGaps()} className="px-3 py-2 text-[11px] bg-orange-50 border border-orange-200 text-orange-700 rounded-lg font-bold">Eksikleri Denetle</button>}
-             {!n.read&&<button type="button" onClick={async()=>{try{await acknowledgeTuruncuAnnouncement(n.id);setFeed(f=>f?{...f,announcements:f.announcements.map(x=>x.id===n.id?{...x,read:true}:x)}:f);}catch{/* Reattempt after refresh. */}} className="px-2 py-1 text-[11px] text-slate-500 underline">Okundu</button>}
+             {!n.read&&<button type="button" onClick={async()=>{try{await acknowledgeTuruncuAnnouncement(n.id);setFeed(f=>f?{...f,announcements:f.announcements.map(x=>x.id===n.id?{...x,read:true}:x)}:f);}catch{/* Reattempt after refresh. */}}} className="px-2 py-1 text-[11px] text-slate-500 underline">Okundu</button>}
            </div>
          </article>)}
          {gaps&&<article className="rounded-xl border border-amber-200 bg-white p-3">
