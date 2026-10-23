@@ -157,7 +157,7 @@ async function stockStats(db:ReturnType<typeof adminClient>,branchId:string,sear
  if(isSpecific){
    const cleaned=search.replace(/(stokta|kaç|adet|var|kaldı|ürün|sku|barkod|nedir|durumu|ne|bu|için)/gi," ").trim().slice(0,60);
    if(cleaned.length>=3){
-     const escaped=cleaned.replace(/[%_]/g,"");
+     const escaped=cleaned.replace(/[^a-zA-Z0-9ÇĞİÖŞÜçğıöşü\s-]/g,"").trim();
      const {data:p}=await db.from("products").select("id,name,sku,barcode").or("name.ilike.%"+escaped+"%,sku.ilike.%"+escaped+"%,barcode.ilike.%"+escaped+"%").limit(12);
      matches=p||[];
    }
