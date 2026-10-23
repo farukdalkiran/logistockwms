@@ -1,0 +1,476 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import {
+  AlertCircle,
+  CalendarDays,
+  FileText,
+  Loader2,
+  MapPin,
+  Package,
+  RefreshCw,
+  Truck,
+  UserRound,
+  Warehouse,
+  X,
+} from "lucide-react";
+import { getMyOrderDetail } from "@/app/actions/my-orders";
+import {
+  dateLabel,
+  hasDecision,
+  isPending,
+  quantity,
+  type Order,
+} from "@/lib/my-orders/types";
+import {
+  ItemDecision,
+  OrderKind,
+  OrderStatus,
+  ProductImage,
+} from "./OrderCard";
+import OrderJourney from "./OrderJourney";
+import s from "../myorders.module.css";
+
+export default function OrderDetailModal({
+  orderId,
+  close,
+}: {
+  orderId: string;
+  close: () => void;
+}) {
+  const [mounted, setMounted] = useState(false),
+    [order, setOrder] = useState<Order | null>(null),
+    [branch, setBranch] = useState("");
+  const [loading, setLoading] = useState(true),
+    [error, setError] = useState(""),
+    [refreshing, setRefreshing] = useState(false);
+  const dialog = useRef<HTMLDivElement>(null),
+    sequence = useRef(0),
+    closeRef = useRef(close);
+  closeRef.current = close;
+  const load = useCallback(
+    async (silent = false) => {
+      const id = ++sequence.current;
+      silent ? setRefreshing(true) : setLoading(true);
+      try {
+        const r = await getMyOrderDetail(orderId);
+        if (id !== sequence.current) return;
+        if (!r.ok) throw new Error(r.error);
+        setOrder(r.data.order);
+        setBranch(r.data.branchName);
+        setError("");
+      } catch (e) {
+        if (id === sequence.current)
+          setError(
+            e instanceof Error ? e.message : "Sipariş detayı alınamadı.",
+          );
+      } finally {
+        if (id === sequence.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    },
+    [orderId],
+  );
+  useEffect(() => {
+    setMounted(true);
+    void load();
+    return () => {
+      sequence.current++;
+    };
+  }, [load]);
+  useEffect(() => {
+    if (!mounted) return;
+    const old = document.body.style.overflow,
+      previous = document.activeElement as HTMLElement | null;
+    document.body.style.overflow = "hidden";
+    dialog.current?.focus();
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeRef.current();
+      }
+      if (event.key !== "Tab") return;
+      const nodes = Array.from(
+          dialog.current?.querySelectorAll<HTMLElement>(
+            'button:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex="0"]',
+          ) ?? [],
+        ).filter((n) => n.getClientRects().length > 0),
+        first = nodes[0],
+        last = nodes[nodes.length - 1];
+      if (!first) {
+        event.preventDefault();
+        return;
+      }
+      if (
+        event.shiftKey &&
+        (document.activeElement === first ||
+          document.activeElement === dialog.current)
+      ) {
+        event.preventDefault();
+        last.focus();
+      } else if (
+        !event.shiftKey &&
+        (document.activeElement === last ||
+          document.activeElement === dialog.current)
+      ) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", key);
+    return () => {
+      document.body.style.overflow = old;
+      document.removeEventListener("keydown", key);
+      previous?.focus();
+    };
+  }, [mounted]);
+  if (!mounted) return null;
+  const decided = order ? hasDecision(order) : false;
+  return createPortal(
+    <div
+      className={s.overlay}
+      onMouseDown={(event) => {
+        if (event.currentTarget === event.target) close();
+      }}
+    >
+      <div
+        className={s.dialog}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="my-order-title"
+        tabIndex={-1}
+        ref={dialog}
+      >
+        <header className={s.dialogHeader}>
+          <div>
+            <span>SİPARİŞ DETAYI</span>
+            <h2 id="my-order-title">
+              {order?.order_code || "Sipariş bilgileri"}
+            </h2>
+          </div>
+          <div className={s.dialogHeaderActions}>
+            {order && <OrderKind order={order} />}
+            <button
+              onClick={close}
+              aria-label="Sipariş detayını kapat"
+              className={s.closeButton}
+            >
+              <X size={21} />
+            </button>
+          </div>
+        </header>
+        <div className={s.dialogScroll}>
+          {error && (
+            <div className={s.error} role="alert">
+              <AlertCircle size={18} />
+              <span>{error}</span>
+              <button onClick={() => void load()}>Tekrar dene</button>
+            </div>
+          )}
+          {loading ? (
+            <div className={s.empty} role="status">
+              <Loader2 className={s.spin} size={29} />
+              <strong>Sipariş detayları getiriliyor</strong>
+            </div>
+          ) : order ? (
+            <>
+              <div className={s.detailStatus}>
+                <div>
+                  <OrderStatus order={order} large />
+                  <p>
+                    Güncel sipariş durumunuz ve merkez depo tarafından
+                    kaydedilen miktarlar.
+                  </p>
+                </div>
+                <button
+                  className={s.button}
+                  disabled={refreshing}
+                  onClick={() => void load(true)}
+                >
+                  <RefreshCw
+                    size={14}
+                    className={refreshing ? s.spin : undefined}
+                  />
+                  Durumu yenile
+                </button>
+              </div>
+              <OrderJourney order={order} />
+              <section className={s.detailSummary}>
+                <div>
+                  <span>Talep edilen</span>
+                  <strong>
+                    {quantity(order.requested_total)}
+                    <small>adet</small>
+                  </strong>
+                </div>
+                <div>
+                  <span>Onaylanan</span>
+                  <strong>
+                    {decided && order.approved_total !== null
+                      ? quantity(order.approved_total)
+                      : "Bekleniyor"}
+                    {decided && order.approved_total !== null && (
+                      <small>adet</small>
+                    )}
+                  </strong>
+                </div>
+                <div>
+                  <span>Revize edilen</span>
+                  <strong>
+                    {decided ? quantity(order.revised_count) : "—"}
+                    <small>kalem</small>
+                  </strong>
+                </div>
+                <div>
+                  <span>Sipariş içeriği</span>
+                  <strong>
+                    {quantity(order.item_count)}
+                    <small>kalem</small>
+                  </strong>
+                </div>
+              </section>
+              {order.decision_note && (
+                <div className={s.detailNote}>
+                  <FileText size={17} />
+                  <div>
+                    <strong>Merkez depo açıklaması</strong>
+                    <p>{order.decision_note}</p>
+                  </div>
+                </div>
+              )}
+              <section className={s.detailProducts}>
+                <header>
+                  <h3>
+                    <Package size={17} />
+                    Ürünler ve revizyonlar
+                  </h3>
+                  <span>{order.items.length} kalem</span>
+                </header>
+                <div className={s.detailTableWrap}>
+                  <table className={s.detailTable}>
+                    <thead>
+                      <tr>
+                        <th>Ürün bilgisi</th>
+                        <th>Tür</th>
+                        <th>Talep</th>
+                        <th>Onay</th>
+                        <th>Eksik</th>
+                        <th>Sonuç / Revizyon gerekçesi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {order.items.map((item) => (
+                        <tr
+                          key={item.id}
+                          className={
+                            decided &&
+                            item.approved_qty !== null &&
+                            item.approved_qty < item.requested_qty
+                              ? s.revisedRow
+                              : undefined
+                          }
+                        >
+                          <td>
+                            <div className={s.detailProductIdentity}>
+                              <ProductImage item={item} />
+                              <div>
+                                <span className={s.sku}>
+                                  {item.product?.sku || "SKU yok"}
+                                </span>
+                                <strong>
+                                  {item.product?.name ||
+                                    "Ürün bilgisi bulunamadı"}
+                                </strong>
+                                <small>
+                                  {item.product?.barcode || "Barkod yok"}
+                                </small>
+                              </div>
+                            </div>
+                          </td>
+                          <td>
+                            {item.product?.is_consumable ? "Sarf" : "Ürün"}
+                          </td>
+                          <td>{quantity(item.requested_qty)}</td>
+                          <td>
+                            {decided && item.approved_qty !== null
+                              ? quantity(item.approved_qty)
+                              : "—"}
+                          </td>
+                          <td>
+                            {decided && item.approved_qty !== null
+                              ? quantity(item.requested_qty - item.approved_qty)
+                              : "—"}
+                          </td>
+                          <td>
+                            <ItemDecision order={order} item={item} />
+                            {decided && item.revision_reason && (
+                              <p className={s.detailReason}>
+                                {item.revision_reason}
+                              </p>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className={s.mobileDetailItems}>
+                  {order.items.map((item) => (
+                    <article key={item.id}>
+                      <div className={s.detailProductIdentity}>
+                        <ProductImage item={item} />
+                        <div>
+                          <span className={s.sku}>
+                            {item.product?.sku || "SKU yok"} ·{" "}
+                            {item.product?.is_consumable ? "Sarf" : "Ürün"}
+                          </span>
+                          <strong>
+                            {item.product?.name || "Ürün bilgisi bulunamadı"}
+                          </strong>
+                          <small>{item.product?.barcode || "Barkod yok"}</small>
+                        </div>
+                      </div>
+                      <div className={s.mobileItemNumbers}>
+                        <span>
+                          Talep <b>{quantity(item.requested_qty)}</b>
+                        </span>
+                        <span>
+                          Onay{" "}
+                          <b>
+                            {decided && item.approved_qty !== null
+                              ? quantity(item.approved_qty)
+                              : "—"}
+                          </b>
+                        </span>
+                        <ItemDecision order={order} item={item} />
+                      </div>
+                      {decided && item.revision_reason && (
+                        <p className={s.detailReason}>{item.revision_reason}</p>
+                      )}
+                    </article>
+                  ))}
+                </div>
+                {!order.items.length && (
+                  <div className={s.empty}>
+                    <Package size={26} />
+                    <p>Siparişte ürün kalemi bulunamadı.</p>
+                  </div>
+                )}
+              </section>
+              <div className={s.operationDetails}>
+                <section>
+                  <h3>Talep ve operasyon bilgileri</h3>
+                  <dl>
+                    <div>
+                      <dt>
+                        <MapPin size={14} />
+                        Talep eden şube
+                      </dt>
+                      <dd>{branch}</dd>
+                    </div>
+                    <div>
+                      <dt>
+                        <UserRound size={14} />
+                        Talep eden kişi
+                      </dt>
+                      <dd>{order.requester_name}</dd>
+                    </div>
+                    <div>
+                      <dt>
+                        <CalendarDays size={14} />
+                        Talep tarihi
+                      </dt>
+                      <dd>{dateLabel(order.created_at)}</dd>
+                    </div>
+                    <div>
+                      <dt>
+                        <Warehouse size={14} />
+                        İşlem deposu
+                      </dt>
+                      <dd>{order.warehouse_name || "Henüz atanmadı"}</dd>
+                    </div>
+                  </dl>
+                </section>
+                <section>
+                  <h3>Merkez depo ve gönderim</h3>
+                  <dl>
+                    <div>
+                      <dt>
+                        <UserRound size={14} />
+                        Merkez işlemini yapan
+                      </dt>
+                      <dd>{order.prepared_by_name || "İşlem bekleniyor"}</dd>
+                    </div>
+                    <div>
+                      <dt>
+                        <CalendarDays size={14} />
+                        {order.status === "REJECTED"
+                          ? "Ret tarihi"
+                          : "Onay tarihi"}
+                      </dt>
+                      <dd>
+                        {!isPending(order)
+                          ? dateLabel(order.approved_at)
+                          : "Bekleniyor"}
+                      </dd>
+                    </div>
+                    {order.shipped_at && (
+                      <div>
+                        <dt>
+                          <Truck size={14} />
+                          Sevk tarihi
+                        </dt>
+                        <dd>{dateLabel(order.shipped_at)}</dd>
+                      </div>
+                    )}
+                    {order.delivered_at && (
+                      <div>
+                        <dt>
+                          <Package size={14} />
+                          Teslim tarihi
+                        </dt>
+                        <dd>{dateLabel(order.delivered_at)}</dd>
+                      </div>
+                    )}
+                    {order.carrier_name && (
+                      <div>
+                        <dt>
+                          <Truck size={14} />
+                          Taşıyıcı
+                        </dt>
+                        <dd>{order.carrier_name}</dd>
+                      </div>
+                    )}
+                    {order.tracking_number && (
+                      <div>
+                        <dt>Takip / Belge numarası</dt>
+                        <dd>{order.tracking_number}</dd>
+                      </div>
+                    )}
+                  </dl>
+                  {!order.shipped_at && !order.delivered_at && (
+                    <p className={s.operationHint}>
+                      Sevk ve teslim tarihleri kaydedildiğinde burada görünür.
+                    </p>
+                  )}
+                </section>
+              </div>
+            </>
+          ) : null}
+        </div>
+        <footer className={s.dialogFooter}>
+          <span>
+            Bu ekranda siparişlerinizin güncel kayıtlarını görüntülüyorsunuz.
+          </span>
+          <button className={s.button} onClick={close}>
+            Kapat
+          </button>
+        </footer>
+      </div>
+    </div>,
+    document.body,
+  );
+}
