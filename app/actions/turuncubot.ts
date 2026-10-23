@@ -184,7 +184,7 @@ export async function getTuruncuFeed(){
  const [orders,news,state]=await Promise.all([
   orderDigest(s.db),announcements(s.db,s.actor),s.db.from("bot_user_states").select("sugar_level,last_intent").eq("user_id",s.actor).maybeSingle()
  ]);
- return {orders,announcements:news,canAttendance:s.canHr,canOrders:true,sugar:state.data?.sugar_level??42,lastIntent:state.data?.last_intent||"chat"};
+ return {orders,announcements:news,canAttendance:s.canHr,canOrders:true,canApprove:["Developer","Admin","ADMNWH"].includes(s.role),sugar:state.data?.sugar_level??42,lastIntent:state.data?.last_intent||"chat"};
 }
 export async function acknowledgeTuruncuAnnouncement(id:string){
  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))throw new Error("Duyuru kimliği geçersiz");
@@ -216,6 +216,7 @@ export async function askTuruncuBot(question:string,lastIntent?:Intent):Promise<
  const {data:state}=await s.db.from("bot_user_states").select("sugar_level,last_intent").eq("user_id",s.actor).maybeSingle();
  const sugar=state?.sugar_level??42;
  const detected=route(msg,lastIntent&&lastIntent!=="chat"?lastIntent:(state?.last_intent as Intent|undefined));
+ const canApprove=["Developer","Admin","ADMNWH"].includes(s.role);
  const p=personality(msg,sugar),q=simplify(msg);
  let answer:BotResponse;
  const suggestions=["Gelen siparişler","Eksik günleri söyle","Kargo özeti","Transferleri göster","Kritik stoklar"];
@@ -245,7 +246,7 @@ export async function askTuruncuBot(question:string,lastIntent?:Intent):Promise<
    const totals=new Map<string,{orders:number;units:number}>();
    orders.forEach(x=>{const v=totals.get(x.branch)||{orders:0,units:0};v.orders++;v.units+=x.quantity;totals.set(x.branch,v);});
    const top=[...totals].sort((a,b)=>b[1].units-a[1].units);
-   const cards=orders.slice(0,12).map(x=>({title:x.code+" · "+x.branch,lines:["Talep eden: "+x.requester,"Ürün adedi: "+x.quantity+" | Kalem: "+x.lines],href:DELIVERY_URL,action:"Talebi İncele",tone:"orange"})) as BotCard[];
+   const cards=orders.slice(0,12).map(x=>({title:x.code+" · "+x.branch,lines:["Talep eden: "+x.requester,"Ürün adedi: "+x.quantity+" | Kalem: "+x.lines],href:canApprove?DELIVERY_URL:undefined,action:canApprove?"Talebi İncele":undefined,tone:"orange"})) as BotCard[];
    const focus=/(en cok|hangi magaza|magazalar)/.test(q);
    answer=result(detected,p.sugar,p.mood,pref+orders.length+" onay bekleyen mağaza siparişi ve toplam "+trNum(qty)+" ürün talebi var. "+(top.length?"En çok adet isteyen mağaza: "+top[0][0]+" ("+top[0][1].units+" adet). ":"")+(focus?"Mağaza dağılımı: "+top.slice(0,5).map(x=>x[0]+" "+x[1].units+" adet").join("; ")+".":""),cards,["Hangi mağaza en çok sipariş verdi?","Bugün kargo","Transfer özeti"]);
  }else if(detected==="cargo"){
@@ -272,7 +273,7 @@ export async function askTuruncuBot(question:string,lastIntent?:Intent):Promise<
    const v=t.counts;
    const summary="Şu an "+o.length+" onay bekleyen sipariş, bugün "+c.count+" kargo ("+c.returned+" iade, "+c.errors+" eksik adres), "+(v.waiting+v.picking+v.road)+" açık transfer, "+st.totals.sku+" stoklu SKU ve "+n.length+" aktif duyuru var.";
    answer=result(detected,p.sugar,p.mood,pref+summary,[
-    {title:"Sipariş",lines:[o.length+" bekleyen"],href:DELIVERY_URL,action:"Siparişleri Aç"},
+    {title:"Sipariş",lines:[o.length+" bekleyen"],href:canApprove?DELIVERY_URL:undefined,action:canApprove?"Siparişleri Aç":undefined},
     {title:"Kargo",lines:[c.count+" günlük kayıt",c.returned+" iade, "+c.errors+" hata"]},
     {title:"Transferler",lines:[v.waiting+" bekliyor",v.picking+" toplanıyor",v.road+" yolda"]},
     {title:"Stok",lines:[trNum(st.totals.units)+" adet",trNum(st.totals.sku)+" SKU"],href:"/management/inventory/view",action:"Stokları Aç"}
