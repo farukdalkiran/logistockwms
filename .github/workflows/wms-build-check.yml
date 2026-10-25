@@ -1,8 +1,7 @@
-name: turuncuBOT build check
+name: WMS build check
 on:
   push:
     branches:
-      - feature/turuncubot-operations-v2
       - main
   pull_request:
     branches:
