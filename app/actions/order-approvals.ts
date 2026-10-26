@@ -93,7 +93,7 @@ export async function getApprovalOrders(
       !input ||
       typeof input.search !== "string" ||
       input.search.length > 120 ||
-      !["ALL", "PENDING", "PREPARING", "READY_TO_SHIP", "REJECTED"].includes(
+      !["ALL", "PENDING", "PREPARING", "READY_TO_SHIP", "DELIVERED", "REJECTED"].includes(
         input.status,
       ) ||
       !["ALL", "PRODUCT", "CONSUMABLE", "MIXED"].includes(input.kind) ||

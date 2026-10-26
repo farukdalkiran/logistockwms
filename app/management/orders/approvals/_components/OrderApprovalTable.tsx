@@ -129,7 +129,7 @@ export default function OrderApprovalTable({
   return (
     <section className={s.panel} aria-label="Sipariş listesi">
       <div className={s.tabs} role="group" aria-label="Sipariş durumu">
-        {(["PENDING", "READY_TO_SHIP", "REJECTED", "ALL"] as const).map(
+        {(["PENDING", "READY_TO_SHIP", "DELIVERED", "REJECTED", "ALL"] as const).map(
           (key) => (
             <button
               key={key}
