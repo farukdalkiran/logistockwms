@@ -121,3 +121,40 @@ export async function getMyOrderDetail(
     return { ok: false, error: errorMessage(error) };
   }
 }
+
+// Mağaza teslim onayı. Service-role istemcisi yalnızca güvenilir server action içinde kullanılır.
+// Kimlik, şube türü, sipariş sahipliği ve önceki durum sunucuda doğrulanır.
+export async function confirmMyOrderReceived(orderId: string): Promise<Result<{ status: "COMPLETED" }>> {
+  try {
+    if (typeof orderId !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId)) {
+      throw new Error("Geçersiz sipariş kimliği.");
+    }
+    const { actor, admin } = await connection();
+    const { data: profile, error: profileError } = await admin
+      .from("profiles").select("branch_id, role").eq("id", actor).single();
+    if (profileError || !profile?.branch_id)
+      throw new Error("Oturumunuza bağlı mağaza bulunamadı.");
+    const { data: branch, error: branchError } = await admin
+      .from("branches").select("type").eq("id", profile.branch_id).single();
+    if (branchError || branch?.type !== "Mağaza" ||
+      !["StoreMng", "Admin", "Developer"].includes(profile.role ?? "")) {
+      throw new Error("Teslim alındı onayını yalnızca yetkili mağaza kullanıcısı verebilir.");
+    }
+
+    // Tek atomik UPDATE: yanlış şube, yanlış durum ve eşzamanlı ikinci onay reddedilir.
+    const { data, error } = await admin.from("orders")
+      .update({ status: "COMPLETED" })
+      .eq("id", orderId)
+      .eq("branch_id", profile.branch_id)
+      .eq("status", "READY_TO_SHIP")
+      .select("id")
+      .maybeSingle();
+    if (error) throw new Error("Teslim onayı kaydedilemedi: " + error.message);
+    if (!data)
+      throw new Error("Sipariş artık gönderim durumunda değil veya bu mağazaya ait değil. Listeyi yenileyiniz.");
+    return { ok: true, data: { status: "COMPLETED" } };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) };
+  }
+}
