@@ -13,9 +13,10 @@ import {
   Truck,
   UserRound,
   Warehouse,
+  CheckCircle2,
   X,
 } from "lucide-react";
-import { getMyOrderDetail } from "@/app/actions/my-orders";
+import { confirmMyOrderReceived, getMyOrderDetail } from "@/app/actions/my-orders";
 import {
   dateLabel,
   hasDecision,
@@ -45,6 +46,10 @@ export default function OrderDetailModal({
   const [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [refreshing, setRefreshing] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [receiving, setReceiving] = useState(false);
+  const [receiptFeedback, setReceiptFeedback] = useState("");
+  const [receiptError, setReceiptError] = useState("");
   const dialog = useRef<HTMLDivElement>(null),
     sequence = useRef(0),
     closeRef = useRef(close);
@@ -74,8 +79,27 @@ export default function OrderDetailModal({
     },
     [orderId],
   );
+  const receive = async () => {
+    if (!order || order.status !== "READY_TO_SHIP" || receiving) return;
+    setReceiving(true);
+    setReceiptError("");
+    try {
+      const result = await confirmMyOrderReceived(order.id);
+      if (!result.ok) throw new Error(result.error);
+      setConfirmOpen(false);
+      setReceiptFeedback("Sipariş tamamlandı olarak güncellendi.");
+      await load(true);
+    } catch (err) {
+      setReceiptError(err instanceof Error ? err.message : "Sipariş tamamlanamadı.");
+    } finally {
+      setReceiving(false);
+    }
+  };
   useEffect(() => {
     setMounted(true);
+    setConfirmOpen(false);
+    setReceiptFeedback("");
+    setReceiptError("");
     void load();
     return () => {
       sequence.current++;
@@ -197,6 +221,35 @@ export default function OrderDetailModal({
                   Durumu yenile
                 </button>
               </div>
+              {order.status === "READY_TO_SHIP" && (
+                <section className={s.receiptPanel} aria-label="Teslimat onayı">
+                  <div className={s.receiptInfo}>
+                    <CheckCircle2 size={25} />
+                    <div>
+                      <strong>Ürünler mağazanıza ulaştı mı?</strong>
+                      <p>Ürünleri ve adetleri kontrol ettiyseniz siparişi tamamlandı olarak işaretleyebilirsiniz.</p>
+                    </div>
+                  </div>
+                  {receiptError && <p role="alert" className={s.receiptError}>{receiptError}</p>}
+                  {confirmOpen ? (
+                    <div className={s.receiptConfirm}>
+                      <p><strong>{order.order_code}</strong> siparişinin tamamını teslim aldığınızı onaylıyor musunuz? İşlem geri alınamaz.</p>
+                      <div>
+                        <button type="button" className={s.receiptCancel} disabled={receiving} onClick={() => setConfirmOpen(false)}>Vazgeç</button>
+                        <button type="button" className={s.receiptButton} disabled={receiving} onClick={() => void receive()}>
+                          {receiving ? <Loader2 size={16} className={s.spin} /> : <CheckCircle2 size={16} />}
+                          {receiving ? "Kaydediliyor…" : "Evet, siparişi tamamla"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button type="button" className={s.receiptButton} onClick={() => setConfirmOpen(true)}>
+                      <CheckCircle2 size={17} /> Siparişi teslim aldım
+                    </button>
+                  )}
+                </section>
+              )}
+              {receiptFeedback && <p className={s.receiptSuccess} role="status"><CheckCircle2 size={16} />{receiptFeedback}</p>}
               <OrderJourney order={order} />
               <section className={s.detailSummary}>
                 <div>
@@ -451,7 +504,7 @@ export default function OrderDetailModal({
                       </div>
                     )}
                   </dl>
-                  {!order.shipped_at && !order.delivered_at && (
+                  {!order.shipped_at && !order.delivered_at && order.status !== "COMPLETED" && (
                     <p className={s.operationHint}>
                       Sevk ve teslim tarihleri kaydedildiğinde burada görünür.
                     </p>
