@@ -6,7 +6,7 @@ import {
 } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BellRing, ClipboardList, VolumeX, X } from "lucide-react";
+import { ArrowUpRight, MapPin, PackagePlus, Volume2, VolumeX, X } from "lucide-react";
 import { useWms } from "@/components/providers/WmsSessionProvider";
 import { getApprovalOrders } from "@/app/actions/order-approvals";
 import { supabase } from "@/lib/supabase";
@@ -95,11 +95,9 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
   const activeUserRef = useRef(userId);
   const initialRef = useRef(true);
 
-  // Sadece masaüstü yönetim ekranlarında bildirim ve ses.
+  // Terminal harici tüm sayfalarda; mobil için eski sessiz davranış korunur.
   useEffect(() => {
-    const media = window.matchMedia(
-      "(min-width: 1024px) and (hover: hover) and (pointer: fine)"
-    );
+    const media = window.matchMedia("(min-width: 768px)");
     const sync = () => setIsDesktop(media.matches);
     sync();
     media.addEventListener("change", sync);
@@ -275,35 +273,69 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
     }}>
       {children}
       {alert && notificationEnabled && (
-        <div role="alert" className="fixed right-4 top-4 z-[9999] w-[min(440px,calc(100vw-2rem))] overflow-hidden rounded-md border border-red-300 bg-white shadow-2xl">
-          <div className="flex gap-3 border-l-[5px] border-[#dc3545] p-4">
-            <div className="rounded bg-red-50 p-2 text-[#dc3545]"><BellRing size={20} className="animate-pulse" /></div>
+        <aside
+          role="alert"
+          aria-label="Yeni mağaza siparişi bildirimi"
+          className="fixed right-4 top-4 z-[9999] w-[min(400px,calc(100vw-2rem))] overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_16px_50px_-16px_rgba(15,23,42,0.32)]"
+        >
+          <div className="flex items-start gap-3 px-4 py-4">
+            <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-900 text-white">
+              <PackagePlus size={21} />
+              <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border-2 border-white bg-[#dc3545]" />
+            </div>
             <div className="min-w-0 flex-1">
-              <h3 className="text-xs font-black uppercase tracking-wider text-[#dc3545]">Yeni mağaza siparişi</h3>
-              <p className="mt-1 text-sm font-black text-slate-900">{alert.count > 1 ? alert.count + " yeni sipariş geldi!" : alert.order.order_code + " numaralı sipariş geldi!"}</p>
-              <p className="mt-1 text-xs text-slate-600">{alert.order.branch_name} · {alert.order.item_count} kalem · {alert.order.requested_total} adet</p>
-              <Link href="/management/orders/approvals" onClick={() => setAlert(null)}
-                className="mt-3 inline-flex items-center gap-1 rounded bg-slate-900 px-3 py-2 text-[11px] font-bold text-white">
-                <ClipboardList size={14} /> Siparişleri incele
-              </Link>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[10px] font-black uppercase tracking-[0.1em] text-[#dc3545]">
+                  Yeni mağaza talebi
+                </span>
+                <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">
+                  Şimdi
+                </span>
+              </div>
+              <p className="mt-1.5 text-[13px] font-extrabold leading-snug text-slate-900">
+                {alert.count > 1 ? alert.count + " yeni sipariş alındı" : alert.order.order_code}
+              </p>
+              <p className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-slate-600">
+                <MapPin size={12} className="shrink-0 text-slate-400" />
+                <span className="truncate">{alert.order.branch_name}</span>
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+                <span className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 font-bold text-slate-700">
+                  {alert.order.has_consumable && alert.order.has_product
+                    ? "Ürün + Sarf"
+                    : alert.order.has_consumable ? "Sarf" : "Ürün"}
+                </span>
+                <span>{alert.order.item_count} kalem</span>
+                <span className="font-bold text-slate-800">{alert.order.requested_total} adet</span>
+              </div>
             </div>
-            <div className="flex shrink-0 flex-col items-end gap-3">
-              <button type="button" onClick={() => setAlert(null)}
-                aria-label="Bildirimi kapat"
-                className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900">
-                <X size={18} />
-              </button>
-              {soundEnabled && (
-                <button type="button" onClick={toggleSound}
-                  title="Gelecek sipariş seslerini kapat"
-                  aria-label="Bildirim sesini kapat"
-                  className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600">
-                  <VolumeX size={17} />
-                </button>
-              )}
-            </div>
+            <button
+              type="button" onClick={() => setAlert(null)}
+              title="Bildirimi kapat" aria-label="Bildirimi kapat"
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-900"
+            >
+              <X size={17} />
+            </button>
           </div>
-        </div>
+          <div className="flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50 px-4 py-2.5">
+            <Link
+              href="/management/orders/approvals"
+              onClick={() => setAlert(null)}
+              className="inline-flex items-center gap-1.5 text-[11px] font-extrabold text-slate-900 transition hover:text-[#dc3545]"
+            >
+              Siparişleri incele <ArrowUpRight size={14} />
+            </Link>
+            <button
+              type="button" onClick={toggleSound}
+              title={soundEnabled ? "Sipariş seslerini kapat" : "Sipariş seslerini aç"}
+              className="inline-flex items-center gap-1.5 rounded border border-slate-200 bg-white px-2 py-1.5 text-[10px] font-bold text-slate-500 transition hover:border-slate-300 hover:text-slate-900"
+            >
+              {soundEnabled ? <VolumeX size={13} /> : <Volume2 size={13} />}
+              {soundEnabled ? "Sesi kapat" : "Sesi aç"}
+            </button>
+          </div>
+          <div className="h-[3px] bg-[#dc3545]" />
+        </aside>
       )}
     </Context.Provider>
   );
