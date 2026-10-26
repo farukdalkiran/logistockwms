@@ -7,6 +7,7 @@ import { AuthProvider } from "@/components/providers/AuthProvider";
 // WMS Güvenlik Duvarı ve Supabase Sunucu İstemcisi
 import { createClient } from "@/lib/supabase/server";
 import { WmsSessionProvider } from "@/components/providers/WmsSessionProvider";
+import { OrderNotificationProvider } from "@/components/providers/OrderNotificationProvider";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -71,8 +72,10 @@ export default async function RootLayout({
         <AuthProvider>
           {/* TÜM UYGULAMAYI SARAN WMS ŞUBE KİLİDİ */}
           <WmsSessionProvider session={sessionData}>
-            <Toaster position="top-right" />
+            <OrderNotificationProvider>
+              <Toaster position="top-right" />
             {children}
+          </OrderNotificationProvider>
           </WmsSessionProvider>
         </AuthProvider>
       </body>
