@@ -122,8 +122,8 @@ export async function getMyOrderDetail(
   }
 }
 
-// Mağaza teslim onayı. Service-role istemcisi yalnızca güvenilir server action içinde kullanılır.
-// Kimlik, şube türü, sipariş sahipliği ve önceki durum sunucuda doğrulanır.
+// Teslim onayı yalnızca oturumun bağlı olduğu şubedeki siparişi etkileyebilir.
+// Rol veya şube türü kısıtı uygulanmaz; sipariş şubesi ve durum filtresi korunur.
 export async function confirmMyOrderReceived(orderId: string): Promise<Result<{ status: "COMPLETED" }>> {
   try {
     if (typeof orderId !== "string" ||
@@ -132,15 +132,9 @@ export async function confirmMyOrderReceived(orderId: string): Promise<Result<{ 
     }
     const { actor, admin } = await connection();
     const { data: profile, error: profileError } = await admin
-      .from("profiles").select("branch_id, role").eq("id", actor).single();
+      .from("profiles").select("branch_id").eq("id", actor).single();
     if (profileError || !profile?.branch_id)
-      throw new Error("Oturumunuza bağlı mağaza bulunamadı.");
-    const { data: branch, error: branchError } = await admin
-      .from("branches").select("type").eq("id", profile.branch_id).single();
-    if (branchError || branch?.type !== "Mağaza" ||
-      !["StoreMng", "Admin", "Developer"].includes(profile.role ?? "")) {
-      throw new Error("Teslim alındı onayını yalnızca yetkili mağaza kullanıcısı verebilir.");
-    }
+      throw new Error("Oturumunuza bağlı şube bulunamadı.");
 
     // Tek atomik UPDATE: yanlış şube, yanlış durum ve eşzamanlı ikinci onay reddedilir.
     const { data, error } = await admin.from("orders")

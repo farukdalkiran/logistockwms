@@ -28,7 +28,6 @@ import {
   ItemDecision,
   OrderKind,
   OrderStatus,
-  ProductImage,
 } from "./OrderCard";
 import OrderJourney from "./OrderJourney";
 import s from "../myorders.module.css";
@@ -302,109 +301,67 @@ export default function OrderDetailModal({
                   </h3>
                   <span>{order.items.length} kalem</span>
                 </header>
-                <div className={s.detailTableWrap}>
+                <div className={s.detailTableWrap} role="region" aria-label="Sipariş kalemleri tablosu" tabIndex={0}>
                   <table className={s.detailTable}>
                     <thead>
                       <tr>
-                        <th>Ürün bilgisi</th>
-                        <th>Tür</th>
-                        <th>Talep</th>
-                        <th>Onay</th>
-                        <th>Eksik</th>
-                        <th>Sonuç / Revizyon gerekçesi</th>
+                        <th scope="col">Ürün adı / Kod</th>
+                        <th scope="col">Tür</th>
+                        <th scope="col">Talep</th>
+                        <th scope="col">Onay</th>
+                        <th scope="col">Eksik</th>
+                        <th scope="col">Durum / Revizyon</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {order.items.map((item) => (
-                        <tr
-                          key={item.id}
-                          className={
-                            decided &&
-                            item.approved_qty !== null &&
-                            item.approved_qty < item.requested_qty
-                              ? s.revisedRow
-                              : undefined
-                          }
-                        >
-                          <td>
-                            <div className={s.detailProductIdentity}>
-                              <ProductImage item={item} />
-                              <div>
-                                <span className={s.sku}>
-                                  {item.product?.sku || "SKU yok"}
-                                </span>
-                                <strong>
-                                  {item.product?.name ||
-                                    "Ürün bilgisi bulunamadı"}
+                      {order.items.map((item) => {
+                        const hasApproved = decided && item.approved_qty !== null;
+                        const missing = hasApproved
+                          ? Math.max(0, item.requested_qty - (item.approved_qty ?? 0))
+                          : null;
+                        return (
+                          <tr
+                            key={item.id}
+                            className={missing !== null && missing > 0 ? s.revisedRow : undefined}
+                          >
+                            <td>
+                              <div className={s.compactProduct}>
+                                <strong title={item.product?.name || "Ürün bilgisi bulunamadı"}>
+                                  {item.product?.name || "Ürün bilgisi bulunamadı"}
                                 </strong>
-                                <small>
-                                  {item.product?.barcode || "Barkod yok"}
-                                </small>
+                                <span>
+                                  {item.product?.sku || "SKU yok"}
+                                  {item.product?.barcode ? " · " + item.product.barcode : ""}
+                                </span>
                               </div>
-                            </div>
-                          </td>
-                          <td>
-                            {item.product?.is_consumable ? "Sarf" : "Ürün"}
-                          </td>
-                          <td>{quantity(item.requested_qty)}</td>
-                          <td>
-                            {decided && item.approved_qty !== null
-                              ? quantity(item.approved_qty)
-                              : "—"}
-                          </td>
-                          <td>
-                            {decided && item.approved_qty !== null
-                              ? quantity(item.requested_qty - item.approved_qty)
-                              : "—"}
-                          </td>
-                          <td>
-                            <ItemDecision order={order} item={item} />
-                            {decided && item.revision_reason && (
-                              <p className={s.detailReason}>
-                                {item.revision_reason}
-                              </p>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td>
+                              <span className={item.product?.is_consumable ? s.compactSupply : s.compactType}>
+                                {item.product?.is_consumable ? "Sarf" : "Ürün"}
+                              </span>
+                            </td>
+                            <td className={s.compactNumber}>{quantity(item.requested_qty)}</td>
+                            <td className={s.compactNumber}>
+                              {hasApproved ? quantity(item.approved_qty ?? 0) : "—"}
+                            </td>
+                            <td className={s.compactNumber}>
+                              {missing === null ? "—" : quantity(missing)}
+                            </td>
+                            <td>
+                              <div className={s.compactDecision}>
+                                <ItemDecision order={order} item={item} />
+                                {hasApproved && item.revision_reason && (
+                                  <span className={s.compactReason} title={item.revision_reason}>
+                                    {item.revision_reason}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
-                </div>
-                <div className={s.mobileDetailItems}>
-                  {order.items.map((item) => (
-                    <article key={item.id}>
-                      <div className={s.detailProductIdentity}>
-                        <ProductImage item={item} />
-                        <div>
-                          <span className={s.sku}>
-                            {item.product?.sku || "SKU yok"} ·{" "}
-                            {item.product?.is_consumable ? "Sarf" : "Ürün"}
-                          </span>
-                          <strong>
-                            {item.product?.name || "Ürün bilgisi bulunamadı"}
-                          </strong>
-                          <small>{item.product?.barcode || "Barkod yok"}</small>
-                        </div>
-                      </div>
-                      <div className={s.mobileItemNumbers}>
-                        <span>
-                          Talep <b>{quantity(item.requested_qty)}</b>
-                        </span>
-                        <span>
-                          Onay{" "}
-                          <b>
-                            {decided && item.approved_qty !== null
-                              ? quantity(item.approved_qty)
-                              : "—"}
-                          </b>
-                        </span>
-                        <ItemDecision order={order} item={item} />
-                      </div>
-                      {decided && item.revision_reason && (
-                        <p className={s.detailReason}>{item.revision_reason}</p>
-                      )}
-                    </article>
-                  ))}
                 </div>
                 {!order.items.length && (
                   <div className={s.empty}>

@@ -2106,3 +2106,67 @@
   .receiptConfirm > div { width: 100%; }
   .receiptConfirm > div > button { flex: 1; }
 }
+
+/* Compact order detail grid: one consistent scrollable table, including mobile. */
+.detailTableWrap {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+.detailTable {
+  width: 100%;
+  min-width: 690px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 11px;
+}
+.detailTable th {
+  background: #e9edf3;
+  color: #475569;
+  padding: 9px 10px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.detailTable th:first-child { width: 35%; }
+.detailTable th:nth-child(2) { width: 9%; }
+.detailTable th:nth-child(3),
+.detailTable th:nth-child(4),
+.detailTable th:nth-child(5) { width: 9%; text-align: center; }
+.detailTable th:last-child { width: 29%; }
+.detailTable td {
+  padding: 7px 10px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: #334155;
+  vertical-align: middle;
+  border-bottom: 1px solid #e9edf3;
+}
+.detailTable td:nth-child(3),
+.detailTable td:nth-child(4),
+.detailTable td:nth-child(5) { text-align: center; }
+.detailTable tbody tr:nth-child(even) { background: #f8fafc; }
+.detailTable tbody tr:hover { background: #edf2f8; }
+.detailTable tbody tr.revisedRow { background: #fff9ec; }
+.compactProduct { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.compactProduct strong { color: #172438; font-size: 11px; font-weight: 800; line-height: 1.35; overflow-wrap: anywhere; }
+.compactProduct span { color: #64748b; font-size: 10px; overflow-wrap: anywhere; }
+.compactType, .compactSupply {
+  display: inline-flex; align-items: center; padding: 3px 6px;
+  border: 1px solid #cbd5e1; border-radius: 3px; background: #f1f5f9;
+  color: #475569; font-size: 10px; font-weight: 800; white-space: nowrap;
+}
+.compactSupply { border-color: #fed7aa; background: #fff7ed; color: #9a3412; }
+.compactNumber { font-variant-numeric: tabular-nums; font-weight: 800; }
+.compactDecision { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 5px; }
+.compactDecision .itemBadge { font-size: 10px; font-weight: 800; padding: 3px 6px; }
+.compactReason { font-size: 10px; line-height: 1.35; color: #92400e; overflow-wrap: anywhere; }
+.mobileDetailItems { display: none; }
+@media (max-width: 700px) {
+  .detailTableWrap { display: block; }
+  .mobileDetailItems { display: none; }
+  .detailTable { min-width: 690px; }
+}
