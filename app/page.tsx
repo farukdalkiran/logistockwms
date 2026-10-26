@@ -33,10 +33,8 @@ import {
   WarehouseLogsSection,
   PutawayLogData,
 } from "./_components/WarehouseLogsSection";
-import {
-  LeaveMovementsSection,
-  LeaveLogData,
-} from "./_components/LeaveMovementsSection";
+import type { LeaveLogData } from "./_components/LeaveMovementsSection";
+import { OrderTrackingSection } from "./_components/OrderTrackingSection";
 
 interface DashboardData {
   kpis: {
@@ -366,11 +364,7 @@ export default function ManagementDashboard() {
           <WarehouseLogsSection
             recentPutawayLogs={data?.recentPutawayLogs || []}
           />
-          <LeaveMovementsSection
-            recentLeaveLogs={data?.recentLeaveLogs || []}
-            getStatusStyle={getStatusStyle}
-            getStatusText={getStatusText}
-          />
+          <OrderTrackingSection />
         </div>
       </main>
       <Footer />
