@@ -5,7 +5,8 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
-import { BellRing, BellOff, ClipboardList, Volume2, X } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { BellRing, ClipboardList, VolumeX, X } from "lucide-react";
 import { useWms } from "@/components/providers/WmsSessionProvider";
 import { getApprovalOrders } from "@/app/actions/order-approvals";
 import { supabase } from "@/lib/supabase";
@@ -70,7 +71,14 @@ function writeSeen(user: string, ids: string[]) {
 
 export function OrderNotificationProvider({ children }: { children: ReactNode }) {
   const { userId, role } = useWms();
-  const eligible = Boolean(userId && ["ADMIN", "DEVELOPER", "ADMNWH"].includes((role || "").toUpperCase()));
+  const pathname = usePathname();
+  const isTerminal = pathname === "/terminal" || pathname.startsWith("/terminal/");
+  const eligible = Boolean(
+    userId && !isTerminal &&
+    ["ADMIN", "DEVELOPER", "ADMNWH"].includes((role || "").toUpperCase())
+  );
+  const [isDesktop, setIsDesktop] = useState(false);
+  const notificationEnabled = eligible && isDesktop;
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [metrics, setMetrics] = useState<Metrics>({ pending: 0, preparing: 0, ready_to_ship: 0 });
   const [loading, setLoading] = useState(true);
@@ -87,7 +95,30 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
   const activeUserRef = useRef(userId);
   const initialRef = useRef(true);
 
+  // Sadece masaüstü yönetim ekranlarında bildirim ve ses.
+  useEffect(() => {
+    const media = window.matchMedia(
+      "(min-width: 1024px) and (hover: hover) and (pointer: fine)"
+    );
+    const sync = () => setIsDesktop(media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    return () => media.removeEventListener("change", sync);
+  }, []);
+
+  // Kalıcı sayaç yerine yalnızca yeni siparişte geçici uyarı.
+  useEffect(() => {
+    if (!notificationEnabled) setAlert(null);
+  }, [notificationEnabled]);
+
+  useEffect(() => {
+    if (!alert) return;
+    const timeout = window.setTimeout(() => setAlert(null), 9000);
+    return () => window.clearTimeout(timeout);
+  }, [alert]);
+
   const unlock = useCallback(async () => {
+    if (!notificationEnabled) return false;
     try {
       if (!audioRef.current) audioRef.current = new AudioContext();
       if (audioRef.current.state !== "running") await audioRef.current.resume();
@@ -98,7 +129,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
       setAudioUnlocked(false);
       return false;
     }
-  }, []);
+  }, [notificationEnabled]);
 
   const sound = useCallback(async () => {
     // Browser gesture restriction cannot be bypassed.
@@ -132,7 +163,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
   }, []);
 
   useEffect(() => {
-    if (!eligible || !soundEnabled || audioUnlocked) return;
+    if (!notificationEnabled || !soundEnabled || audioUnlocked) return;
     const action = () => { void unlock(); };
     document.addEventListener("pointerdown", action, { once: true });
     document.addEventListener("keydown", action, { once: true });
@@ -140,7 +171,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
       document.removeEventListener("pointerdown", action);
       document.removeEventListener("keydown", action);
     };
-  }, [eligible, soundEnabled, audioUnlocked, unlock]);
+  }, [notificationEnabled, soundEnabled, audioUnlocked, unlock]);
 
   useEffect(() => {
     activeUserRef.current = userId;
@@ -185,7 +216,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
         : [];
       complete.forEach((x) => known.add(x.id));
       writeSeen(userId, Array.from(known));
-      if (fresh.length > 0) {
+      if (fresh.length > 0 && notificationEnabled) {
         setAlert({ order: fresh[0], count: fresh.length });
         if (soundRef.current && audioRef.current?.state === "running") void sound();
       }
@@ -198,7 +229,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
       setLoading(false);
       setRefreshing(false);
     }
-  }, [eligible, userId, sound]);
+  }, [eligible, userId, notificationEnabled, sound]);
 
   useEffect(() => {
     if (!eligible) { setLoading(false); return; }
@@ -243,18 +274,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
       testSound: () => void sound(),
     }}>
       {children}
-      {eligible && canRead && (
-        <div className="fixed bottom-4 right-4 z-[9998] flex items-center gap-2 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white shadow-2xl">
-          <BellRing size={16} className="text-red-400" />
-          <span className="hidden text-[11px] font-bold sm:inline">{metrics.pending} bekleyen sipariş</span>
-          <button type="button" onClick={soundEnabled && !audioUnlocked ? () => void unlock() : toggleSound}
-            className="inline-flex items-center gap-1 rounded border border-slate-600 px-2 py-1 text-[10px] font-bold">
-            {soundEnabled ? <Volume2 size={14} /> : <BellOff size={14} />}
-            {soundEnabled ? audioUnlocked ? "Ses açık" : "Sesi etkinleştir" : "Ses kapalı"}
-          </button>
-        </div>
-      )}
-      {alert && eligible && (
+      {alert && notificationEnabled && (
         <div role="alert" className="fixed right-4 top-4 z-[9999] w-[min(440px,calc(100vw-2rem))] overflow-hidden rounded-md border border-red-300 bg-white shadow-2xl">
           <div className="flex gap-3 border-l-[5px] border-[#dc3545] p-4">
             <div className="rounded bg-red-50 p-2 text-[#dc3545]"><BellRing size={20} className="animate-pulse" /></div>
@@ -267,7 +287,21 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
                 <ClipboardList size={14} /> Siparişleri incele
               </Link>
             </div>
-            <button type="button" onClick={() => setAlert(null)} aria-label="Bildirimi kapat" className="self-start text-slate-500"><X size={18} /></button>
+            <div className="flex shrink-0 flex-col items-end gap-3">
+              <button type="button" onClick={() => setAlert(null)}
+                aria-label="Bildirimi kapat"
+                className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-900">
+                <X size={18} />
+              </button>
+              {soundEnabled && (
+                <button type="button" onClick={toggleSound}
+                  title="Gelecek sipariş seslerini kapat"
+                  aria-label="Bildirim sesini kapat"
+                  className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600">
+                  <VolumeX size={17} />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
