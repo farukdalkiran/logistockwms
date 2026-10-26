@@ -8,14 +8,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowUpRight, MapPin, PackagePlus, Volume2, VolumeX, X } from "lucide-react";
 import { useWms } from "@/components/providers/WmsSessionProvider";
-import { getApprovalOrders } from "@/app/actions/order-approvals";
+import { getHomeWarehouseOrders } from "@/app/actions/home-warehouse-orders";
 import { supabase } from "@/lib/supabase";
-import type { Filters, OrderRow } from "@/lib/order-approvals/types";
+import type { OrderRow } from "@/lib/order-approvals/types";
 
-const QUERY: Filters = {
-  search: "", status: "ALL", kind: "ALL", branch: "",
-  from: "", to: "", sort: "newest", page: 1, pageSize: 50,
-};
 const SOUND_KEY = "wms:orders:sound:v1";
 const SEEN_KEY = "wms:orders:seen:v1:";
 const POLL_MS = 15000;
@@ -70,13 +66,11 @@ function writeSeen(user: string, ids: string[]) {
 }
 
 export function OrderNotificationProvider({ children }: { children: ReactNode }) {
-  const { userId, role } = useWms();
+  const { userId, branchName, branchType } = useWms();
   const pathname = usePathname();
   const isTerminal = pathname === "/terminal" || pathname.startsWith("/terminal/");
-  const eligible = Boolean(
-    userId && !isTerminal &&
-    ["ADMIN", "DEVELOPER", "ADMNWH"].includes((role || "").toUpperCase())
-  );
+  // Online Depo'ya bağlı bütün oturumlar (WAREHOUSE dahil), yönetici rolü şartı olmadan.
+  const eligible = Boolean(userId && !isTerminal && branchType === "Depo" && branchName === "Online Depo");
   const [isDesktop, setIsDesktop] = useState(false);
   const notificationEnabled = eligible && isDesktop;
   const [orders, setOrders] = useState<OrderRow[]>([]);
@@ -135,20 +129,23 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
     const ctx = audioRef.current;
     if (!ctx) return;
     const start = ctx.currentTime + 0.025;
-    [880, 1174, 880, 1318].forEach((freq, i) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      const at = start + i * 0.22;
-      osc.type = "triangle";
-      osc.frequency.setValueAtTime(freq, at);
-      gain.gain.setValueAtTime(0.0001, at);
-      gain.gain.exponentialRampToValueAtTime(0.45, at + 0.025);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.19);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(at);
-      osc.stop(at + 0.2);
-    });
+    // Aynı tanıdık dört notalı uyarı iki kez çalar; Web Audio ile zamanlanır.
+    for (let repeat = 0; repeat < 2; repeat++) {
+      [880, 1174, 880, 1318].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const at = start + repeat * 1.18 + i * 0.22;
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(freq, at);
+        gain.gain.setValueAtTime(0.0001, at);
+        gain.gain.exponentialRampToValueAtTime(0.45, at + 0.025);
+        gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.19);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(at);
+        osc.stop(at + 0.2);
+      });
+    }
   }, [unlock]);
 
   useEffect(() => {
@@ -188,7 +185,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
     if (initialRef.current) setLoading(true);
     else setRefreshing(true);
     try {
-      const result = await getApprovalOrders(QUERY);
+      const result = await getHomeWarehouseOrders();
       if (activeUserRef.current !== userId) return;
       if (!result.ok) {
         setError(result.error);

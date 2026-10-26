@@ -18,6 +18,9 @@ import {
   ListChecks,
   Route,
   ShieldCheck,
+  ChevronRight,
+  ScanLine,
+  CircleCheck,
 } from "lucide-react";
 
 export default function TerminalMenuPage() {
@@ -180,136 +183,147 @@ export default function TerminalMenuPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-100 font-['Quicksand'] select-none flex flex-col">
-      {/* 1. ÜST BİLGİ VE ORİJİNAL LOGO */}
-      <div className="bg-white border-b border-slate-300 pt-8 pb-4 px-5 shrink-0">
-        <div className="flex justify-between items-center mb-2">
-          <div className="flex justify-center gap-2">
-            <Logo variant="primary" className="text-4xl" />
-            <span className="text-[#0f172b] font-black text-[15px] tracking-tight uppercase opacity-90 self-end mb-[2px]">
-              WMS
-            </span>
+    <div className="min-h-screen bg-[#f1f4f8] font-['Quicksand'] select-none flex flex-col overflow-x-hidden">
+      {/* Orijinal mobil container genişliği ve terminal oturumu korunur */}
+      <header className="shrink-0 bg-white border-b border-slate-200">
+        <div className="mx-auto flex w-full max-w-lg items-center justify-between px-4 py-3.5">
+          <div className="flex items-center gap-2">
+            <Logo variant="primary" className="text-3xl" />
+            <span className="border-l border-slate-300 pl-2 text-[13px] font-black tracking-[0.08em] text-slate-800">WMS</span>
           </div>
           <button
+            type="button"
             onClick={handleLogout}
-            className="flex items-center justify-center p-2.5 bg-white border border-slate-300 text-slate-500 rounded-sm hover:border-[#dc3545] hover:text-[#dc3545] hover:bg-red-50 transition-all active:scale-95 shadow-sm"
-            title="Güvenli Çıkış (Yönetim Paneline Dön)"
+            aria-label="Terminal oturumunu kapat"
+            title="Güvenli Çıkış"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-[#dc3545] hover:text-[#dc3545] active:scale-95"
           >
-            <LogOut size={18} strokeWidth={2.5} />
+            <LogOut size={17} strokeWidth={2.4}/>
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* 2. DARK HEADING (ENDÜSTRİYEL KONTROL PANeli) */}
-      <div className="bg-[#0f172b] shadow-md flex flex-col relative shrink-0">
-        {/* Üst Kırmızı Operasyon Şeridi */}
-        <div className="bg-[#dc3545] py-2 px-4 flex items-center justify-center border-b border-[#a12330]">
-          <div className="flex items-center gap-2">
-            <TerminalSquare size={14} className="text-white" />
-            <span className="text-white text-[10px] font-black uppercase tracking-[0.2em]">
-              Operasyon Terminali
-            </span>
-          </div>
-        </div>
-
-        {/* Bilgi Panelleri */}
-        <div className="p-4 grid grid-cols-2 gap-3 relative z-10 max-w-lg mx-auto w-full">
-          {/* Sol Panel: Operatör */}
-          <div className="bg-slate-900 border border-slate-800 rounded-sm p-3 flex flex-col justify-between shadow-inner">
-            <span className="text-slate-400 text-[9px] font-bold uppercase tracking-widest mb-1 flex items-center gap-1">
-              <ShieldCheck size={10} className="text-emerald-500" /> Aktif
-              Operatör
-            </span>
-            <span className="text-white font-black text-[13px] uppercase tracking-wide truncate mt-1">
-              {session.empName}
-            </span>
-            <div className="mt-2 inline-flex">
-              <span className="bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-black px-2 py-0.5 rounded-sm tracking-widest">
-                ID: {session.empId}
-              </span>
+      <section className="relative shrink-0 overflow-hidden bg-[#152238] text-white">
+        <div className="absolute inset-x-0 top-0 h-1 bg-[#dc3545]"/>
+        <div className="pointer-events-none absolute -right-12 -top-14 h-44 w-44 rounded-full border-[30px] border-white/[0.035]"/>
+        <div className="pointer-events-none absolute -left-16 -bottom-24 h-48 w-48 rounded-full bg-[#dc3545]/[0.07] blur-2xl"/>
+        <div className="relative mx-auto w-full max-w-lg px-4 pb-4 pt-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="inline-flex items-center gap-2 rounded border border-white/10 bg-white/10 px-2.5 py-1.5">
+              <TerminalSquare size={14} className="text-red-300"/>
+              <span className="text-[10px] font-black uppercase tracking-[0.12em]">OPERASYON TERMİNALİ</span>
+            </div>
+            <div className="inline-flex items-center gap-1.5 text-[10px] font-bold text-emerald-300">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,.55)]"/>
+              Oturum aktif
             </div>
           </div>
-
-          {/* Sağ Panel: Konum ve Saat */}
-          <div className="bg-slate-900 border border-slate-800 rounded-sm p-3 flex flex-col justify-between text-right shadow-inner">
-            <span className="text-slate-400 text-[9px] font-bold uppercase tracking-widest mb-1 flex justify-end items-center gap-1">
-              <MapPin size={10} className="text-[#dc3545]" /> Konum Modülü
-            </span>
-            <span className="text-white font-bold text-[11px] uppercase tracking-wide truncate mt-1">
-              {session.branchName}
-            </span>
-            <div className="mt-1.5">
-              <span className="text-white font-mono text-xl font-black tracking-tight">
-                {session.time}
+          <h1 className="mt-3 text-[23px] font-black leading-tight tracking-tight">İşlem Merkezi</h1>
+          <p className="mt-1 text-[11px] font-medium text-slate-300">
+            Barkod, transfer, kargo ve raf operasyonlarını yönetin.
+          </p>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="flex min-w-0 flex-col justify-between gap-2 rounded-md border border-white/10 bg-white/[0.07] p-3">
+              <span className="inline-flex items-center gap-1.5 text-[9px] font-extrabold uppercase tracking-widest text-slate-300">
+                <ShieldCheck size={12} className="text-emerald-400"/> AKTİF PERSONEL
+              </span>
+              <strong className="block truncate text-[13px] font-black uppercase leading-snug text-white" title={session.empName}>
+                {session.empName}
+              </strong>
+              <span className="self-start rounded bg-slate-950/40 px-2 py-1 font-mono text-[10px] font-bold text-slate-300">#{session.empId || "—"}</span>
+            </div>
+            <div className="flex min-w-0 flex-col justify-between gap-2 rounded-md border border-white/10 bg-white/[0.07] p-3">
+              <span className="inline-flex items-center gap-1.5 text-[9px] font-extrabold uppercase tracking-widest text-slate-300">
+                <MapPin size={12} className="text-red-300"/> ÇALIŞMA NOKTASI
+              </span>
+              <strong className="block truncate text-[11px] font-extrabold leading-snug text-white" title={session.branchName}>
+                {session.branchName}
+              </strong>
+              <span className="font-mono text-[17px] font-black tabular-nums tracking-tight text-emerald-300">
+                {session.time || "--:--:--"}
               </span>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* 3. KESKİN TASARIMLI MENÜ LİSTESİ */}
-      <div className="px-4 pt-5 pb-15 mt-2 max-w-lg mx-auto w-full flex-1 flex flex-col gap-6">
+      <main className="mx-auto flex w-full max-w-lg flex-1 flex-col gap-5 px-4 pb-8 pt-5">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <h2 className="text-[14px] font-black text-[#142238]">İşlem Modülleri</h2>
+            <p className="mt-0.5 text-[10px] font-semibold text-slate-500">
+              Çalışmak istediğiniz operasyonu seçin
+            </p>
+          </div>
+          <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-black text-slate-600">
+            <ScanLine size={13} className="text-[#dc3545]"/> {modules.reduce((count, mod) => count + mod.items.length, 0)} İŞLEM
+          </span>
+        </div>
+
         {modules.map((mod, idx) => (
-          <section key={idx} className="flex flex-col gap-2.5">
-            <h3
-              className={`text-[11px] font-black text-slate-800 uppercase tracking-widest border-l-4 ${mod.borderColor} pl-2 ml-1`}
-            >
-              {mod.title}
-            </h3>
-
-            <div className="flex flex-col gap-2">
-              {mod.items.map((item, i) => (
+          <section key={mod.title} className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_3px_14px_rgba(15,23,42,0.04)]">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-[#f8fafc] px-3.5 py-3">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <span className={"h-7 w-1 shrink-0 rounded-full border-l-[4px] " + mod.borderColor}/>
+                <div>
+                  <h3 className="text-[12px] font-black uppercase tracking-[0.04em] text-[#142238]">{mod.title}</h3>
+                  <span className="text-[10px] font-semibold text-slate-500">
+                    {mod.items.length} kullanılabilir işlem
+                  </span>
+                </div>
+              </div>
+              <span className="rounded border border-slate-200 bg-white px-2 py-1 font-mono text-[10px] font-black text-slate-400">
+                0{idx + 1}
+              </span>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {mod.items.map((item) => (
                 <button
-                  key={i}
+                  key={item.link}
+                  type="button"
                   onClick={() => handleNavigate(item.link)}
-                  className={`w-full flex items-center p-3 bg-white border border-slate-200 border-l-4 ${mod.borderColor} rounded-sm shadow-sm hover:bg-slate-50 transition-all active:scale-[0.98] group relative`}
+                  aria-label={item.label}
+                  className="group flex min-h-[64px] w-full touch-manipulation items-center gap-3 px-3.5 py-2.5 text-left transition-colors hover:bg-slate-50 active:bg-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#dc3545]"
                 >
-                  <div
-                    className={`w-10 h-10 flex items-center justify-center shrink-0 bg-slate-50 border border-slate-100 rounded-sm mr-4 group-hover:scale-110 transition-transform`}
-                  >
-                    <item.icon
-                      size={20}
-                      className={mod.textColor}
-                      strokeWidth={2.5}
-                    />
-                  </div>
-
-                  <div className="flex flex-col items-start flex-1">
-                    <span className="font-black text-[13px] text-slate-800 uppercase tracking-wide">
+                  <span className={"flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50 " + mod.textColor}>
+                    <item.icon size={19} strokeWidth={2.1}/>
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[12px] font-black leading-snug text-slate-800 group-hover:text-slate-950">
                       {item.label}
                     </span>
-                  </div>
-
+                    <span className="mt-0.5 block text-[10px] font-semibold text-slate-400">
+                      İşlemi başlat
+                    </span>
+                  </span>
                   {item.badge && (
-                    <div className="absolute right-4 top-1/2 -translate-y-1/2">
-                      <span
-                        className={`${item.badgeBg} text-white text-[9px] font-black px-2 py-1 rounded-sm uppercase tracking-widest shadow-sm`}
-                      >
-                        {item.badge}
-                      </span>
-                    </div>
+                    <span className="shrink-0 rounded bg-[#dc3545] px-2 py-1 text-[9px] font-black tracking-wide text-white">{item.badge}</span>
                   )}
+                  <ChevronRight size={17} className="shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5 group-hover:text-[#dc3545]"/>
                 </button>
               ))}
             </div>
           </section>
         ))}
-      </div>
+        <div className="flex items-start gap-2 rounded-md border border-slate-200 bg-white px-3 py-3 text-slate-500">
+          <CircleCheck size={16} className="mt-0.5 shrink-0 text-emerald-600"/>
+          <p className="text-[10px] font-semibold leading-relaxed">
+            Terminal oturumunuz aktif. İşlemler personel ve şube bilgilerinize bağlı olarak yürütülür.
+          </p>
+        </div>
+      </main>
 
-      {/* 4. ENDÜSTRİYEL FOOTER */}
-      <div className="bg-[#0f172b] border-t-4 border-[#dc3545] mt-auto shrink-0 py-5 px-6 flex justify-between items-center shadow-[0_-10px_20px_rgba(0,0,0,0.1)]">
-        <div className="flex flex-col text-left">
-          <span className="text-[11px] font-black text-white uppercase tracking-widest">
-            LogiStock WMS
-          </span>
-          <span className="text-[9px] font-bold text-slate-400 mt-1 tracking-wider">
-            Sürüm 2.4.1 • Güvenli Terminal
-          </span>
+      <footer className="mt-auto shrink-0 border-t-[3px] border-[#dc3545] bg-[#142238] text-white">
+        <div className="mx-auto flex w-full max-w-lg items-center justify-between gap-3 px-4 py-4">
+          <div>
+            <span className="block text-[11px] font-black uppercase tracking-widest">LogiStock WMS</span>
+            <span className="mt-1 block text-[9px] font-semibold text-slate-400">Terminal 2.4.1 · Güvenli Operasyon</span>
+          </div>
+          <div className="opacity-50">
+            <Logo variant="white" className="text-2xl"/>
+          </div>
         </div>
-        <div className="opacity-30 grayscale pointer-events-none">
-          <Logo variant="white" className="text-2xl" />
-        </div>
-      </div>
+      </footer>
     </div>
   );
 }

@@ -35,6 +35,8 @@ import {
 } from "./_components/WarehouseLogsSection";
 import type { LeaveLogData } from "./_components/LeaveMovementsSection";
 import { OrderTrackingSection } from "./_components/OrderTrackingSection";
+import { StoreOrdersHomeSection } from "./_components/StoreOrdersHomeSection";
+import { useWms } from "@/components/providers/WmsSessionProvider";
 
 interface DashboardData {
   kpis: {
@@ -64,6 +66,9 @@ const CLIENT_CACHE_TTL = 2 * 60 * 1000; // 2 Dakika
 
 export default function ManagementDashboard() {
   const { userProfile, isLoading: isAuthLoading } = useAuth();
+  const { branchType, branchName } = useWms();
+  const isOnlineWarehouse = branchType === "Depo" && branchName === "Online Depo";
+  const isStore = branchType === "Mağaza";
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -364,7 +369,7 @@ export default function ManagementDashboard() {
           <WarehouseLogsSection
             recentPutawayLogs={data?.recentPutawayLogs || []}
           />
-          <OrderTrackingSection />
+          {isOnlineWarehouse ? <OrderTrackingSection /> : isStore ? <StoreOrdersHomeSection /> : null}
         </div>
       </main>
       <Footer />

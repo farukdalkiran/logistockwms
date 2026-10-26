@@ -23,6 +23,8 @@ export type WmsSessionData = {
   managerBranchId: string | null;
   isGlobal: boolean;
   role: string;
+  branchName: string | null;
+  branchType: string | null;
 };
 
 export default async function RootLayout({
@@ -42,17 +44,27 @@ export default async function RootLayout({
     managerBranchId: null,
     isGlobal: false,
     role: "GUEST",
+    branchName: null,
+    branchType: null,
   };
 
   // 4. EĞER GİRİŞ YAPILMIŞSA: VERİTABANINDAN YÖNETİCİ ŞUBESİNİ ÇEK
   if (user) {
     const { data: profile } = await supabase
       .from("profiles")
-      .select("branch_id, role")
+      .select("branch_id, role, branches(name,type)")
       .eq("id", user.id)
       .single();
 
+    const relation = profile?.branches as unknown as
+      | { name: string; type: string }
+      | { name: string; type: string }[]
+      | null;
+    const branch = Array.isArray(relation) ? relation[0] : relation;
+
     sessionData = {
+      branchName: branch?.name ?? null,
+      branchType: branch?.type ?? null,
       userId: user.id, // Artık TypeScript hata fırlatmaz, string değer güvenle atanır.
       managerBranchId: profile?.branch_id || "GLOBAL",
       isGlobal:
