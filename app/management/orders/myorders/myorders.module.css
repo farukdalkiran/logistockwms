@@ -2028,3 +2028,81 @@
     transition: none !important;
   }
 }
+
+
+/* Marketplace edition: detail modal keeps clear, dark operational headers.
+   Main list/card sections are now Tailwind-based; old modal selectors are retained. */
+.overlay { background: rgba(10, 19, 34, .78); }
+.dialog { background: #f2f5fa; border-color: #344359; border-radius: 8px; }
+.dialogHeader {
+  background: #1e293b;
+  color: white;
+  border-bottom: 3px solid #dc3545;
+  padding: 18px 24px;
+}
+.dialogHeader > div:first-child > span { color: #b9c7dd; font-weight: 800; }
+.dialogHeader h2 { color: #fff; font-size: 21px; font-weight: 800; }
+.dialogHeaderActions .kind { background: #334155; color: #fff; border-color: #475569; }
+.closeButton { border-color: #475569; color: #e2e8f0; background: #334155; }
+.closeButton:hover { background: #475569; }
+.detailStatus .statusLarge { font-weight: 800; }
+.detailSummary { border-color: #d5dce8; }
+.detailSummary span { color: #64748b; font-weight: 600; }
+.detailSummary strong { color: #172438; font-weight: 800; }
+.detailProducts { border-color: #d5dce8; }
+.detailProducts > header { background: #253249; border-color: #253249; }
+.detailProducts h3, .detailProducts > header > span { color: #fff; font-weight: 800; }
+.detailTable th { background: #e9edf3; color: #475569; font-weight: 800; }
+.detailTable td { color: #334155; }
+.detailProductIdentity strong { color: #1e293b; font-weight: 700; }
+.operationDetails section { border-color: #d5dce8; padding: 0; overflow: hidden; }
+.operationDetails h3 {
+  margin: 0 0 15px; padding: 13px 17px; background: #253249;
+  color: #fff; font-weight: 800; font-size: 12px;
+}
+.operationDetails dl { padding: 0 17px 18px; }
+.operationDetails dt { color: #64748b; }
+.operationDetails dd { color: #253249; font-weight: 700; }
+.operationHint { margin: 0 17px 17px !important; color: #64748b; }
+.dialogFooter { background: white; border-top-color: #d5dce8; }
+.dialogFooter > span { color: #64748b; }
+.dialogFooter .button { color: #334155; font-weight: 700; }
+.receiptPanel {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 16px; margin: 0 0 18px; padding: 17px 19px; border: 1px solid #bbdfca;
+  border-left: 4px solid #059669; background: #f0fdf4; border-radius: 6px;
+}
+.receiptInfo { display: flex; flex: 1; min-width: 190px; align-items: flex-start; gap: 12px; color: #059669; }
+.receiptInfo > svg { flex-shrink: 0; }
+.receiptInfo strong { display: block; color: #14532d; font-size: 14px; font-weight: 800; }
+.receiptInfo p { max-width: 600px; margin-top: 3px; color: #3e6750; font-size: 12px; line-height: 1.5; }
+.receiptButton {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1px solid #047857; border-radius: 5px; background: #059669; color: #fff;
+  padding: 11px 15px; font-size: 12px; font-weight: 800; cursor: pointer;
+  min-height: 41px; transition: background .16s;
+}
+.receiptButton:hover { background: #047857; }
+.receiptButton:disabled { opacity: .55; cursor: not-allowed; }
+.receiptConfirm { width: 100%; padding-top: 13px; border-top: 1px solid #bbdfca; }
+.receiptConfirm p { color: #14532d; font-size: 12px; line-height: 1.6; }
+.receiptConfirm > div { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 13px; }
+.receiptCancel {
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid #cbd5e1; border-radius: 5px; background: white; color: #334155;
+  font-size: 12px; font-weight: 700; min-height: 41px; padding: 10px 16px;
+  cursor: pointer;
+}
+.receiptError { color: #b91c1c; font-size: 12px; font-weight: 800; width: 100%; }
+.receiptSuccess {
+  display: flex; align-items: center; gap: 8px; margin: 0 0 17px; padding: 13px;
+  border: 1px solid #bbf7d0; border-radius: 5px; color: #065f46;
+  background: #ecfdf5; font-size: 12px; font-weight: 800;
+}
+@media (max-width: 700px) {
+  .dialogHeader { padding: 13px 15px; }
+  .dialogScroll { padding: 14px; }
+  .receiptButton { width: 100%; }
+  .receiptConfirm > div { width: 100%; }
+  .receiptConfirm > div > button { flex: 1; }
+}
