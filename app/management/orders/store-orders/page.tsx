@@ -92,17 +92,17 @@ export default async function StoreOrdersPage({ searchParams }: { searchParams: 
   return (
     <main className="min-h-screen bg-slate-50 p-4 lg:p-8">
       {/* Dark-Industrial Header */}
-      <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-8 gap-4 bg-white p-6 rounded-lg shadow-sm border border-slate-200 border-l-4 border-l-[#dc3545]">
+      <header className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-8 gap-4 bg-slate-900 p-6 rounded-xl shadow-lg border-b-4 border-[#dc3545]">
         <div>
           <span className="flex items-center gap-2 text-[#dc3545] font-bold text-xs tracking-widest uppercase mb-1">
             <Warehouse size={16} /> Merkez Depo Komuta
           </span>
-          <h1 className="text-2xl font-black text-slate-900 tracking-tight">Mağaza Sipariş & Talepler</h1>
-          <p className="text-slate-500 text-sm mt-1">Gelen mağaza taleplerini depo stok durumuna göre inceleyin ve onaylayın.</p>
+          <h1 className="text-2xl font-black text-white tracking-tight">Mağaza Sipariş & Talepler</h1>
+          <p className="text-slate-400 text-sm mt-1">Gelen mağaza taleplerini depo stok durumuna göre inceleyin ve onaylayın.</p>
         </div>
         <Link 
           href="/management/orders/store-orders" 
-          className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-800 rounded-md transition-colors text-sm font-semibold border border-slate-300"
+          className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-md transition-colors text-sm font-semibold border border-slate-700"
         >
           <RefreshCw size={16} /> Ekranı Yenile
         </Link>

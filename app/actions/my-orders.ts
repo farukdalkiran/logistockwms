@@ -121,32 +121,3 @@ export async function getMyOrderDetail(
     return { ok: false, error: errorMessage(error) };
   }
 }
-
-/** Mağaza teslim onayı; aktör kimliği, şube ve mevcut durum sunucuda doğrulanır. */
-export async function confirmMyOrderReceived(orderId: string): Promise<Result<{ deliveredAt: string }>> {
-  try {
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderId))
-      throw new Error("Geçersiz sipariş numarası.");
-    const { actor, admin } = await connection();
-    const { data: profile, error: profileError } = await admin
-      .from("profiles").select("branch_id").eq("id", actor).single();
-    if (profileError || !profile?.branch_id)
-      throw new Error("Teslim onayı için bağlı bir mağaza bulunamadı.");
-    const { data: branch, error: branchError } = await admin
-      .from("branches").select("type").eq("id", profile.branch_id).single();
-    if (branchError || branch?.type !== "Mağaza")
-      throw new Error("Siparişi yalnızca talep eden mağaza teslim alabilir.");
-    const { data, error } = await admin.from("orders")
-      .update({ status: "DELIVERED", delivered_at: new Date().toISOString(), received_by: actor })
-      .eq("id", orderId)
-      .eq("branch_id", profile.branch_id)
-      .eq("status", "READY_TO_SHIP")
-      .select("delivered_at").maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!data?.delivered_at)
-      throw new Error("Sipariş mağazanıza ait değil veya teslim onayı beklemiyor. Listeyi yenileyin.");
-    return { ok: true, data: { deliveredAt: data.delivered_at as string } };
-  } catch (error) {
-    return { ok: false, error: errorMessage(error) };
-  }
-}

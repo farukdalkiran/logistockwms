@@ -184,47 +184,47 @@ export default function ManagementDashboard() {
         {/* =========================================
             ÜST BLOK: HERO HEADER (YENİLENMİŞ ENDÜSTRİYEL TASARIM)
             ========================================= */}
-        <div className="w-full bg-white border border-slate-200 border-l-[6px] border-l-[#dc3545] rounded-lg shadow-sm relative overflow-hidden flex flex-col md:flex-row justify-between">
+        <div className="w-full bg-[#0b1120] border border-slate-800 border-l-[6px] border-l-[#dc3545] rounded-lg shadow-xl relative overflow-hidden flex flex-col md:flex-row justify-between">
           {/* Background Grid Pattern */}
-          <div className="absolute inset-0 opacity-30 bg-[linear-gradient(rgba(220,53,69,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(220,53,69,0.06)_1px,transparent_1px)] [background-size:20px_20px] pointer-events-none z-0"></div>
+          <div className="absolute inset-0 opacity-20 bg-[linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] [background-size:20px_20px] pointer-events-none z-0"></div>
 
           {/* Sol Taraf: Karşılama ve Bilgi */}
           <div className="relative z-10 p-5 sm:p-6 md:p-8 flex flex-col gap-4 flex-1">
             <div className="flex flex-wrap items-center gap-2 mb-1">
-              <span className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded shadow-sm tracking-wider font-mono">
+              <span className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded shadow-sm tracking-wider font-mono">
                 <div className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-sm bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-sm h-2 w-2 bg-emerald-500"></span>
                 </div>
                 {isGlobal ? "MASTER YETKİ" : "LOKAL BAĞLANTI"}
               </span>
-              <span className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 text-slate-700 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded shadow-sm tracking-wider font-mono">
+              <span className="flex items-center gap-1.5 bg-slate-800 border border-slate-700 text-slate-300 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded shadow-sm tracking-wider font-mono">
                 <Building2 size={14} className={isGlobal ? "text-blue-400" : "text-amber-400"} />
                 {isGlobal ? "MERKEZ KOMUTA" : profileSafe?.branch_name || "ŞUBE ATANMADI"}
               </span>
             </div>
 
             <div className="flex flex-col">
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-black text-slate-900 tracking-tight uppercase leading-tight">
+              <h1 className="text-2xl sm:text-3xl md:text-4xl font-black text-white tracking-tight uppercase leading-tight">
                 LogiStock <span className="text-[#dc3545]">WMS</span>
               </h1>
-              <p className="text-slate-600 text-xs sm:text-sm font-medium mt-2 max-w-2xl leading-relaxed border-l-2 border-slate-200 pl-3">
+              <p className="text-slate-400 text-xs sm:text-sm font-medium mt-2 max-w-2xl leading-relaxed border-l-2 border-slate-700 pl-3">
                 Tüm şube, depo ve personel operasyonlarını gerçek zamanlı yönetebileceğiniz, sıfır hata toleranslı merkezi kontrol paneli.
               </p>
             </div>
           </div>
 
           {/* Sağ Taraf: Metrikler ve Aksiyon */}
-          <div className="relative z-10 bg-slate-50/80 border-t md:border-t-0 md:border-l border-slate-200 p-5 sm:p-6 flex flex-row items-center justify-between md:flex-col md:justify-center gap-5 min-w-[280px]">
+          <div className="relative z-10 bg-slate-900/60 border-t md:border-t-0 md:border-l border-slate-800 p-5 sm:p-6 flex flex-row items-center justify-between md:flex-col md:justify-center gap-5 min-w-[280px]">
             <div className="flex flex-col w-full gap-5">
               
               {/* Sistem Yükü */}
               <div className="flex flex-col gap-2 w-full">
                 <div className="flex items-center justify-between text-[10px] sm:text-xs font-bold text-slate-400 tracking-wider font-mono">
                   <span className="flex items-center gap-1.5"><Database size={14} className="text-[#dc3545]"/> DB Doluluk Yükü</span>
-                  <span className="text-slate-800">%{data?.systemLoad || 0}</span>
+                  <span className="text-white">%{data?.systemLoad || 0}</span>
                 </div>
-                <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden border border-slate-200">
+                <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden border border-slate-700">
                   <div 
                     className="bg-[#dc3545] h-full transition-all duration-700 ease-out" 
                     style={{ width: `${data?.systemLoad || 0}%` }}
@@ -236,7 +236,7 @@ export default function ManagementDashboard() {
               <div className="flex items-center justify-between mt-1">
                 <div className="flex flex-col">
                   <span className="text-[10px] text-slate-500 font-bold tracking-wider uppercase font-mono">Sistem Saati</span>
-                  <span className="text-xl sm:text-2xl font-black text-emerald-600 font-mono tracking-tight">
+                  <span className="text-xl sm:text-2xl font-black text-emerald-400 font-mono tracking-tight">
                     {new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}
                   </span>
                 </div>
@@ -244,7 +244,7 @@ export default function ManagementDashboard() {
                   onClick={() => fetchData(true)}
                   disabled={isRefreshing}
                   title="Verileri Şimdi Yenile"
-                  className="p-2.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-md text-slate-600 transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
+                  className="p-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-md text-slate-300 transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
                 >
                   <RefreshCw size={18} className={isRefreshing ? "animate-spin text-[#dc3545]" : ""} />
                 </button>

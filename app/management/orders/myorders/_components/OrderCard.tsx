@@ -221,11 +221,6 @@ export default function OrderCard({
             </span>
           )}
         </div>
-        {order.status === "READY_TO_SHIP" && (
-          <button type="button" className={s.receiptEntry} onClick={onOpen}>
-            <CheckCheck size={15} /> Teslimatı onayla
-          </button>
-        )}
         <button
           className={s.detailButton}
           onClick={onOpen}

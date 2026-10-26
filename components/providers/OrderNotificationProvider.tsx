@@ -5,7 +5,6 @@ import {
   type ReactNode,
 } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { BellRing, BellOff, ClipboardList, Volume2, X } from "lucide-react";
 import { useWms } from "@/components/providers/WmsSessionProvider";
 import { getApprovalOrders } from "@/app/actions/order-approvals";
@@ -71,11 +70,7 @@ function writeSeen(user: string, ids: string[]) {
 
 export function OrderNotificationProvider({ children }: { children: ReactNode }) {
   const { userId, role } = useWms();
-  const pathname = usePathname();
-  const terminal = pathname === "/terminal" || pathname.startsWith("/terminal/");
-  const eligible = Boolean(userId && !terminal && ["ADMIN", "DEVELOPER", "ADMNWH"].includes((role || "").toUpperCase()));
-  const [desktop, setDesktop] = useState(false);
-  const audioAllowed = eligible && desktop;
+  const eligible = Boolean(userId && ["ADMIN", "DEVELOPER", "ADMNWH"].includes((role || "").toUpperCase()));
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [metrics, setMetrics] = useState<Metrics>({ pending: 0, preparing: 0, ready_to_ship: 0 });
   const [loading, setLoading] = useState(true);
@@ -92,16 +87,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
   const activeUserRef = useRef(userId);
   const initialRef = useRef(true);
 
-  useEffect(() => {
-    const m = window.matchMedia("(min-width: 768px)");
-    const update = () => setDesktop(m.matches);
-    update();
-    m.addEventListener("change", update);
-    return () => m.removeEventListener("change", update);
-  }, []);
-
   const unlock = useCallback(async () => {
-    if (!audioAllowed) return false;
     try {
       if (!audioRef.current) audioRef.current = new AudioContext();
       if (audioRef.current.state !== "running") await audioRef.current.resume();
@@ -112,7 +98,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
       setAudioUnlocked(false);
       return false;
     }
-  }, [audioAllowed]);
+  }, []);
 
   const sound = useCallback(async () => {
     // Browser gesture restriction cannot be bypassed.
@@ -134,7 +120,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
       osc.start(at);
       osc.stop(at + 0.2);
     });
-  }, [unlock, audioAllowed]);
+  }, [unlock]);
 
   useEffect(() => {
     try {
@@ -146,7 +132,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
   }, []);
 
   useEffect(() => {
-    if (!audioAllowed || !soundEnabled || audioUnlocked) return;
+    if (!eligible || !soundEnabled || audioUnlocked) return;
     const action = () => { void unlock(); };
     document.addEventListener("pointerdown", action, { once: true });
     document.addEventListener("keydown", action, { once: true });
@@ -154,7 +140,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
       document.removeEventListener("pointerdown", action);
       document.removeEventListener("keydown", action);
     };
-  }, [audioAllowed, soundEnabled, audioUnlocked, unlock]);
+  }, [eligible, soundEnabled, audioUnlocked, unlock]);
 
   useEffect(() => {
     activeUserRef.current = userId;
@@ -200,10 +186,8 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
       complete.forEach((x) => known.add(x.id));
       writeSeen(userId, Array.from(known));
       if (fresh.length > 0) {
-        if (audioAllowed) {
-          setAlert({ order: fresh[0], count: fresh.length });
-          if (soundRef.current && audioRef.current?.state === "running") void sound();
-        }
+        setAlert({ order: fresh[0], count: fresh.length });
+        if (soundRef.current && audioRef.current?.state === "running") void sound();
       }
       initialRef.current = false;
     } catch (e) {
@@ -214,7 +198,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
       setLoading(false);
       setRefreshing(false);
     }
-  }, [eligible, userId, audioAllowed, sound]);
+  }, [eligible, userId, sound]);
 
   useEffect(() => {
     if (!eligible) { setLoading(false); return; }
@@ -244,8 +228,8 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
     soundRef.current = next;
     setSoundEnabled(next);
     try { localStorage.setItem(SOUND_KEY, String(next)); } catch {}
-    if (next && audioAllowed) void unlock();
-  }, [unlock, audioAllowed]);
+    if (next) void unlock();
+  }, [unlock]);
 
   return (
     <Context.Provider value={{
@@ -259,7 +243,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
       testSound: () => void sound(),
     }}>
       {children}
-      {audioAllowed && canRead && (
+      {eligible && canRead && (
         <div className="fixed bottom-4 right-4 z-[9998] flex items-center gap-2 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white shadow-2xl">
           <BellRing size={16} className="text-red-400" />
           <span className="hidden text-[11px] font-bold sm:inline">{metrics.pending} bekleyen sipariş</span>
@@ -270,7 +254,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
           </button>
         </div>
       )}
-      {alert && audioAllowed && (
+      {alert && eligible && (
         <div role="alert" className="fixed right-4 top-4 z-[9999] w-[min(440px,calc(100vw-2rem))] overflow-hidden rounded-md border border-red-300 bg-white shadow-2xl">
           <div className="flex gap-3 border-l-[5px] border-[#dc3545] p-4">
             <div className="rounded bg-red-50 p-2 text-[#dc3545]"><BellRing size={20} className="animate-pulse" /></div>

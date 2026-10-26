@@ -4,7 +4,6 @@ export type Status =
   | "PENDING"
   | "PREPARING"
   | "READY_TO_SHIP"
-  | "DELIVERED"
   | "REJECTED";
 export interface Filters {
   search: string;

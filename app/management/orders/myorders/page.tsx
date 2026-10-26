@@ -265,7 +265,6 @@ export default function MyOrdersPage() {
                 <b>{quantity(result.metrics.ready_to_ship)}</b> hazırlandı &
                 gönderiliyor
               </span>
-              <span><b>{quantity(result.metrics.completed)}</b> teslim edildi</span>
             </div>
           )}
           <div className={s.listControls}>

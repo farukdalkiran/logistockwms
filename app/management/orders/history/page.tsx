@@ -22,7 +22,7 @@ import {
   type ListResult,
 } from "@/lib/order-approvals/types";
 
-type HistoryStatus = "PREPARING" | "READY_TO_SHIP" | "DELIVERED" | "REJECTED";
+type HistoryStatus = "PREPARING" | "READY_TO_SHIP" | "REJECTED";
 const PAGE_SIZE = 20;
 
 export default function OrderHistoryPage() {
@@ -93,18 +93,18 @@ export default function OrderHistoryPage() {
   return (
     <main className="min-h-screen bg-slate-50 p-4 md:p-8">
       <div className="mx-auto max-w-6xl space-y-5">
-        <header className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-slate-200 border-l-4 border-l-[#dc3545] bg-white p-6 text-slate-900 shadow-sm">
+        <header className="flex flex-wrap items-center justify-between gap-4 rounded-xl border-b-4 border-[#dc3545] bg-slate-900 p-6 text-white">
           <div>
-            <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[#dc3545]">
+            <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-orange-300">
               <Clock3 size={15} /> WMS / Sipariş Arşivi
             </div>
             <h1 className="text-2xl font-black">Sipariş İşlem Geçmişi</h1>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 text-sm text-slate-300">
               Hazırlanan, gönderime hazır ve reddedilen sipariş kararları
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Link href="/management/orders/approvals" className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+            <Link href="/management/orders/approvals" className="rounded-lg border border-slate-600 px-3 py-2 text-sm font-semibold hover:bg-slate-800">
               <ArrowLeft size={16} className="mr-1 inline" /> Onay Merkezi
             </Link>
             <button onClick={refresh} className="rounded-lg bg-[#dc3545] px-3 py-2 text-sm font-bold hover:bg-red-700">
@@ -126,7 +126,6 @@ export default function OrderHistoryPage() {
             >
               <option value="PREPARING">Hazırlanıyor</option>
               <option value="READY_TO_SHIP">Gönderime hazır</option>
-              <option value="DELIVERED">Teslim edildi</option>
               <option value="REJECTED">Reddedildi</option>
             </select>
           </label>

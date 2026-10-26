@@ -13,10 +13,9 @@ import {
   Truck,
   UserRound,
   Warehouse,
-  CheckCircle2,
   X,
 } from "lucide-react";
-import { confirmMyOrderReceived, getMyOrderDetail } from "@/app/actions/my-orders";
+import { getMyOrderDetail } from "@/app/actions/my-orders";
 import {
   dateLabel,
   hasDecision,
@@ -46,10 +45,6 @@ export default function OrderDetailModal({
   const [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [refreshing, setRefreshing] = useState(false);
-  const [confirmReceipt, setConfirmReceipt] = useState(false);
-  const [receiving, setReceiving] = useState(false);
-  const [receiptMessage, setReceiptMessage] = useState("");
-  const [receiptError, setReceiptError] = useState("");
   const dialog = useRef<HTMLDivElement>(null),
     sequence = useRef(0),
     closeRef = useRef(close);
@@ -79,27 +74,8 @@ export default function OrderDetailModal({
     },
     [orderId],
   );
-  const receive = async () => {
-    if (!order || order.status !== "READY_TO_SHIP" || receiving) return;
-    setReceiving(true);
-    setReceiptError("");
-    try {
-      const result = await confirmMyOrderReceived(order.id);
-      if (!result.ok) throw new Error(result.error);
-      setConfirmReceipt(false);
-      setReceiptMessage("Sipariş başarıyla teslim edildi olarak işaretlendi.");
-      await load(true);
-    } catch (error) {
-      setReceiptError(error instanceof Error ? error.message : "Teslim onaylanamadı.");
-    } finally {
-      setReceiving(false);
-    }
-  };
   useEffect(() => {
     setMounted(true);
-    setConfirmReceipt(false);
-    setReceiptMessage("");
-    setReceiptError("");
     void load();
     return () => {
       sequence.current++;
@@ -221,35 +197,6 @@ export default function OrderDetailModal({
                   Durumu yenile
                 </button>
               </div>
-              {order.status === "READY_TO_SHIP" && (
-                <section className={s.receiptPanel} aria-label="Sipariş teslim onayı">
-                  <div className={s.receiptPanelHeading}>
-                    <CheckCircle2 size={23} />
-                    <div>
-                      <strong>Sipariş mağazanıza ulaştı mı?</strong>
-                      <p>Ürünleri ve adetleri fiziki olarak kontrol ettikten sonra teslimatı onaylayın.</p>
-                    </div>
-                  </div>
-                  {receiptError && <p className={s.receiptError} role="alert">{receiptError}</p>}
-                  {confirmReceipt ? (
-                    <div className={s.receiptConfirm}>
-                      <p><b>{order.order_code}</b> numaralı siparişin tamamını teslim aldığınızı onaylıyor musunuz? Bu işlem geri alınamaz.</p>
-                      <div>
-                        <button type="button" disabled={receiving} className={s.button} onClick={() => setConfirmReceipt(false)}>Vazgeç</button>
-                        <button type="button" disabled={receiving} className={s.receiptButton} onClick={() => void receive()}>
-                          {receiving ? <Loader2 size={16} className={s.spin} /> : <CheckCircle2 size={16} />}
-                          {receiving ? "Kaydediliyor…" : "Evet, teslim aldım"}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button type="button" className={s.receiptButton} onClick={() => setConfirmReceipt(true)}>
-                      <CheckCircle2 size={17} /> Siparişi teslim aldım
-                    </button>
-                  )}
-                </section>
-              )}
-              {receiptMessage && <p className={s.receiptSuccess} role="status"><CheckCircle2 size={17} /> {receiptMessage}</p>}
               <OrderJourney order={order} />
               <section className={s.detailSummary}>
                 <div>
