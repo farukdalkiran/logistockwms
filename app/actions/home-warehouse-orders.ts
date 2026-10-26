@@ -6,6 +6,17 @@ import type { ListResult, OrderRow, Result } from "@/lib/order-approvals/types";
 
 const STATES = ["PENDING", "PREPARING", "READY_TO_SHIP"] as const;
 
+type FeedOrder = {
+  id: string;
+  order_code: string;
+  branch_id: string | null;
+  status: string;
+  created_at: string;
+  approved_at: string | null;
+  prepared_by_name: string | null;
+  approval_branch_id: string | null;
+};
+
 /**
  * Read-only home feed for users assigned to Online Depo.
  * Unlike the approval center, this does not confer permission to approve an order.
@@ -51,7 +62,7 @@ export async function getHomeWarehouseOrders(): Promise<Result<ListResult>> {
     for (const count of counts) {
       if (count.error) throw new Error(count.error.message);
     }
-    const orders = orderResult.data ?? [];
+    const orders = (orderResult.data ?? []) as FeedOrder[];
     const orderIds = orders.map(o => o.id);
     const branchIds = [...new Set(orders.map(o => o.branch_id).filter(Boolean))] as string[];
 
@@ -90,7 +101,7 @@ export async function getHomeWarehouseOrders(): Promise<Result<ListResult>> {
         id: o.id,
         order_code: o.order_code,
         branch_id: o.branch_id,
-        branch_name: branchMap.get(o.branch_id) || "Bilinmeyen şube",
+        branch_name: (o.branch_id ? branchMap.get(o.branch_id) : null) || "Bilinmeyen şube",
         requester_name: "",
         status: o.status,
         created_at: o.created_at,
