@@ -7,6 +7,8 @@ interface WmsSession {
   managerBranchId: string | null;
   isGlobal: boolean;
   role: string;
+  branchName: string | null;
+  branchType: string | null;
 }
 
 const WmsContext = createContext<WmsSession | null>(null);
