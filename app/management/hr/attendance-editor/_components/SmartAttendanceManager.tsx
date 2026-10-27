@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getPublicHolidays,savePublicHoliday,removePublicHoliday } from "@/app/actions/public-holidays";
-import { HOLIDAY_WINDOWS,type HolidayPeriod,type PublicHoliday } from "@/lib/attendance/day-coverage";
+import { HOLIDAY_WINDOWS,istanbulDate,type HolidayPeriod,type PublicHoliday } from "@/lib/attendance/day-coverage";
 import { 
   Clock, ShieldAlert, CheckCircle2, AlertCircle, Save, 
   UserCheck, Calendar, Search, CalendarDays, Zap, 
@@ -88,7 +88,7 @@ export default function DeveloperAttendancePanel({ managerId, managerName, manag
   const [excludedDates, setExcludedDates] = useState<string[]>([]);
   const [holidayDate,setHolidayDate]=useState(()=>{
     const tomorrow=new Date(Date.now()+86400000);
-    return new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Istanbul",year:"numeric",month:"2-digit",day:"2-digit"}).format(tomorrow);
+    return istanbulDate(tomorrow.toISOString());
   });
   const [holidayTitle,setHolidayTitle]=useState("Resmî Tatil");
   const [holidayPeriod,setHolidayPeriod]=useState<HolidayPeriod>("AFTERNOON");
@@ -97,7 +97,7 @@ export default function DeveloperAttendancePanel({ managerId, managerName, manag
   const [holidayLoaded,setHolidayLoaded]=useState(false);
   const fetchHolidays=async()=>{
     setHolidayLoading(true);
-    const result=await getPublicHolidays("2025-01-01","2029-12-31");
+    const result=await getPublicHolidays(`${new Date().getFullYear()-1}-01-01`,`${new Date().getFullYear()+2}-12-31`);
     if(result.success){setHolidayList(result.data);setHolidayLoaded(true);}
     else setFeedback({type:"error",msg:result.message});
     setHolidayLoading(false);
