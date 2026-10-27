@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { requireWmsActor, assertBranchAccess } from "@/lib/security/require-wms-actor";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -13,6 +14,9 @@ export async function processPutawayServer(payload: {
   quantity: number; empId: string; productDetails: any;
 }) {
   try {
+    const actor = await requireWmsActor();
+    assertBranchAccess(actor, payload.branchId);
+    if (!Number.isSafeInteger(payload.quantity) || payload.quantity <= 0) throw new Error('Miktar pozitif tam sayı olmalı.');
     const { data: existingStocks, error: fetchErr } = await supabaseAdmin
       .from("stocks").select("id, quantity")
       .eq("product_id", payload.productId).eq("branch_id", payload.branchId).eq("shelf_id", payload.shelfId)
@@ -60,6 +64,9 @@ export async function processPickingServer(payload: {
   quantity: number; empId: string; productDetails: any; reasonDetails?: string | null;
 }) {
   try {
+    const actor = await requireWmsActor();
+    assertBranchAccess(actor, payload.branchId);
+    if (!Number.isSafeInteger(payload.quantity) || payload.quantity <= 0) throw new Error('Miktar pozitif tam sayı olmalı.');
     // 1. İlgili raftaki tüm kopya stokları çek
     const { data: stocks, error: fetchErr } = await supabaseAdmin
       .from("stocks").select("id, quantity")
@@ -116,6 +123,9 @@ export async function processPickingServer(payload: {
 // ----------------- WMS SIFIR HATA STOK SORGULAMA (RLS BYPASS & İLK YÜKLEME) -----------------
 export async function getAggregatedInventoryServer(searchTerm: string, branchId: string | null, isGlobal: boolean) {
   try {
+    const actor = await requireWmsActor();
+    isGlobal = actor.isGlobal;
+    if (!actor.isGlobal) branchId = actor.branchId;
     const keyword = searchTerm.trim().toLowerCase();
     
     let matchedProductIds: string[] = [];
@@ -215,6 +225,9 @@ export async function getStockHistoryModalDataServer(
   searchKeyword: string
 ) {
   try {
+    const actor = await requireWmsActor();
+    isGlobal = actor.isGlobal;
+    if (!actor.isGlobal) branchId = actor.branchId;
     // 1. Ürünün Bulunduğu Aktif Rafları Çek
     let shelfQuery = supabaseAdmin
       .from('stocks')
