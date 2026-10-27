@@ -1,166 +1,164 @@
 "use server";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
+import { createClient as createSessionClient } from "@/lib/supabase/server";
+import { datesForLeave, isISODate } from "@/lib/attendance/leave-records";
+import { istanbulDate, timeAtIstanbul, coveredDayHours, HOLIDAY_WINDOWS, type TimedAttendance, type PublicHoliday } from "@/lib/attendance/day-coverage";
 
-import { createClient } from "@supabase/supabase-js";
-
-// RLS kısıtlamalarını by-pass eden Master Admin İstemcisi
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
+const db=createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.SUPABASE_SERVICE_ROLE_KEY!,
+ {auth:{autoRefreshToken:false,persistSession:false}});
+async function requireHRActor(employeeIds:string[]) {
+ const session=await createSessionClient();
+ const {data:claims,error}=await session.auth.getClaims();
+ if(error||!claims?.claims?.sub)throw new Error("Giriş yapmanız gerekiyor.");
+ const {data:profile}=await db.from("profiles").select("role,branch_id").eq("id",claims.claims.sub).single();
+ if(!profile)throw new Error("Kullanıcı profili bulunamadı.");
+ if(["Developer","Admin"].includes(profile.role))return;
+ if(!profile.branch_id)throw new Error("Şubeye bağlı bir kullanıcı hesabı gerekli.");
+ const unique=[...new Set(employeeIds.filter(Boolean))];
+ if(!unique.length)throw new Error("Personel seçiniz.");
+ const {data:personnel,error:empError}=await db.from("employees")
+   .select("id,branch_id").in("id",unique).eq("is_active",true);
+ if(empError || personnel?.length!==unique.length ||
+    personnel?.some(x=>x.branch_id!==profile.branch_id))
+   throw new Error("Yalnızca kendi şubenizdeki personellerin kayıtlarını yönetebilirsiniz.");
+}
+function datesBetween(start:string,end:string,excluded:string[]) {
+ if(!isISODate(start)||!isISODate(end)||start>end)throw new Error("Tarih aralığı hatalı.");
+ const count=Math.round((Date.parse(end+"T12:00:00Z")-Date.parse(start+"T12:00:00Z"))/86400000)+1;
+ if(count>92)throw new Error("Tek seferde en fazla 92 gün taranabilir.");
+ const dates:string[]=[];
+ for(let i=0;i<count;i++){
+  const d=new Date(Date.parse(start+"T12:00:00Z")+i*86400000);
+  const date=d.toISOString().slice(0,10);
+  if(d.getUTCDay()!==0&&d.getUTCDay()!==6&&!excluded.includes(date)) dates.push(date);
+ }
+ return dates;
+}
+function nextDate(day:string){return new Date(Date.parse(day+"T12:00:00Z")+86400000).toISOString().slice(0,10);}
 export async function analyzeAttendanceGaps(
-  employeeIds: string[], 
-  startDateStr: string, // YENİ: Başlangıç Tarihi (YYYY-MM-DD)
-  endDateStr: string,   // YENİ: Bitiş Tarihi (YYYY-MM-DD)
-  excludedDates: string[] = [] // İstenmeyen veya hariç tutulan günler (YYYY-MM-DD)
-) {
-  try {
-    if (employeeIds.length === 0) return { success: false, message: "Personel seçilmedi." };
-
-    const start = new Date(`${startDateStr}T12:00:00`);
-    const end = new Date(`${endDateStr}T12:00:00`);
-
-    if (start > end) return { success: false, message: "Başlangıç tarihi bitiş tarihinden büyük olamaz." };
-
-    const weekdays: string[] = [];
-    const currentDate = new Date(start);
-
-    // Tarih aralığında döngü yap ve hafta sonlarını/hariç tutulanları ayıkla
-    while (currentDate <= end) {
-      const dateStr = currentDate.toISOString().split("T")[0];
-      const day = currentDate.getDay();
-
-      // Hafta sonları (0 = Pazar, 6 = Cumartesi) ve hariç tutulan günleri atla
-      if (day !== 0 && day !== 6 && !excludedDates.includes(dateStr)) {
-        weekdays.push(dateStr);
-      }
-      currentDate.setDate(currentDate.getDate() + 1);
-    }
-
-    // Veritabanı sorgusu için sınırları belirle
-    const startQuery = `${startDateStr}T00:00:00Z`;
-    const endQuery = `${endDateStr}T23:59:59Z`;
-
-    const { data: attendanceData } = await supabaseAdmin
-      .from("attendance")
-      .select("employee_id, check_in_time")
-      .in("employee_id", employeeIds)
-      .gte("check_in_time", startQuery)
-      .lte("check_in_time", endQuery);
-
-    const { data: leaveData } = await supabaseAdmin
-      .from("leave_requests")
-      .select("employee_id, selected_dates, start_date, end_date")
-      .in("employee_id", employeeIds)
-      .in("status", ["APPROVED", "MANUAL_EDIT_AUTO_APPROVED"]);
-
-    const existingLogs = new Set<string>();
-
-    attendanceData?.forEach(record => {
-      const date = record.check_in_time.split("T")[0];
-      existingLogs.add(`${record.employee_id}_${date}`);
-    });
-
-    leaveData?.forEach(leave => {
-      let dates: string[] = [];
-      if (typeof leave.selected_dates === 'string') dates = JSON.parse(leave.selected_dates);
-      else if (Array.isArray(leave.selected_dates)) dates = leave.selected_dates;
-      else if (leave.start_date) dates = [leave.start_date.split("T")[0]];
-      
-      dates.forEach(d => {
-        const dStr = new Date(d).toISOString().split("T")[0];
-        existingLogs.add(`${leave.employee_id}_${dStr}`);
+ employeeIds:string[],startDateStr:string,endDateStr:string,excludedDates:string[]=[],
+){
+ try{
+  const ids=[...new Set(employeeIds.filter(Boolean))];
+  await requireHRActor(ids);
+  if(!ids.length||ids.length>500)throw new Error("1–500 çalışan seçiniz.");
+  const weekdays=datesBetween(startDateStr,endDateStr,excludedDates);
+  const startISO=timeAtIstanbul(startDateStr,"00:00");
+  const endISO=timeAtIstanbul(nextDate(endDateStr),"00:00");
+  const [att,leaves,holidays]=await Promise.all([
+   db.from("attendance").select("employee_id,check_in_time,check_out_time,status,working_hours")
+    .in("employee_id",ids).gte("check_in_time",startISO).lt("check_in_time",endISO),
+   db.from("leave_requests").select("employee_id,selected_dates,start_date,is_half_day,half_day_period")
+    .in("employee_id",ids).eq("status","APPROVED")
+    .lte("start_date",endDateStr).gte("end_date",startDateStr),
+   db.from("wms_public_holidays").select("id,holiday_date,title,period,start_time,end_time,credited_hours")
+    .gte("holiday_date",startDateStr).lte("holiday_date",endDateStr)
+  ]);
+  if(att.error||leaves.error||holidays.error)throw att.error??leaves.error??holidays.error;
+  // Same-day physical work + approved leave + official holiday must occupy
+  // their OWN half-day windows, not all be treated as a full-day shortcut.
+  const byEmpDay=new Map<string,TimedAttendance[]>();
+  const add=(key:string,row:TimedAttendance)=>{
+    if(!byEmpDay.has(key))byEmpDay.set(key,[]);
+    byEmpDay.get(key)!.push(row);
+  };
+  for(const row of att.data??[]){
+    if(!row.check_in_time)continue;
+    const day=istanbulDate(row.check_in_time);
+    add(row.employee_id+"_"+day,row);
+  }
+  for(const req of leaves.data??[]){
+    const period=req.is_half_day
+      ? (req.half_day_period==="AFTERNOON"?"AFTERNOON":"MORNING")
+      : "FULL";
+    const window=HOLIDAY_WINDOWS[period];
+    for(const date of datesForLeave(req.selected_dates,req.start_date)){
+      if(date<startDateStr||date>endDateStr)continue;
+      add(req.employee_id+"_"+date,{
+        check_in_time:timeAtIstanbul(date,window.start),
+        check_out_time:timeAtIstanbul(date,window.end),
+        status:"LEAVE_APPROVED",
       });
-    });
-
-    const gapsByDate: Record<string, string[]> = {};
-
-    weekdays.forEach(dateStr => {
-      const missingEmps = employeeIds.filter(empId => !existingLogs.has(`${empId}_${dateStr}`));
-      if (missingEmps.length > 0) {
-        gapsByDate[dateStr] = missingEmps;
-      }
-    });
-
-    return { success: true, data: Object.entries(gapsByDate).map(([date, emps]) => ({ date, employeeIds: emps })) };
-  } catch (error: any) {
-    console.error("[GAP_ANALYSIS_ERROR]", error);
-    return { success: false, message: error.message };
-  }
-}
-
-interface BulkGapPayload {
-  date: string;
-  isHoliday: boolean;
-  checkIn: string;
-  checkOut: string;
-  breakMinutes: number;
-  employeeIds: string[];
-}
-
-export async function processBulkMissingAttendance(payloads: BulkGapPayload[], managerId: string) {
-  try {
-    let successCount = 0;
-    const allInserts = [];
-    const allLogs = [];
-
-    const allEmpIds = [...new Set(payloads.flatMap(p => p.employeeIds))];
-    const { data: empData } = await supabaseAdmin.from("employees").select("id, branch_id").in("id", allEmpIds);
-    const branchMap = new Map(empData?.map(e => [e.id, e.branch_id]));
-
-    for (const group of payloads) {
-      if (group.employeeIds.length === 0) continue;
-
-      const breakHours = group.isHoliday ? 0 : Number((group.breakMinutes / 60).toFixed(2));
-      
-      const checkInDate = new Date(`${group.date}T${group.checkIn}:00+03:00`);
-      let checkOutDate = new Date(`${group.date}T${group.checkOut}:00+03:00`);
-      if (checkOutDate < checkInDate) checkOutDate.setDate(checkOutDate.getDate() + 1);
-
-      const checkInISO = checkInDate.toISOString();
-      const checkOutISO = checkOutDate.toISOString();
-
-      const totalDiffMs = checkOutDate.getTime() - checkInDate.getTime();
-      const totalDiffHours = totalDiffMs / (1000 * 60 * 60);
-      const workingHours = group.isHoliday ? 0 : Number((totalDiffHours - breakHours).toFixed(2));
-
-      for (const empId of group.employeeIds) {
-        const bId = branchMap.get(empId);
-        if (!bId) continue;
-
-        allInserts.push({
-          employee_id: empId,
-          branch_id: bId,
-          check_in_time: checkInISO,
-          check_out_time: checkOutISO,
-          rounded_check_in: checkInISO,
-          rounded_check_out: checkOutISO,
-          break_hours: breakHours,
-          working_hours: workingHours > 0 ? workingHours : 0,
-          status: "PRESENT", // 🎯 Akıllı taramadan gelen eksikler "Normal Mesai" statüsüyle işlenir
-          manager_id: managerId,
-          created_at: new Date().toISOString()
-        });
-
-        allLogs.push({
-          employee_id: managerId,
-          action_type: "BULK_ATTENDANCE_NORMAL",
-          description: `Akıllı Tarama Eksik Tamamlama: ${empId} ID'li personele ${group.date} tarihi için NORMAL MESAİ işlendi.`
-        });
-        
-        successCount++;
-      }
     }
-
-    if (allInserts.length > 0) {
-      const { error: insertErr } = await supabaseAdmin.from("attendance").insert(allInserts);
-      if (insertErr) throw insertErr;
-      await supabaseAdmin.from("transaction_logs").insert(allLogs);
-    }
-
-    return { success: true, message: `${successCount} adet eksik gün kaydı NORMAL MESAİ olarak sisteme işlendi.` };
-  } catch (error: any) {
-    console.error("[BULK_INSERT_ERROR]", error);
-    return { success: false, message: error.message || "Toplu kayıt sırasında bir hata oluştu." };
   }
+  const holidayRows=(holidays.data??[]) as PublicHoliday[];
+  const results:{date:string;employeeIds:string[];partialEmployeeIds:string[]}[]=[];
+  for(const date of weekdays){
+    const missing:string[]=[],partial:string[]=[];
+    for(const id of ids){
+      const entries=byEmpDay.get(id+"_"+date)??[];
+      const credited=coveredDayHours(date,entries,holidayRows);
+      if(credited>=7.99)continue;
+      if(credited>0||entries.length>0||holidayRows.some(h=>h.holiday_date===date))partial.push(id);
+      else missing.push(id);
+    }
+    if(missing.length||partial.length)results.push({date,employeeIds:missing,partialEmployeeIds:partial});
+  }
+  return {success:true,data:results,message:"Eksik günler hesaplandı; yarım günler ayrı işaretlendi."};
+ }catch(e){return {success:false,message:e instanceof Error?e.message:"Tarama hatası."};}
+}
+type BulkGapPayload={date:string;isHoliday:boolean;checkIn:string;checkOut:string;breakMinutes:number;employeeIds:string[]};
+export async function processBulkMissingAttendance(payloads:BulkGapPayload[],managerId:string) {
+ try{
+  if(!Array.isArray(payloads)||payloads.length>92)throw new Error("Tarih sayısı sınırlandı.");
+  if(!payloads.length)return {success:true,message:"İşlenecek kayıt yok."};
+  const selected=[...new Set(payloads.flatMap(x=>x.employeeIds))];
+  await requireHRActor(selected);
+  if(!selected.length)return {success:true,message:"Gerçek eksik gün bulunmuyor."};
+  const dates=payloads.map(x=>x.date).sort(),start=dates[0],end=dates[dates.length-1];
+  datesBetween(start,end,[]);
+  const [employees,existing,leaves,holidays]=await Promise.all([
+   db.from("employees").select("id,branch_id").in("id",selected).eq("is_active",true),
+   db.from("attendance").select("employee_id,check_in_time,status")
+    .in("employee_id",selected).gte("check_in_time",timeAtIstanbul(start,"00:00"))
+    .lt("check_in_time",timeAtIstanbul(nextDate(end),"00:00")),
+   db.from("leave_requests").select("employee_id,selected_dates,start_date")
+    .in("employee_id",selected).eq("status","APPROVED")
+    .lte("start_date",end).gte("end_date",start),
+   db.from("wms_public_holidays").select("holiday_date,period").gte("holiday_date",start).lte("holiday_date",end)
+  ]);
+  if(employees.error||existing.error||leaves.error||holidays.error)
+   throw employees.error??existing.error??leaves.error??holidays.error;
+  const branches=new Map((employees.data??[]).map(x=>[x.id,x.branch_id]));
+  const occupied=new Set<string>();
+  for(const x of existing.data??[])if(x.check_in_time)occupied.add(x.employee_id+"_"+istanbulDate(x.check_in_time));
+  for(const x of leaves.data??[])for(const d of datesForLeave(x.selected_dates,x.start_date))occupied.add(x.employee_id+"_"+d);
+  const holidayDays=new Set((holidays.data??[]).map(x=>x.holiday_date));
+  const rows:Record<string,unknown>[]=[];
+  let skipped=0;
+  for(const group of payloads){
+   if(!isISODate(group.date)||group.isHoliday)throw new Error("Resmî tatil kaydı ayrı Tatil Yönetimi sekmesinden yapılır.");
+   if(!/^\d\d:\d\d$/.test(group.checkIn)||!/^\d\d:\d\d$/.test(group.checkOut))
+    throw new Error("Mesai saatleri geçersiz.");
+   const timeIn=new Date(timeAtIstanbul(group.date,group.checkIn));
+   const timeOut=new Date(timeAtIstanbul(group.date,group.checkOut));
+   if(timeOut<=timeIn)timeOut.setTime(timeOut.getTime()+86400000);
+   const duration=(timeOut.getTime()-timeIn.getTime())/3600000;
+   const breakHours=Number(group.breakMinutes)/60;
+   if(duration>20||duration<=0||breakHours<0||breakHours>duration)throw new Error("Mesai süresi geçersiz.");
+   for(const id of group.employeeIds){
+    const key=id+"_"+group.date,branch=branches.get(id);
+    // Never synthesize full-day work on a half holiday or a half leave.
+    if(!branch||occupied.has(key)||holidayDays.has(group.date)){skipped++;continue;}
+    occupied.add(key);
+    rows.push({
+     employee_id:id,branch_id:branch,check_in_time:timeIn.toISOString(),
+     check_out_time:timeOut.toISOString(),rounded_check_in:timeIn.toISOString(),
+     rounded_check_out:timeOut.toISOString(),break_hours:Number(breakHours.toFixed(2)),
+     working_hours:Number((duration-breakHours).toFixed(2)),status:"PRESENT",
+     manager_id:managerId,
+    });
+   }
+  }
+  if(rows.length){
+   const {error}=await db.from("attendance").insert(rows);
+   if(error)throw error;
+   // Single audit event instead of one REST insert per employee.
+   await db.from("transaction_logs").insert({
+    employee_id:managerId,action_type:"BULK_ATTENDANCE_NORMAL",
+    description:`${rows.length} eksik mesai tamamlandı, ${skipped} izin/tatil/mevcut kayıt korundu.`
+   });
+  }
+  return {success:true,message:`${rows.length} eksik mesai eklendi. ${skipped} mevcut izin, tatil veya mesai kaydı korunarak atlandı.`};
+ }catch(e){return {success:false,message:e instanceof Error?e.message:"Toplu mesai hatası."};}
 }

@@ -4,6 +4,8 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { Plus, Clock, AlertCircle, CalendarDays, ArrowRight, Check, Info, Calendar, FileText, Lock, ListChecks, ChevronLeft, ChevronRight, CheckCircle2, XCircle, History, ShieldAlert, Ban, MessageSquare, TerminalSquare, Umbrella, HeartPulse, Scale, UserMinus, AlertTriangle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { submitLeaveRequest, cancelLeaveRequestServer } from "@/app/actions/leave-requests";
+import { getPublicHolidays } from "@/app/actions/public-holidays";
+import type { PublicHoliday } from "@/lib/attendance/day-coverage";
 import { useRouter } from "next/navigation";
 import { useWms } from "@/components/providers/WmsSessionProvider";
 
@@ -27,10 +29,13 @@ export default function LeaveRequestPanel() {
   const [leaveType, setLeaveType] = useState("");
   const [customType, setCustomType] = useState("");
   const [isHalfDay, setIsHalfDay] = useState(false);
+  const [halfDayPeriod,setHalfDayPeriod]=useState<"MORNING"|"AFTERNOON">("MORNING");
   const [reason, setReason] = useState("");
 
   const [currentMonthDate, setCurrentMonthDate] = useState(new Date());
   const [selectedDates, setSelectedDates] = useState<string[]>([]);
+  const [publicHolidays,setPublicHolidays] = useState<PublicHoliday[]>([]);
+  const [holidayWarning,setHolidayWarning]=useState("");
   
   const [cancelModal, setCancelModal] = useState<any>(null);
 
@@ -53,6 +58,24 @@ export default function LeaveRequestPanel() {
       fetchData(employee.id, currentMonthDate);
     }
   }, [currentMonthDate, employee, step]);
+
+  // One month-scoped public-holiday lookup only while the leave form is open.
+  // No continuous polling; calendar month navigation fetches just that month.
+  useEffect(() => {
+    if (step !== "REQUEST_FORM" || !employee) return;
+    let alive = true;
+    const year=currentMonthDate.getFullYear(),month=currentMonthDate.getMonth();
+    const start=`${year}-${String(month+1).padStart(2,"0")}-01`;
+    const last=new Date(year,month+1,0).getDate();
+    const end=`${year}-${String(month+1).padStart(2,"0")}-${String(last).padStart(2,"0")}`;
+    setPublicHolidays([]);
+    void getPublicHolidays(start,end).then(result=>{
+      if(!alive)return;
+      if(result.success) {setPublicHolidays(result.data);setHolidayWarning("");}
+      else setHolidayWarning("Resmî tatil bilgileri alınamadı; seçimi kaydetmeden önce kontrol ediniz.");
+    });
+    return ()=>{alive=false;};
+  },[step,employee?.id,currentMonthDate]);
 
   const fetchData = async (empId: string, targetMonth?: Date) => {
     const { data: leaves } = await supabase
@@ -197,19 +220,24 @@ export default function LeaveRequestPanel() {
       const dayNum = i + 1;
       const dateString = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
       const isSelected = selectedDates.includes(dateString);
+      const holiday = publicHolidays.find(h=>h.holiday_date===dateString);
       
       return (
         <button
           key={dateString}
           type="button"
           onClick={() => toggleDateSelection(dateString)}
-          className={`h-11 w-full flex items-center justify-center rounded-none font-mono font-black text-xs transition-all border ${
-            isSelected 
-              ? "bg-[#dc3545] text-white border-[#dc3545] shadow-sm z-10 relative scale-105" 
-              : "bg-white text-slate-700 border-slate-200 hover:border-[#0F172A] hover:bg-slate-50"
+          title={holiday?`${holiday.title}: ${holiday.period==="FULL"?"Tam gün":holiday.period==="MORNING"?"08:00–12:00":"13:00–17:00"}`:"Tarih seç"}
+          className={`relative flex h-12 w-full flex-col items-center justify-center rounded-[5px] border font-mono text-xs font-black transition-colors ${
+            isSelected
+              ? "border-[#dc3545] bg-[#dc3545] text-white"
+              : holiday
+                ? "border-amber-300 bg-amber-50 text-amber-900 hover:border-amber-500"
+                : "border-slate-200 bg-white text-slate-700 hover:border-[#0F172A] hover:bg-slate-50"
           }`}
         >
           {dayNum}
+          {holiday && <span className={`text-[8px] font-extrabold tracking-tight ${isSelected?"text-white":"text-amber-700"}`}>{holiday.period==="FULL"?"TATİL":"½ TATİL"}</span>}
         </button>
       );
     });
@@ -228,6 +256,13 @@ export default function LeaveRequestPanel() {
 
     if (selectedDates.length === 0) {
       alert("Lütfen takvimden en az bir gün seçiniz.");
+      return;
+    }
+
+    const dateConflicts=publicHolidays.filter(h=>selectedDates.includes(h.holiday_date)
+      && leaveType==="YILLIK_IZIN" && (h.period==="FULL" || !isHalfDay || h.period===halfDayPeriod));
+    if(dateConflicts.length){
+      alert(`Tatil dönemiyle çakışan yıllık izin: ${dateConflicts.map(h=>h.holiday_date).join(", ")}. Tatil olmayan diğer yarım günü seçiniz.`);
       return;
     }
 
@@ -251,6 +286,7 @@ export default function LeaveRequestPanel() {
       custom_leave_type: customType,
       selected_dates: selectedDates,
       is_half_day: isHalfDay,
+      half_day_period: isHalfDay?halfDayPeriod:null,
       reason: reason,
     });
 
@@ -261,7 +297,7 @@ export default function LeaveRequestPanel() {
       await fetchData(employee.id, currentMonthDate);
       setStep("DASHBOARD");
       
-      setLeaveCategory(""); setLeaveType(""); setSelectedDates([]); setReason(""); setIsHalfDay(false); setCustomType("");
+      setLeaveCategory(""); setLeaveType(""); setSelectedDates([]); setReason(""); setIsHalfDay(false); setHalfDayPeriod("MORNING"); setCustomType("");
       router.refresh();
     } else {
       alert(`HATA: ${result.message}`); // Sunucudan dönen ret mesajı burada basılır
@@ -653,7 +689,7 @@ export default function LeaveRequestPanel() {
                                 </span>
                               </td>
                               <td className="p-3 text-center align-middle font-mono text-sm font-black text-[#dc3545]">
-                                {req.requested_days} <span className="text-[9px] text-slate-500 ml-0.5">GÜN</span>
+                                {req.requested_days} <span className="text-[9px] text-slate-500 ml-0.5">GÜN</span>{req.is_half_day && <span className="block text-[9px] text-sky-700">{req.half_day_period==="AFTERNOON"?"13.00–17.00":"08.00–12.00"}</span>}
                               </td>
                               <td className="p-3 align-middle whitespace-normal min-w-[200px]">
                                 <div className="flex flex-col items-start gap-1.5">
@@ -732,6 +768,11 @@ export default function LeaveRequestPanel() {
                                      leaveText === 'SAGLIK RAPORU' ? 'bg-red-50 text-red-700 border-red-300' : 'bg-blue-50 text-blue-700 border-blue-300'
                                    }`}>
                                      {leaveText === 'SAGLIK RAPORU' ? 'SAĞLIK RAPORU' : `${leaveText}`}
+                                      {log.check_in_time && log.check_out_time && (Date.parse(log.check_out_time)-Date.parse(log.check_in_time))/3600000<=4.1 && (
+                                        <span className="ml-2 inline-flex items-center rounded-[5px] bg-white px-2 py-1 font-mono text-[10px] text-blue-800">
+                                          Yarım gün · {formatTime(log.check_in_time)}–{formatTime(log.check_out_time)}
+                                        </span>
+                                      )}
                                    </span>
                                  ) : (
                                    <div className="flex items-center justify-center">
@@ -861,6 +902,22 @@ export default function LeaveRequestPanel() {
                         <div className="w-3 h-3 rounded-full border-2 border-current relative overflow-hidden"><div className="absolute left-0 top-0 bottom-0 w-1/2 bg-current"></div></div>
                         YARIM GÜN
                      </button>
+                      {isHalfDay && (
+                        <div className="rounded-[5px] border border-amber-200 bg-amber-50 p-3">
+                          <p className="mb-2 text-[11px] font-black text-amber-900">Yarım gün aralığı • 4 saat</p>
+                          <div className="grid gap-2">
+                            <button type="button" onClick={()=>setHalfDayPeriod("MORNING")}
+                              className={`rounded-[5px] border px-3 py-3 text-left text-[11px] font-extrabold ${halfDayPeriod==="MORNING"?"border-amber-600 bg-amber-200 text-amber-950":"border-slate-200 bg-white text-slate-700"}`}>
+                              Sabah · 08.00–12.00
+                            </button>
+                            <button type="button" onClick={()=>setHalfDayPeriod("AFTERNOON")}
+                              className={`rounded-[5px] border px-3 py-3 text-left text-[11px] font-extrabold ${halfDayPeriod==="AFTERNOON"?"border-amber-600 bg-amber-200 text-amber-950":"border-slate-200 bg-white text-slate-700"}`}>
+                              Öğleden sonra · 13.00–17.00
+                            </button>
+                          </div>
+                          <p className="mt-2 text-[10px] leading-5 text-amber-800">Diğer yarım gün gerçek mesai veya resmî tatil olarak kaydedilebilir.</p>
+                        </div>
+                      )}
                    </div>
                  </div>
 
@@ -901,6 +958,8 @@ export default function LeaveRequestPanel() {
                 <div className="grid grid-cols-7 gap-1.5 bg-slate-50 p-2 border border-slate-200 flex-1 content-start">
                   {generateCalendarDays()}
                 </div>
+                {publicHolidays.length>0 && <p className="mt-3 text-[11px] font-semibold leading-5 text-amber-800">Amber işaretli günlerde resmî tatil vardır. Öğleden sonra tatil ise sabah yarım gün izin seçebilirsiniz; aynı saatler ikinci kez izin yazılmaz.</p>}
+                {holidayWarning && <p className="mt-2 text-[11px] font-bold text-red-700">{holidayWarning}</p>}
 
                 {leaveCategory === "YILLIK" && selectedDates.length > 0 && employee.leave_balance - (isHalfDay ? selectedDates.length * 0.5 : selectedDates.length) < 0 && (
                    <div className="mt-4 p-3 bg-red-50 border border-red-200 flex items-start gap-2 shadow-sm">
@@ -917,6 +976,7 @@ export default function LeaveRequestPanel() {
                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">HESAPLANAN</span>
                    <span className="text-3xl font-black font-mono tracking-wide leading-none">
                      {isHalfDay ? selectedDates.length * 0.5 : selectedDates.length} <span className="text-xs text-[#dc3545] ml-0.5 tracking-widest">GÜN</span>
+                      {isHalfDay && <span className="mt-1 block text-[10px] font-medium text-slate-300">{halfDayPeriod==="MORNING"?"08.00–12.00":"13.00–17.00"} • {selectedDates.length*4} saat</span>}
                    </span>
                 </div>
                 

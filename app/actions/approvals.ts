@@ -2,6 +2,8 @@
 
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import { leaveAttendanceRows } from "@/lib/attendance/leave-records";
+import { istanbulDate } from "@/lib/attendance/day-coverage";
 
 // ========================================================================
 // 🛡️ TİP TANIMLAMALARI (WMS STRICT TYPING)
@@ -128,61 +130,66 @@ export async function processApproval(params: ProcessApprovalParams): Promise<Ac
       if (req.status !== "PENDING") return { success: false, message: "UYARI: Bu talep zaten karara bağlanmış." };
 
       const employee = req.employees;
+      let creditedRowsInserted = false;
+      let annualBalanceAdjusted = false;
 
+      try {
       if (isApprove) {
-        // 1. Yıllık İzin Bakiye Kontrolü (Bakiye Yetersizse Reddet)
-        if (req.leave_type === "YILLIK_IZIN") {
-          // Bakiyeden düş
-          await supabaseAdmin.from("employees").update({
-            leave_balance: employee.leave_balance - req.requested_days
-          }).eq("id", employee.id);
+        // Leave-only rows carry the exact selected clock window and a source
+        // request ID. Actual worked shifts for the same date remain intact.
+        const rows=leaveAttendanceRows({
+          id:req.id,employee_id:employee.id,branch_id:req.branch_id,
+          leave_type:req.leave_type,is_half_day:!!req.is_half_day,
+          half_day_period:req.half_day_period,selected_dates:req.selected_dates,
+          start_date:req.start_date,
+        });
+        if(req.leave_type==="YILLIK_IZIN"){
+          // Holidays can be registered after a request was filed but before
+          // manager approval. Never deduct annual leave for the holiday half.
+          const dateStrings=[...new Set(rows.map(r=>istanbulDate(r.check_in_time)))];
+          const {data:holidays,error:holidayError}=await supabaseAdmin
+            .from("wms_public_holidays").select("holiday_date,period").in("holiday_date",dateStrings);
+          if(holidayError)throw holidayError;
+          const period=req.is_half_day?(req.half_day_period==="AFTERNOON"?"AFTERNOON":"MORNING"):null;
+          if((holidays??[]).some(h=>h.period==="FULL" || !req.is_half_day || h.period===period))
+            return {success:false,message:"Talep edilen yıllık izin resmî tatil ile çakışıyor. İzin saatlerini düzeltiniz."};
         }
-
-        // 2. Çoklu Tarih (Selected Dates) Akıllı Ayrıştırıcı
-        let dates: string[] = [];
-        if (req.selected_dates) {
-          dates = Array.isArray(req.selected_dates) 
-            ? req.selected_dates 
-            : JSON.parse(req.selected_dates as string);
-        } else {
-          dates = [req.start_date]; // Eski loglar için Fallback
-        }
-
-        // 3. Çalışma Saati Mantığı (Ücretsiz izinlerde 0 saat işlenir)
-        let workingHours = req.is_half_day ? 4 : 8;
-        if (req.leave_type === "UCRETSIZ" || req.leave_type === "ÜCRETSİZ") {
-          workingHours = 0; 
-        }
-
-        // 4. Puantaj (Attendance) Oluşturma Döngüsü
-        for (const dStr of dates) {
-          const dIn = new Date(dStr); 
-          dIn.setHours(5, 0, 0, 0); // Orijinal referansı bozmadan yeni instance oluşturuldu
-          
-          const dOut = new Date(dStr); 
-          dOut.setHours(req.is_half_day ? 9 : 13, 0, 0, 0);
-
-          await supabaseAdmin.from("attendance").insert({
-            employee_id: employee.id,
-            branch_id: req.branch_id,
-            check_in_time: dIn.toISOString(),
-            check_out_time: dOut.toISOString(),
-            rounded_check_in: dIn.toISOString(),
-            rounded_check_out: dOut.toISOString(),
-            break_hours: 0,
-            working_hours: workingHours,
-            status: `LEAVE_${req.leave_type}`
-          });
+        const {error:insertError}=await supabaseAdmin.from("attendance").insert(rows);
+        if(insertError) throw insertError;
+        creditedRowsInserted = true;
+        if(req.leave_type==="YILLIK_IZIN"){
+          const {error:balanceError}=await supabaseAdmin.from("employees")
+            .update({leave_balance:Number(employee.leave_balance)-Number(req.requested_days)})
+            .eq("id",employee.id);
+          if(balanceError){
+            await supabaseAdmin.from("attendance").delete().eq("leave_request_id",req.id);
+            throw balanceError;
+          }
+          annualBalanceAdjusted = true;
         }
       }
 
       // 5. Talebi Güncelle ve Log Bırak
-      await supabaseAdmin.from("leave_requests").update({
+      const {data:updatedRequest,error:requestUpdateError}=await supabaseAdmin.from("leave_requests").update({
         status: finalStatus,
         manager_id: params.manager_id,
         manager_note: params.manager_note,
         updated_at: new Date().toISOString()
-      }).eq("id", params.request_id);
+      }).eq("id", params.request_id).eq("status","PENDING").select("id").maybeSingle();
+      if(requestUpdateError || !updatedRequest)throw requestUpdateError??new Error("Talep zaten değişmiş.");
+
+      } catch(error) {
+        // The REST API has no cross-request SQL transaction; compensate
+        // partial writes so a failed approval never leaves fake absence rows.
+        if (isApprove && creditedRowsInserted) {
+          await supabaseAdmin.from("attendance").delete().eq("leave_request_id",req.id);
+        }
+        if(isApprove && annualBalanceAdjusted && req.leave_type==="YILLIK_IZIN"){
+          await supabaseAdmin.from("employees")
+            .update({leave_balance:employee.leave_balance}).eq("id",employee.id);
+        }
+        throw error;
+      }
 
       await supabaseAdmin.from("transaction_logs").insert({
         employee_id: employee.id,
@@ -235,7 +242,7 @@ export async function processApproval(params: ProcessApprovalParams): Promise<Ac
           // Mesai ve mola süresi hesabı sadece hem giriş hem çıkış doluysa hesaplanabilir
           if (rIn && rOut) {
             const diffHours = (rOut.getTime() - rIn.getTime()) / 3600000;
-            breakH = diffHours > 5 ? 1 : 0; // 5 Saatten uzunsa 1 saat mola düşülür
+            breakH = diffHours >= 5 ? 1 : 0; // 5h interval includes 1h lunch // 5 Saatten uzunsa 1 saat mola düşülür
             netW = Math.max(0, diffHours - breakH);
           }
 

@@ -108,7 +108,7 @@ export async function submitLogRequest(params: LogRequestParams) {
         // Mola ve Net Süre Hesaplama
         const diffMs = new Date(roundedOutIso).getTime() - new Date(roundedInIso).getTime();
         const totalHours = diffMs / (1000 * 60 * 60);
-        breakHours = totalHours > 5 ? 1 : 0;
+        breakHours = totalHours >= 5 ? 1 : 0; // 08:00–13:00 = 4 net working hours
         netWorkingHours = Math.max(0, totalHours - breakHours);
       }
     }

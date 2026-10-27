@@ -111,7 +111,8 @@ export async function processAttendanceScan(
         .select('id')
         .eq('employee_id', employee.id)
         .gte('check_in_time', startOfDayTrt)
-        .lt('check_in_time', startOfTomorrowTrt) // <--- KRİTİK DÜZELTME BURADA
+        .lt('check_in_time', startOfTomorrowTrt)
+        .not('status', 'like', 'LEAVE_%') // Leave-only credits are NOT real punches.
         .limit(1)
         .maybeSingle();
 
@@ -122,24 +123,10 @@ export async function processAttendanceScan(
         };
       }
 
-      // RAPOR / İZİN KONTROLÜ
-      const { data: existingTodayReport } = await supabase
-        .from('leave_requests') 
-        .select('id')
-        .eq('employee_id', employee.id)
-        .eq('status', 'APPROVED')
-        .lte('start_date', startOfDayTrt)
-        .gte('end_date', startOfDayTrt)
-        .limit(1)
-        .maybeSingle();
-
-      if (existingTodayReport) {
-        return { 
-          success: false, 
-          message: `HATA: ${employee.full_name.toUpperCase()} BUGÜN İÇİN RAPORLU/İZİNLİ GÖRÜNÜYOR` 
-        };
-      }
-
+      // A half-day leave may coexist with a real 08:00–12:00 or 13:00–17:00
+      // shift. Even a full-day approved leave is not a punched time record.
+      // We preserve approved absence rows and allow actual scan events through.
+      
       const { error: insertError } = await supabase
         .from('attendance')
         .insert({
@@ -184,7 +171,7 @@ export async function processAttendanceScan(
       const diffInMilliseconds = roundedTime.getTime() - checkInDate.getTime();
       const totalHoursRounded = diffInMilliseconds / (1000 * 60 * 60);
 
-      const breakHours = totalHoursRounded > 5 ? 1 : 0;
+      const breakHours = totalHoursRounded >= 5 ? 1 : 0; // 08:00–13:00 includes 1h lunch; 4h net work
       const netWorkingHours = Math.max(0, totalHoursRounded - breakHours);
 
       const { error: updateError } = await supabase

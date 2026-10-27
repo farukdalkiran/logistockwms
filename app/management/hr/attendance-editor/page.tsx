@@ -6,15 +6,17 @@ export const revalidate = 0;
 
 export default async function AttendanceEditorPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) redirect("/login");
+  // Local JWT verification avoids a separate /auth/v1/user network request
+  // on every visit to the editor.
+  const { data: claims, error: authError } = await supabase.auth.getClaims();
+  if (authError || !claims?.claims?.sub) redirect("/login");
 
   const { data: profile } = await supabase
     .from("profiles")
     .select("id, role, branch_id")
-    .eq("id", user.id)
+    .eq("id", claims.claims.sub)
     .single();
+  if (!profile) redirect("/management");
 
   const isGlobal = !profile?.branch_id || profile?.role === 'Developer' || profile?.role === 'Admin';
   
@@ -42,7 +44,7 @@ export default async function AttendanceEditorPage() {
   }
 
   return (
-    <div className="p-4 md:p-8 w-full min-h-[calc(100vh-4rem)] bg-slate-100 flex items-start justify-center">
+    <div className="w-full min-h-[calc(100vh-4rem)] bg-slate-50 p-0 sm:p-2 flex items-start justify-center">
       <SmartAttendanceManager 
         managerId={managerMock.id}
         managerName={managerMock.full_name}

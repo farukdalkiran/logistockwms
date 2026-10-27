@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import { datesForLeave, leaveAttendanceRows } from "@/lib/attendance/leave-records";
 
 // ============================================================================
 // 1. GÜVENLİK VE VERİTABANI İSTEMCİSİ (SERVICE ROLE BYPASS)
@@ -29,28 +30,38 @@ export async function submitLeaveRequest(data: {
   custom_leave_type: string;
   selected_dates: string[];
   is_half_day: boolean;
+  half_day_period?: "MORNING" | "AFTERNOON" | null;
   reason: string;
 }) {
   const supabase = await createClient();
 
   try {
-    if (!data.selected_dates || data.selected_dates.length === 0) {
-      return { success: false, message: "LÜTFEN TAKVİMDEN EN AZ 1 GÜN SEÇİNİZ" };
+    const {data:session,error:authError}=await supabase.auth.getClaims();
+    if(authError || !session?.claims?.sub) return {success:false,message:"Oturum doğrulanamadı."};
+    const sortedDates=datesForLeave(data.selected_dates);
+    const period=data.is_half_day?(data.half_day_period==="AFTERNOON"?"AFTERNOON":"MORNING"):null;
+    if(data.is_half_day && period!=="MORNING" && period!=="AFTERNOON") {
+      return {success:false,message:"Yarım gün dilimini seçiniz."};
     }
+    const {data:profile}=await supabaseAdmin.from("profiles").select("role,branch_id").eq("id",session.claims.sub).single();
+    if(!profile) return {success:false,message:"Kullanıcı profili bulunamadı."};
+    const globallyAuthorized=profile.role==="Developer"||profile.role==="Admin";
+    if(!globallyAuthorized && profile.branch_id!==data.branch_id)
+      return {success:false,message:"Farklı şube adına izin oluşturulamaz."};
 
-    const { data: employee, error: empError } = await supabase
+    const { data: employee, error: empError } = await supabaseAdmin
       .from("employees")
-      .select("id, full_name, position_title, leave_balance")
-      .eq("id", data.employee_id)
+      .select("id, full_name, position_title, leave_balance, branch_id")
+      .eq("id", data.employee_id).eq("is_active", true)
       .single();
 
     if (empError || !employee) return { success: false, message: "PERSONEL BULUNAMADI" };
 
-    const sortedDates = [...data.selected_dates].sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+    if(employee.branch_id!==data.branch_id) return {success:false,message:"Çalışan farklı şubeye bağlı."};
     const startDate = sortedDates[0];
     const endDate = sortedDates[sortedDates.length - 1];
 
-    const requestedDays = data.is_half_day ? (sortedDates.length * 0.5) : sortedDates.length;
+    const requestedDays = data.is_half_day ? sortedDates.length * 0.5 : sortedDates.length;
 
 // YENİ KOD (Olması Gereken -14 Lojiği):
 if (data.leave_type === 'YILLIK_IZIN') {
@@ -69,6 +80,42 @@ if (data.leave_type === 'YILLIK_IZIN') {
     let managerNote = null;
     let feedbackMessage = "İZİN TALEBİNİZ YÖNETİCİ ONAYINA GÖNDERİLDİ";
 
+    // An annual-leave half cannot overlap a public-holiday half.
+    // For a 13–17 holiday, the user may still request 08–12 annual leave.
+    if(data.leave_type==="YILLIK_IZIN"){
+      const {data:holidays,error:holidayError}=await supabaseAdmin.from("wms_public_holidays")
+        .select("holiday_date,period").in("holiday_date",sortedDates);
+      if(holidayError)throw holidayError;
+      const conflict=(holidays??[]).find(h=>h.period==="FULL" || !data.is_half_day || h.period===period);
+      if(conflict)return {
+        success:false,
+        message:`${conflict.holiday_date} tarihi için resmî tatil bulunmaktadır. Sadece tatil olmayan yarım güne izin oluşturabilirsiniz.`,
+      };
+    }
+
+    const {data:existingLeaves,error:overlapError}=await supabaseAdmin.from("leave_requests")
+      .select("id,selected_dates,start_date,end_date,is_half_day,half_day_period")
+      .eq("employee_id",data.employee_id).in("status",["PENDING","APPROVED"])
+      .lte("start_date",endDate).gte("end_date",startDate);
+    if(overlapError) throw overlapError;
+    const desired=new Set(sortedDates);
+    for(const old of existingLeaves??[]){
+      const existingDates=datesForLeave(old.selected_dates,old.start_date);
+      if(existingDates.some(day=>desired.has(day)) &&
+        (!old.is_half_day || !data.is_half_day || (old.half_day_period??"MORNING")===period))
+        return {success:false,message:"Seçili gün ve saat dilimi için zaten bekleyen veya onaylanmış izin mevcut."};
+    }
+
+    // Create the request BEFORE its attendance credits, linking each leave-only
+    // attendance row to this specific request (actual punches are independent).
+    const {data:storedRequest,error:reqError}=await supabaseAdmin.from("leave_requests").insert({
+      employee_id:data.employee_id,branch_id:data.branch_id,leave_type:data.leave_type,
+      custom_leave_type:data.custom_leave_type||null,start_date:startDate,end_date:endDate,
+      selected_dates:sortedDates,is_half_day:data.is_half_day,half_day_period:period,
+      requested_days:requestedDays,reason:data.reason,status:requestStatus,manager_note:managerNote
+    }).select("id").single();
+    if(reqError||!storedRequest) throw reqError??new Error("Talep kaydedilemedi.");
+
     if (isAuthorized || isHealthReport) {
       requestStatus = "APPROVED";
       managerNote = isHealthReport 
@@ -79,37 +126,34 @@ if (data.leave_type === 'YILLIK_IZIN') {
         ? "SAĞLIK RAPORU: SİSTEM TARAFINDAN OTOMATİK ONAYLANDI" 
         : "YETKİLİ: İZİN OTOMATİK ONAYLANDI VEYA SİSTEME İŞLENDİ";
 
-      if (data.leave_type === 'YILLIK_IZIN') {
-         await supabaseAdmin.from("employees").update({
-           leave_balance: employee.leave_balance - requestedDays
-         }).eq("id", employee.id);
-      }
-
-      let workingHours = data.is_half_day ? 4 : 8;
-      if (data.leave_type === 'UCRETSIZ' || data.leave_type === 'ÜCRETSİZ') {
-        workingHours = 0;
+      try {
+        const credits=leaveAttendanceRows({
+          id:storedRequest.id,employee_id:data.employee_id,branch_id:data.branch_id,
+          leave_type:data.leave_type,is_half_day:data.is_half_day,half_day_period:period,
+          selected_dates:sortedDates,
+        });
+        const {error:creditError}=await supabaseAdmin.from("attendance").insert(credits);
+        if(creditError)throw creditError;
+        if(data.leave_type==="YILLIK_IZIN"){
+          const {error:balanceError}=await supabaseAdmin.from("employees")
+            .update({leave_balance:Number(employee.leave_balance)-requestedDays}).eq("id",employee.id);
+          if(balanceError)throw balanceError;
+        }
+      } catch (error) {
+        await supabaseAdmin.from("attendance").delete().eq("leave_request_id",storedRequest.id);
+        await supabaseAdmin.from("leave_requests").delete().eq("id",storedRequest.id);
+        throw error;
       }
       
-      for (const dateStr of sortedDates) {
-        const dIn = new Date(dateStr);
-        dIn.setHours(8, 0, 0, 0);
-        const checkInIso = dIn.toISOString();
-
-        const dOut = new Date(dateStr);
-        dOut.setHours(data.is_half_day ? 12 : 16, 0, 0, 0);
-        const checkOutIso = dOut.toISOString();
-
-        await supabaseAdmin.from("attendance").insert({
-          employee_id: data.employee_id,
-          branch_id: data.branch_id,
-          check_in_time: checkInIso,
-          check_out_time: checkOutIso,
-          rounded_check_in: checkInIso,    
-          rounded_check_out: checkOutIso,  
-          break_hours: 0, 
-          working_hours: workingHours,
-          status: `LEAVE_${data.leave_type}`
-        });
+      const {error:statusErr}=await supabaseAdmin.from("leave_requests")
+        .update({status:"APPROVED",manager_note:managerNote,updated_at:new Date().toISOString()})
+        .eq("id",storedRequest.id).eq("status","PENDING");
+      if(statusErr){
+        await supabaseAdmin.from("attendance").delete().eq("leave_request_id",storedRequest.id);
+        if(data.leave_type==="YILLIK_IZIN")
+          await supabaseAdmin.from("employees").update({leave_balance:employee.leave_balance}).eq("id",employee.id);
+        await supabaseAdmin.from("leave_requests").delete().eq("id",storedRequest.id);
+        throw statusErr;
       }
 
       await supabaseAdmin.from("transaction_logs").insert({
@@ -118,23 +162,6 @@ if (data.leave_type === 'YILLIK_IZIN') {
         description: `OTO-ONAY: Toplam ${requestedDays} gün ${data.leave_type} izni kullanıldı. Neden: ${data.reason}`
       });
     }
-
-    const { error: reqError } = await supabaseAdmin.from("leave_requests").insert({
-      employee_id: data.employee_id,
-      branch_id: data.branch_id,
-      leave_type: data.leave_type,
-      custom_leave_type: data.custom_leave_type || null,
-      start_date: startDate, 
-      end_date: endDate,     
-      selected_dates: data.selected_dates,
-      is_half_day: data.is_half_day,
-      requested_days: requestedDays,
-      reason: data.reason,
-      status: requestStatus,
-      manager_note: managerNote
-    });
-
-    if (reqError) throw reqError;
 
     revalidatePath("/management/hr", "layout");
 
@@ -149,77 +176,59 @@ if (data.leave_type === 'YILLIK_IZIN') {
 // 3. İPTAL VE TEMİZLİK MOTORU (ÇALIŞAN YAPIYA UYARLANMIŞ KESİN ÇÖZÜM)
 // ============================================================================
 export async function cancelLeaveRequestServer(
-  leaveId: string, 
-  employeeId: string, 
-  leaveType: string, 
-  requestedDays: number, 
-  selectedDatesRaw: any, 
-  status: string
+ leaveId:string, employeeId:string, _leaveType:string,
+ _requestedDays:number,_selectedDatesRaw:unknown,_status:string,
 ) {
-  try {
-    const logMsg = status === 'APPROVED' ? "SİSTEM: Personel onaylanmış iznini iptal etti." : "SİSTEM: Personel bekleyen talebini geri çekti.";
-    
-    // 1. İzin talebini CANCELLED olarak güncelle
-    const { error: updateError } = await supabaseAdmin.from('leave_requests').update({ status: 'CANCELLED', manager_note: logMsg }).eq('id', leaveId);
-    if (updateError) throw new Error("Talep güncellenemedi: " + updateError.message);
+ try{
+  const supabase=await createClient();
+  const {data:claims,error:authError}=await supabase.auth.getClaims();
+  if(authError||!claims?.claims?.sub)throw new Error("Oturum doğrulanamadı.");
+  const {data:profile}=await supabaseAdmin.from("profiles").select("role,branch_id").eq("id",claims.claims.sub).single();
+  const {data:req,error:readError}=await supabaseAdmin.from("leave_requests")
+   .select("id,employee_id,branch_id,leave_type,requested_days,status,selected_dates,start_date,is_half_day,half_day_period")
+   .eq("id",leaveId).eq("employee_id",employeeId).single();
+  if(readError||!req||!profile)throw new Error("İzin talebi bulunamadı.");
+  if(!["PENDING","APPROVED"].includes(req.status))throw new Error("Bu talep zaten kapatılmış.");
+  if(profile.role!=="Developer" && profile.role!=="Admin" && profile.branch_id!==req.branch_id)
+   throw new Error("Bu şubeye işlem yetkiniz yok.");
+  const {data:updated,error:updError}=await supabaseAdmin.from("leave_requests")
+   .update({status:"CANCELLED",manager_note:"Personel tarafından iptal edildi.",updated_at:new Date().toISOString()})
+   .eq("id",req.id).eq("status",req.status).select("id").maybeSingle();
+  if(updError||!updated)throw new Error("Talep durumu güncellenemedi.");
 
-    if (status === 'APPROVED') {
-      
-      // 2. Bakiye İadesi
-      const nonRefundable = ['UCRETSİZ', 'ÜCRETSİZ', 'UCRETSIZ', 'SAGLIK_RAPORU', 'EVLILIK', 'VEFAT', 'DOGUM', 'MAZERET'];
-      if (!nonRefundable.includes(leaveType)) {
-        const { data: emp, error: empError } = await supabaseAdmin.from('employees').select('leave_balance').eq('id', employeeId).single();
-        if (empError) throw new Error("Bakiye okunamadı: " + empError.message);
+  if(req.status==="APPROVED"){
+    const {error:delError}=await supabaseAdmin.from("attendance")
+      .delete().eq("leave_request_id",req.id);
+    if(delError)throw delError;
 
-        if (emp) {
-           const { error: balanceError } = await supabaseAdmin.from('employees').update({ leave_balance: emp.leave_balance + Number(requestedDays) }).eq('id', employeeId);
-           if (balanceError) throw new Error("Bakiye iade edilemedi: " + balanceError.message);
-        }
-      }
-
-      // 3. Puantaj (Attendance) Hayalet Loglarını Silme (Döngüsel Tekil Silme)
-      const rawString = typeof selectedDatesRaw === 'string' ? selectedDatesRaw : JSON.stringify(selectedDatesRaw);
-      const matchedDates = rawString.match(/20\d{2}-\d{2}-\d{2}/g) || [];
-      const uniqueDates = [...new Set(matchedDates)];
-
-      if (uniqueDates.length > 0) {
-        
-        const { data: records, error: recordsError } = await supabaseAdmin
-          .from('attendance')
-          .select('id, check_in_time, status')
-          .eq('employee_id', employeeId);
-          
-        if (recordsError) throw new Error("Puantaj logları okunamadı: " + recordsError.message);
-
-        if (records && records.length > 0) {
-          
-          const idsToDelete = records.filter(r => {
-            if (!r.status || !r.status.startsWith('LEAVE_')) return false;
-            if (!r.check_in_time) return false;
-            
-            // "2026-06-22 05:00:00+00" tarihinden "2026-06-22" kısmını yakala
-            const checkInStr = String(r.check_in_time).substring(0, 10);
-            return uniqueDates.includes(checkInStr);
-          }).map(r => r.id);
-
-          // Çalışan kodundaki yapıya sadık kalarak, ID'leri tek tek eq() ile siliyoruz.
-          if (idsToDelete.length > 0) {
-            for (const delId of idsToDelete) {
-               const { error: deleteError } = await supabaseAdmin
-                 .from('attendance')
-                 .delete()
-                 .eq('id', delId);
-
-               if (deleteError) throw new Error(`Puantaj ID: ${delId} silinemedi: ` + deleteError.message);
-            }
-          }
-        }
-      }
+    // Legacy rows have no leave_request_id. Only delete a uniquely matching
+    // synthetic absence when no OTHER approved request could own that slot.
+    const dates=datesForLeave(req.selected_dates,req.start_date);
+    const {data:other}=await supabaseAdmin.from("leave_requests")
+      .select("id,selected_dates,start_date,is_half_day,half_day_period")
+      .eq("employee_id",employeeId).eq("status","APPROVED").eq("leave_type",req.leave_type);
+    const otherDates=new Set((other??[]).flatMap(x=>datesForLeave(x.selected_dates,x.start_date)));
+    const {data:legacy}=await supabaseAdmin.from("attendance")
+      .select("id,status,check_in_time,leave_request_id")
+      .eq("employee_id",employeeId).eq("status",`LEAVE_${req.leave_type}`)
+      .is("leave_request_id",null);
+    const uniqueLegacyIds=(legacy??[]).filter(r=>
+      r.check_in_time && dates.includes(new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Istanbul",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(r.check_in_time))) &&
+      !otherDates.has(new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Istanbul",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(r.check_in_time)))
+    ).map(x=>x.id);
+    if(uniqueLegacyIds.length){
+      const {error:legacyError}=await supabaseAdmin.from("attendance").delete().in("id",uniqueLegacyIds);
+      if(legacyError)throw legacyError;
     }
-    
-    revalidatePath("/management/hr", "layout");
-    return { success: true };
-  } catch (error: any) {
-    return { success: false, message: error.message };
+    if(req.leave_type==="YILLIK_IZIN"){
+      const {data:emp,error:empError}=await supabaseAdmin.from("employees").select("leave_balance").eq("id",employeeId).single();
+      if(empError||!emp)throw new Error("İzin bakiyesi okunamadı.");
+      const {error:refundError}=await supabaseAdmin.from("employees")
+        .update({leave_balance:Number(emp.leave_balance)+Number(req.requested_days)}).eq("id",employeeId);
+      if(refundError)throw refundError;
+    }
   }
+  revalidatePath("/management/hr","layout");
+  return {success:true};
+ }catch(error){return {success:false,message:error instanceof Error?error.message:"İzin iptal edilemedi."};}
 }
