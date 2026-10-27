@@ -242,7 +242,7 @@ export async function processApproval(params: ProcessApprovalParams): Promise<Ac
           // Mesai ve mola süresi hesabı sadece hem giriş hem çıkış doluysa hesaplanabilir
           if (rIn && rOut) {
             const diffHours = (rOut.getTime() - rIn.getTime()) / 3600000;
-            breakH = diffHours > 5 ? 1 : 0; // 5 Saatten uzunsa 1 saat mola düşülür
+            breakH = diffHours >= 5 ? 1 : 0; // 5h interval includes 1h lunch // 5 Saatten uzunsa 1 saat mola düşülür
             netW = Math.max(0, diffHours - breakH);
           }
 
