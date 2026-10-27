@@ -2,6 +2,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import { requireWmsActor, assertBranchAccess } from "@/lib/security/require-wms-actor";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -10,8 +11,10 @@ const supabaseAdmin = createClient(
 
 export async function getEmployeeBranchServer(empId: string) {
   try {
+    const actor = await requireWmsActor();
     const { data, error } = await supabaseAdmin.from("employees").select("branch_id").eq("id", empId).single();
     if (error) throw error;
+    assertBranchAccess(actor, data.branch_id);
     return { success: true, branchId: data.branch_id };
   } catch (err: any) {
     return { success: false, error: "Şube bilgisi alınamadı." };
@@ -21,6 +24,8 @@ export async function getEmployeeBranchServer(empId: string) {
 // KRİTİK FİX: created_at sütunu yerine started_at kullanıldı
 export async function getActiveCargoSessions(branchId: string) {
   try {
+    const actor = await requireWmsActor();
+    assertBranchAccess(actor, branchId);
     const { data, error } = await supabaseAdmin
       .from("cargo_sessions")
       .select("id, carrier_name, started_at")
@@ -39,6 +44,10 @@ export async function getActiveCargoSessions(branchId: string) {
 // KRİTİK FİX: Zaman damgası bağımlılığı kaldırılarak hata riski 0'a indirildi
 export async function getSessionLogsServer(sessionId: string) {
   try {
+    const actor = await requireWmsActor();
+    const { data: cargoSession } = await supabaseAdmin.from("cargo_sessions").select("branch_id").eq("id", sessionId).single();
+    if (!cargoSession) throw new Error("Kargo oturumu bulunamadı.");
+    assertBranchAccess(actor, cargoSession.branch_id);
     const { data, error } = await supabaseAdmin
       .from("cargo_logs")
       .select("tracking_number")
@@ -53,6 +62,10 @@ export async function getSessionLogsServer(sessionId: string) {
 
 export async function createCargoSessionServer(empId: string, branchId: string, carrierName: string) {
   try {
+    const actor = await requireWmsActor();
+    assertBranchAccess(actor, branchId);
+    const { data: employee } = await supabaseAdmin.from("employees").select("branch_id").eq("id", empId).single();
+    if (!employee || employee.branch_id !== branchId) throw new Error("Personel başka bir şubeye bağlı.");
     const { data, error } = await supabaseAdmin
       .from("cargo_sessions")
       .insert([{ employee_id: empId, branch_id: branchId, carrier_name: carrierName, status: "ACTIVE" }])
@@ -68,6 +81,11 @@ export async function createCargoSessionServer(empId: string, branchId: string, 
 
 export async function logCargoBarcodeServer(sessionId: string, trackingNumber: string) {
   try {
+    const actor = await requireWmsActor();
+    const { data: cargoSession } = await supabaseAdmin.from("cargo_sessions").select("branch_id, status").eq("id", sessionId).single();
+    if (!cargoSession) throw new Error("Kargo oturumu bulunamadı.");
+    assertBranchAccess(actor, cargoSession.branch_id);
+    if (cargoSession.status !== "ACTIVE") throw new Error("Kargo oturumu kapatılmış.");
     const { error } = await supabaseAdmin
       .from("cargo_logs")
       .insert([{ session_id: sessionId, tracking_number: trackingNumber }]);
@@ -81,6 +99,10 @@ export async function logCargoBarcodeServer(sessionId: string, trackingNumber: s
 
 export async function completeCargoSessionServer(sessionId: string, totalItems: number) {
   try {
+    const actor = await requireWmsActor();
+    const { data: cargoSession } = await supabaseAdmin.from("cargo_sessions").select("branch_id").eq("id", sessionId).single();
+    if (!cargoSession) throw new Error("Kargo oturumu bulunamadı.");
+    assertBranchAccess(actor, cargoSession.branch_id);
     const { error } = await supabaseAdmin
       .from("cargo_sessions")
       .update({ status: "COMPLETED", completed_at: new Date().toISOString(), total_items: totalItems })
