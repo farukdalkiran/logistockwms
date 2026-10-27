@@ -3,6 +3,7 @@
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { leaveAttendanceRows } from "@/lib/attendance/leave-records";
+import { istanbulDate } from "@/lib/attendance/day-coverage";
 
 // ========================================================================
 // 🛡️ TİP TANIMLAMALARI (WMS STRICT TYPING)
@@ -142,12 +143,7 @@ export async function processApproval(params: ProcessApprovalParams): Promise<Ac
         if(req.leave_type==="YILLIK_IZIN"){
           // Holidays can be registered after a request was filed but before
           // manager approval. Never deduct annual leave for the holiday half.
-          const dateStrings=rows.map(r=>{
-            const p=new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/Istanbul",
-              year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date(r.check_in_time));
-            const value=(type:string)=>p.find(x=>x.type===type)?.value;
-            return `${value("year")}-${value("month")}-${value("day")}`;
-          });
+          const dateStrings=[...new Set(rows.map(r=>istanbulDate(r.check_in_time)))];
           const {data:holidays,error:holidayError}=await supabaseAdmin
             .from("wms_public_holidays").select("holiday_date,period").in("holiday_date",dateStrings);
           if(holidayError)throw holidayError;
