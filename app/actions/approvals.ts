@@ -139,9 +139,7 @@ export async function processApproval(params: ProcessApprovalParams): Promise<Ac
           half_day_period:req.half_day_period,selected_dates:req.selected_dates,
           start_date:req.start_date,
         });
-        const {error:insertError}=await supabaseAdmin.from("attendance").upsert(rows,{
-          onConflict:"leave_request_id,check_in_time",ignoreDuplicates:true,
-        });
+        const {error:insertError}=await supabaseAdmin.from("attendance").insert(rows);
         if(insertError) throw insertError;
         if(req.leave_type==="YILLIK_IZIN"){
           const {error:balanceError}=await supabaseAdmin.from("employees")
