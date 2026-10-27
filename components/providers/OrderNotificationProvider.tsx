@@ -273,7 +273,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
     // The first read keeps the dashboard usable immediately after login.
     void load();
     let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timer: number | undefined;
     const scheduleNextCheck = () => {
       timer = window.setTimeout(() => {
         if (cancelled) return;
