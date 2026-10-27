@@ -457,7 +457,7 @@ export default function ApprovalPanel({ managerBranchId, isGlobal }: ApprovalPan
                                   <span className="px-2 py-1 rounded-none text-[9px] font-black uppercase tracking-widest bg-blue-100 text-blue-800 border border-blue-200 shadow-sm">
                                     {req.leave_type.replace(/_/g, ' ')}
                                   </span>
-                                  <span className="text-[11px] font-mono font-black text-slate-800">{totalDays} GÜN</span>
+                                  <span className="text-[11px] font-mono font-black text-slate-800">{totalDays} GÜN</span>{req.is_half_day && <span className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-900">{req.half_day_period==="AFTERNOON"?"13.00–17.00":"08.00–12.00"} · 4 saat/gün</span>}
                                 </div>
                                 <span className="text-[10px] text-slate-600 font-mono font-bold flex items-center gap-1.5">
                                   <Calendar className="w-3.5 h-3.5 text-blue-500 shrink-0" strokeWidth={2.5} /> {dateInfo.fullListStr}
