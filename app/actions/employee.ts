@@ -29,7 +29,7 @@ export async function getEmployees(branchId: string | null, isGlobal: boolean) {
   isGlobal = actor.isGlobal;
   if (!actor.isGlobal) branchId = actor.branchId;
   const supabase = await createClient();
-  let query = supabase.from('employees').select('*, branches(name)').order('created_at', { ascending: false });
+  let query = supabase.from('employees').select('id, full_name, position_title, branch_id, is_active, branches(name)').order('created_at', { ascending: false });
 
   // Sorgu Sıkıyönetimi: Sadece yöneticinin bulunduğu şubenin personellerini çek
   if (!isGlobal && branchId) {
@@ -82,7 +82,7 @@ export async function createEmployee(formData: {
         is_active: true,
       },
     ])
-    .select('*, branches(name)')
+    .select('id, full_name, position_title, branch_id, is_active, branches(name)')
     .single();
 
   if (error) throw new Error('Personel oluşturulamadı: ' + error.message);
