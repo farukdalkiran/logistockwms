@@ -38,7 +38,10 @@ export async function getEmployees(branchId: string | null, isGlobal: boolean) {
 
   const { data, error } = await query;
   if (error) throw new Error('Personeller getirilemedi: ' + error.message);
-  return data;
+  return (data || []).map((employee) => ({
+    ...employee,
+    branches: Array.isArray(employee.branches) ? employee.branches[0] : employee.branches,
+  }));
 }
 
 // Personel Oluşturma Motoru (Revize Edildi: Opsiyonel Özel ID Desteği Eklendi)
@@ -88,7 +91,10 @@ export async function createEmployee(formData: {
   if (error) throw new Error('Personel oluşturulamadı: ' + error.message);
 
   revalidatePath('/management/hr/personnel');
-  return newEmployee;
+  return {
+    ...newEmployee,
+    branches: Array.isArray(newEmployee.branches) ? newEmployee.branches[0] : newEmployee.branches,
+  };
 }
 
 export async function deleteEmployee(id: string) {
