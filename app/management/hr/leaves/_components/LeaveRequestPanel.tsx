@@ -27,6 +27,7 @@ export default function LeaveRequestPanel() {
   const [leaveType, setLeaveType] = useState("");
   const [customType, setCustomType] = useState("");
   const [isHalfDay, setIsHalfDay] = useState(false);
+  const [halfDayPeriod,setHalfDayPeriod]=useState<"MORNING"|"AFTERNOON">("MORNING");
   const [reason, setReason] = useState("");
 
   const [currentMonthDate, setCurrentMonthDate] = useState(new Date());
@@ -251,6 +252,7 @@ export default function LeaveRequestPanel() {
       custom_leave_type: customType,
       selected_dates: selectedDates,
       is_half_day: isHalfDay,
+      half_day_period: isHalfDay?halfDayPeriod:null,
       reason: reason,
     });
 
@@ -261,7 +263,7 @@ export default function LeaveRequestPanel() {
       await fetchData(employee.id, currentMonthDate);
       setStep("DASHBOARD");
       
-      setLeaveCategory(""); setLeaveType(""); setSelectedDates([]); setReason(""); setIsHalfDay(false); setCustomType("");
+      setLeaveCategory(""); setLeaveType(""); setSelectedDates([]); setReason(""); setIsHalfDay(false); setHalfDayPeriod("MORNING"); setCustomType("");
       router.refresh();
     } else {
       alert(`HATA: ${result.message}`); // Sunucudan dönen ret mesajı burada basılır
@@ -861,6 +863,22 @@ export default function LeaveRequestPanel() {
                         <div className="w-3 h-3 rounded-full border-2 border-current relative overflow-hidden"><div className="absolute left-0 top-0 bottom-0 w-1/2 bg-current"></div></div>
                         YARIM GÜN
                      </button>
+                      {isHalfDay && (
+                        <div className="rounded-[5px] border border-amber-200 bg-amber-50 p-3">
+                          <p className="mb-2 text-[11px] font-black text-amber-900">Yarım gün aralığı • 4 saat</p>
+                          <div className="grid gap-2">
+                            <button type="button" onClick={()=>setHalfDayPeriod("MORNING")}
+                              className={`rounded-[5px] border px-3 py-3 text-left text-[11px] font-extrabold ${halfDayPeriod==="MORNING"?"border-amber-600 bg-amber-200 text-amber-950":"border-slate-200 bg-white text-slate-700"}`}>
+                              Sabah · 08.00–12.00
+                            </button>
+                            <button type="button" onClick={()=>setHalfDayPeriod("AFTERNOON")}
+                              className={`rounded-[5px] border px-3 py-3 text-left text-[11px] font-extrabold ${halfDayPeriod==="AFTERNOON"?"border-amber-600 bg-amber-200 text-amber-950":"border-slate-200 bg-white text-slate-700"}`}>
+                              Öğleden sonra · 13.00–17.00
+                            </button>
+                          </div>
+                          <p className="mt-2 text-[10px] leading-5 text-amber-800">Diğer yarım gün gerçek mesai veya resmî tatil olarak kaydedilebilir.</p>
+                        </div>
+                      )}
                    </div>
                  </div>
 
@@ -917,6 +935,7 @@ export default function LeaveRequestPanel() {
                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">HESAPLANAN</span>
                    <span className="text-3xl font-black font-mono tracking-wide leading-none">
                      {isHalfDay ? selectedDates.length * 0.5 : selectedDates.length} <span className="text-xs text-[#dc3545] ml-0.5 tracking-widest">GÜN</span>
+                      {isHalfDay && <span className="mt-1 block text-[10px] font-medium text-slate-300">{halfDayPeriod==="MORNING"?"08.00–12.00":"13.00–17.00"} • {selectedDates.length*4} saat</span>}
                    </span>
                 </div>
                 
