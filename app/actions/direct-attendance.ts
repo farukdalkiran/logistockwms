@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { requireWmsActor, assertBranchAccess } from "@/lib/security/require-wms-actor";
 
 // RLS kısıtlamalarını by-pass eden Master Admin İstemcisi
 const supabaseAdmin = createClient(
@@ -22,6 +23,7 @@ interface DirectAttendancePayload {
 
 export async function upsertDirectAttendance(data: DirectAttendancePayload) {
   try {
+    const actor = await requireWmsActor();
     // 1. GİRİŞ SAATİNİ HESAPLA (Zorunlu)
     const checkInDate = new Date(`${data.target_date}T${data.check_in}:00+03:00`);
     const checkInISO = checkInDate.toISOString();
@@ -54,6 +56,7 @@ export async function upsertDirectAttendance(data: DirectAttendancePayload) {
       .single();
 
     if (empError || !emp) throw new Error("Personelin şube bilgisine ulaşılamadı.");
+    assertBranchAccess(actor, emp.branch_id);
 
     // Eğer editleniyorsa ID'den, yeni kayıtsa tarihten eşleşme ara
     let existingRecordId = data.record_id;
@@ -90,6 +93,12 @@ export async function upsertDirectAttendance(data: DirectAttendancePayload) {
     let resultId = null;
 
     if (existingRecordId) {
+      // A crafted record_id must not allow updates to a different branch.
+      const { data: current } = await supabaseAdmin.from("attendance").select("branch_id")
+        .eq("id", existingRecordId).single();
+      if (!current) throw new Error("Mesai kaydı bulunamadı.");
+      assertBranchAccess(actor, current.branch_id);
+      if (current.branch_id !== emp.branch_id) throw new Error("Mesai kaydı farklı bir şubeye ait.");
       const { data: updated, error: updateError } = await supabaseAdmin
         .from("attendance")
         .update(payload)
@@ -110,7 +119,7 @@ export async function upsertDirectAttendance(data: DirectAttendancePayload) {
       resultId = inserted.id;
     }
 
-    if (!data.is_developer_override) {
+    if (!(data.is_developer_override && actor.role === "Developer")) {
       await supabaseAdmin.from("transaction_logs").insert([{
         employee_id: data.manager_id,
         action_type: "ATTENDANCE_RECORD",
@@ -130,6 +139,7 @@ export async function upsertDirectAttendance(data: DirectAttendancePayload) {
 
 export async function getAttendanceHistory(month: number, year: number, employeeId: string | null = null) {
   try {
+    const actor = await requireWmsActor();
     const startDate = new Date(year, month - 1, 1).toISOString();
     const endDate = new Date(year, month, 1).toISOString();
 
@@ -140,9 +150,16 @@ export async function getAttendanceHistory(month: number, year: number, employee
       .lt("check_in_time", endDate)
       .order("check_in_time", { ascending: false });
 
-    if (employeeId) {
-      query = query.eq("employee_id", employeeId);
+    if (!actor.isGlobal) {
+      const { data: branchEmployees, error: branchError } = await supabaseAdmin.from("employees")
+        .select("id").eq("branch_id", actor.branchId!);
+      if (branchError) throw branchError;
+      const allowed = (branchEmployees || []).map((e) => e.id);
+      if (employeeId && !allowed.includes(employeeId)) throw new Error("Bu personelin kayıtlarını görüntüleme yetkiniz yok.");
+      if (!allowed.length) return { success: true, data: [] };
+      query = query.in("employee_id", allowed);
     }
+    if (employeeId) query = query.eq("employee_id", employeeId);
 
     const { data, error } = await query;
     
@@ -177,6 +194,10 @@ export async function getAttendanceHistory(month: number, year: number, employee
 
 export async function deleteAttendance(recordId: string, managerId: string, isDeveloperOverride: boolean = false) {
   try {
+    const actor = await requireWmsActor();
+    const { data: record } = await supabaseAdmin.from("attendance").select("branch_id").eq("id", recordId).single();
+    if (!record) throw new Error("Mesai kaydı bulunamadı.");
+    assertBranchAccess(actor, record.branch_id);
     const { error: deleteError } = await supabaseAdmin
       .from("attendance")
       .delete()
@@ -184,7 +205,7 @@ export async function deleteAttendance(recordId: string, managerId: string, isDe
 
     if (deleteError) throw deleteError;
 
-    if (!isDeveloperOverride) {
+    if (!(isDeveloperOverride && actor.role === "Developer")) {
       await supabaseAdmin.from("transaction_logs").insert([{
         employee_id: managerId,
         action_type: "DELETE_ATTENDANCE",
