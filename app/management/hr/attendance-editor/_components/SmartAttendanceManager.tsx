@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { getPublicHolidays,savePublicHoliday,removePublicHoliday } from "@/app/actions/public-holidays";
+import { HOLIDAY_WINDOWS,type HolidayPeriod,type PublicHoliday } from "@/lib/attendance/day-coverage";
 import { 
   Clock, ShieldAlert, CheckCircle2, AlertCircle, Save, 
   UserCheck, Calendar, Search, CalendarDays, Zap, 
-  Users, Trash2, PlusCircle, TerminalSquare, Edit2, RefreshCw, X, ArrowRight, LogIn, LogOut
+  Users, Trash2, PlusCircle, TerminalSquare, Edit2, RefreshCw, X, ArrowRight, LogIn, LogOut, Sun, CalendarRange, Info
 } from "lucide-react";
 import { 
   upsertDirectAttendance, 
@@ -50,7 +52,7 @@ const getLocalInputTime = (isoString: string | null) => {
 
 export default function DeveloperAttendancePanel({ managerId, managerName, managerTitle, employees }: Props) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"HISTORY" | "NEW_RECORD" | "SMART_GAP">("HISTORY");
+  const [activeTab, setActiveTab] = useState<"HISTORY" | "NEW_RECORD" | "SMART_GAP" | "HOLIDAYS">("HISTORY");
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; msg: string } | null>(null);
 
@@ -81,9 +83,45 @@ export default function DeveloperAttendancePanel({ managerId, managerName, manag
   const [gapStartDate, setGapStartDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0]);
   const [gapEndDate, setGapEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [selectedEmps, setSelectedEmps] = useState<string[]>([]);
-  const [gaps, setGaps] = useState<{ date: string; employeeIds: string[] }[]>([]);
+  const [gaps, setGaps] = useState<{ date: string; employeeIds: string[]; partialEmployeeIds: string[] }[]>([]);
   const [gapConfig, setGapConfig] = useState<Record<string, { isHoliday: boolean, checkIn: string, checkOut: string, breakMinutes: number }>>({});
   const [excludedDates, setExcludedDates] = useState<string[]>([]);
+  const [holidayDate,setHolidayDate]=useState(()=>{
+    const tomorrow=new Date(Date.now()+86400000);
+    return new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Istanbul",year:"numeric",month:"2-digit",day:"2-digit"}).format(tomorrow);
+  });
+  const [holidayTitle,setHolidayTitle]=useState("Resmî Tatil");
+  const [holidayPeriod,setHolidayPeriod]=useState<HolidayPeriod>("AFTERNOON");
+  const [holidayList,setHolidayList]=useState<PublicHoliday[]>([]);
+  const [holidayLoading,setHolidayLoading]=useState(false);
+  const [holidayLoaded,setHolidayLoaded]=useState(false);
+  const fetchHolidays=async()=>{
+    setHolidayLoading(true);
+    const result=await getPublicHolidays("2025-01-01","2029-12-31");
+    if(result.success){setHolidayList(result.data);setHolidayLoaded(true);}
+    else setFeedback({type:"error",msg:result.message});
+    setHolidayLoading(false);
+  };
+  useEffect(()=>{
+    if(activeTab==="HOLIDAYS" && !holidayLoaded)void fetchHolidays();
+  },[activeTab,holidayLoaded]);
+  const saveHoliday=async(e:React.FormEvent)=>{
+    e.preventDefault();setLoading(true);setFeedback(null);
+    const result=await savePublicHoliday({holiday_date:holidayDate,title:holidayTitle,period:holidayPeriod});
+    if(result.success){setFeedback({type:"success",msg:result.message||"Tatil kaydedildi."});await fetchHolidays();router.refresh();}
+    else setFeedback({type:"error",msg:result.message});
+    setLoading(false);
+  };
+  const removeHoliday=async(id:string)=>{
+    if(!window.confirm("Resmî tatili kaldırmak istiyor musunuz? Gerçek mesai kayıtları korunacak."))return;
+    setLoading(true);
+    const result=await removePublicHoliday(id);
+    if(result.success){setFeedback({type:"success",msg:result.message||"Tatil kaldırıldı."});await fetchHolidays();router.refresh();}
+    else setFeedback({type:"error",msg:result.message});
+    setLoading(false);
+  };
+  const fillableCount=gaps.reduce((sum,g)=>sum+g.employeeIds.length,0);
+
 
   // 1. SORGULAMA İŞLEMİ
   const handleSearchHistory = async () => {
@@ -225,10 +263,10 @@ export default function DeveloperAttendancePanel({ managerId, managerName, manag
   };
 
   const handleBulkSubmit = async () => {
-    if (gaps.length === 0) return;
+    if (fillableCount === 0) return;
     if (!window.confirm("Seçili eksik günleri, LOG TUTMADAN sisteme işlemek istediğinize emin misiniz?")) return;
     setLoading(true); setFeedback(null);
-    const payloads = gaps.map(g => ({ date: g.date, employeeIds: g.employeeIds, ...gapConfig[g.date] }));
+    const payloads = gaps.filter(g=>g.employeeIds.length).map(g => ({ date: g.date, employeeIds: g.employeeIds, ...gapConfig[g.date], isHoliday:false }));
     const result = await processBulkMissingAttendance(payloads, managerId);
     if (result.success) {
       setFeedback({ type: "success", msg: "TÜM KAYITLAR İZ BIRAKMADAN İŞLENDİ." });
@@ -239,42 +277,35 @@ export default function DeveloperAttendancePanel({ managerId, managerName, manag
     setLoading(false);
   };
 
+  const tabs=[
+    {id:"HISTORY" as const,label:"Mesai Geçmişi",icon:Search},
+    {id:"NEW_RECORD" as const,label:"Manuel Mesai",icon:PlusCircle},
+    {id:"SMART_GAP" as const,label:"Eksik Gün Tarama",icon:Zap},
+    {id:"HOLIDAYS" as const,label:"Resmî Tatiller",icon:Sun},
+  ];
   return (
-    <div className="w-full mx-auto flex flex-col bg-slate-50 border border-slate-200 shadow-xl rounded-xl overflow-hidden font-['Quicksand'] select-none">
-      
-      {/* ŞIK & ENDÜSTRİYEL HEADER */}
-      <div className="w-full bg-[#0F172B] px-8 py-7 flex flex-col md:flex-row items-start md:items-center justify-between border-b-4 border-[#dc3545] relative overflow-hidden">
-        <div className="absolute inset-0 opacity-[0.02] bg-[repeating-linear-gradient(45deg,transparent,transparent_10px,#ffffff_10px,#ffffff_20px)] pointer-events-none"></div>
-        <div className="absolute -top-10 -right-10 w-40 h-40 bg-[#dc3545] opacity-20 blur-3xl rounded-full pointer-events-none"></div>
-
-        <div className="relative z-10 flex items-center gap-5">
-          <div className="bg-gradient-to-br from-[#dc3545] to-red-700 p-3.5 shadow-[0_0_20px_rgba(220,53,69,0.3)] rounded-xl border border-red-500/50">
-            <TerminalSquare className="w-7 h-7 text-white animate-pulse" strokeWidth={2} />
+    <div className="mx-auto flex w-full flex-col overflow-hidden rounded-[5px] border border-slate-200 bg-white shadow-sm">
+      <header className="border-b-2 border-[#dc3545] bg-[#101b2e] px-5 py-6 text-white md:px-8">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="rounded-[5px] border border-white/15 bg-white/10 p-3"><CalendarRange size={24} className="text-red-400"/></span>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.13em] text-red-300">LogiStock • İnsan Kaynakları</p>
+              <h1 className="mt-1 text-xl font-black tracking-tight md:text-2xl">Puantaj ve Resmî Tatil Yönetimi</h1>
+              <p className="mt-1 text-[11px] font-medium text-slate-300">Gerçek giriş–çıkış, izin saatleri ve resmî tatiller ayrı tutulur.</p>
+            </div>
           </div>
-          <div className="flex flex-col gap-1">
-            <h1 className="text-2xl font-black text-white tracking-widest uppercase drop-shadow-sm flex items-center gap-2">
-              DEVELOPER <span className="text-[#dc3545]">MODE</span>
-            </h1>
-            <p className="text-[11px] text-amber-400 font-bold uppercase tracking-[0.2em] flex items-center gap-1.5">
-              <Zap className="w-3.5 h-3.5" /> Log Bypass Aktif • Tam Manipülasyon Lojiği
-            </p>
-          </div>
+          <span className="rounded-[5px] border border-white/15 bg-white/5 px-3 py-2 text-[11px] font-semibold text-slate-200">{employees.length} aktif personel</span>
         </div>
-      </div>
-
-      {/* ŞIK SEKMELER (Pill Design) */}
-      <div className="flex flex-col sm:flex-row gap-3 px-6 py-5 bg-white border-b border-slate-200">
-        <button onClick={() => { setActiveTab("HISTORY"); setFeedback(null); }} className={`flex-1 py-3.5 px-4 text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2.5 rounded-lg transition-all duration-300 ${activeTab === 'HISTORY' ? 'bg-[#0F172B] text-white shadow-md' : 'bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-800 border border-slate-200'}`}>
-          <Search className="w-4 h-4" /> Geçmiş & Düzenle
-        </button>
-        <button onClick={() => { setActiveTab("NEW_RECORD"); setFeedback(null); }} className={`flex-1 py-3.5 px-4 text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2.5 rounded-lg transition-all duration-300 ${activeTab === 'NEW_RECORD' ? 'bg-[#dc3545] text-white shadow-md shadow-red-500/20' : 'bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-800 border border-slate-200'}`}>
-          <PlusCircle className="w-4 h-4" /> Mesai Zorla
-        </button>
-        <button onClick={() => { setActiveTab("SMART_GAP"); setFeedback(null); }} className={`flex-1 py-3.5 px-4 text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2.5 rounded-lg transition-all duration-300 ${activeTab === 'SMART_GAP' ? 'bg-amber-500 text-white shadow-md shadow-amber-500/20' : 'bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-slate-800 border border-slate-200'}`}>
-          <Zap className="w-4 h-4" /> Akıllı Tarama
-        </button>
-      </div>
-
+      </header>
+      <nav aria-label="Puantaj editörü bölümleri" className="grid grid-cols-2 gap-2 border-b border-slate-200 bg-white p-3 lg:grid-cols-4">
+        {tabs.map(({id,label,icon:Icon})=>(
+          <button key={id} type="button" onClick={()=>{setActiveTab(id);setFeedback(null);}}
+            className={`flex min-h-12 items-center justify-center gap-2 rounded-[5px] border px-3 py-2.5 text-[11px] font-extrabold transition-colors ${activeTab===id?"border-[#dc3545] bg-[#dc3545] text-white":"border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-400 hover:bg-white"}`}>
+            <Icon size={16}/>{label}
+          </button>
+        ))}
+      </nav>
       {feedback && (
         <div className={`mx-6 mt-6 px-5 py-4 border-l-4 flex items-center gap-3 text-[11px] font-black uppercase tracking-widest shadow-sm rounded-r-lg animate-in slide-in-from-top-2 ${feedback.type === 'success' ? 'bg-emerald-50 border-emerald-500 text-emerald-700' : 'bg-red-50 border-[#dc3545] text-[#dc3545]'}`}>
           {feedback.type === 'success' ? <CheckCircle2 className="w-5 h-5 shrink-0" /> : <AlertCircle className="w-5 h-5 shrink-0" />}
