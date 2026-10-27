@@ -205,6 +205,7 @@ function getLeaveName(status: string | null) {
     .toLocaleUpperCase("tr-TR");
 
   if (value === "SAGLIK RAPORU") return "SAĞLIK RAPORU";
+  if (value === "RESMI TATIL") return "RESMÎ TATİL";
 
   return value;
 }
@@ -478,6 +479,9 @@ export default function AttendanceTable({
             .select("employee_id, working_hours, check_in_time, check_out_time, status")
             .gte("check_in_time", monthStart)
             .lt("check_in_time", nextMonthStart)
+            // Pre-entered future public holidays must not inflate today's
+            // accumulated monthly hours before the holiday has started.
+            .lte("check_in_time", new Date().toISOString())
             .order("check_in_time", { ascending: true })
             .order("id", { ascending: true })
             .range(from, from + PAGE_SIZE - 1);
@@ -598,6 +602,15 @@ export default function AttendanceTable({
         ? `branch_id=eq.${branchId}`
         : undefined;
 
+    let realtimeRefreshTimer: number | null = null;
+    const scheduleRealtimeRefresh = () => {
+      if (realtimeRefreshTimer !== null || document.visibilityState !== "visible") return;
+      // Batch multi-employee holiday / leave writes into a single read.
+      realtimeRefreshTimer = window.setTimeout(() => {
+        realtimeRefreshTimer = null;
+        void fetchRecords(true);
+      }, 2500);
+    };
     const channel = supabase
       .channel(`attendance_realtime_${branchId ?? "GLOBAL"}`)
       .on(
@@ -609,14 +622,14 @@ export default function AttendanceTable({
           ...(realtimeFilter ? { filter: realtimeFilter } : {}),
         },
         () => {
-          void fetchRecords(true);
+          scheduleRealtimeRefresh();
         },
       )
       .subscribe();
 
     return () => {
       window.removeEventListener("refresh-wms-attendance", handleRefresh);
-
+      if (realtimeRefreshTimer !== null) window.clearTimeout(realtimeRefreshTimer);
       requestIdRef.current++;
       void supabase.removeChannel(channel);
     };
@@ -1038,15 +1051,18 @@ export default function AttendanceTable({
                       >
                         <div
                           className={`mx-auto flex max-w-[340px] items-center justify-center gap-2 rounded-md border px-3 py-2 ${
-                            isMedicalLeave
-                              ? "border-red-200 bg-red-50 text-red-700"
-                              : "border-blue-200 bg-blue-50 text-blue-700"
+                            leaveText === "RESMÎ TATİL"
+                              ? "border-amber-200 bg-amber-50 text-amber-800"
+                              : isMedicalLeave
+                                ? "border-red-200 bg-red-50 text-red-700"
+                                : "border-blue-200 bg-blue-50 text-blue-700"
                           }`}
                         >
                           <CalendarDays size={15} strokeWidth={2.1} />
 
                           <span className="text-[10px] font-extrabold uppercase tracking-wider">
                             {leaveText} · {formatTime(record.check_in_time)}–{formatTime(record.check_out_time)}
+                            <span className="ml-2 rounded-[5px] border border-current/20 bg-white/70 px-1.5 py-0.5 font-mono">{formatHours(record.working_hours)}</span>
                           </span>
                         </div>
                       </td>
