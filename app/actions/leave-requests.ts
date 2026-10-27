@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
-import { datesForLeave, leaveAttendanceRows } from "@/lib/attendance/leave-records";
+import { datesForLeave } from "@/lib/attendance/leave-records";
 
 // ============================================================================
 // 1. GÜVENLİK VE VERİTABANI İSTEMCİSİ (SERVICE ROLE BYPASS)
@@ -106,8 +106,7 @@ if (data.leave_type === 'YILLIK_IZIN') {
         return {success:false,message:"Seçili gün ve saat dilimi için zaten bekleyen veya onaylanmış izin mevcut."};
     }
 
-    // Create the request BEFORE its attendance credits, linking each leave-only
-    // attendance row to this specific request (actual punches are independent).
+    // Create PENDING first; the DB will synchronize attendance atomically on approval.
     const {data:storedRequest,error:reqError}=await supabaseAdmin.from("leave_requests").insert({
       employee_id:data.employee_id,branch_id:data.branch_id,leave_type:data.leave_type,
       custom_leave_type:data.custom_leave_type||null,start_date:startDate,end_date:endDate,
@@ -126,34 +125,30 @@ if (data.leave_type === 'YILLIK_IZIN') {
         ? "SAĞLIK RAPORU: SİSTEM TARAFINDAN OTOMATİK ONAYLANDI" 
         : "YETKİLİ: İZİN OTOMATİK ONAYLANDI VEYA SİSTEME İŞLENDİ";
 
+      // A single database trigger on APPROVED now creates 08–12 / 13–17
+      // LEAVE_ attendance entries in the SAME transaction as the approval.
+      // Do not insert again from this Server Action: that duplicates hours
+      // when an existing historic leave was entered manually.
       try {
-        const credits=leaveAttendanceRows({
-          id:storedRequest.id,employee_id:data.employee_id,branch_id:data.branch_id,
-          leave_type:data.leave_type,is_half_day:data.is_half_day,half_day_period:period,
-          selected_dates:sortedDates,
-        });
-        const {error:creditError}=await supabaseAdmin.from("attendance").insert(credits);
-        if(creditError)throw creditError;
         if(data.leave_type==="YILLIK_IZIN"){
           const {error:balanceError}=await supabaseAdmin.from("employees")
             .update({leave_balance:Number(employee.leave_balance)-requestedDays}).eq("id",employee.id);
           if(balanceError)throw balanceError;
         }
-      } catch (error) {
-        await supabaseAdmin.from("attendance").delete().eq("leave_request_id",storedRequest.id);
-        await supabaseAdmin.from("leave_requests").delete().eq("id",storedRequest.id);
+      } catch(error) {
+        await supabaseAdmin.from("leave_requests").delete().eq("id",storedRequest.id).eq("status","PENDING");
         throw error;
       }
-      
-      const {error:statusErr}=await supabaseAdmin.from("leave_requests")
+
+      const {data:confirmed,error:statusErr}=await supabaseAdmin.from("leave_requests")
         .update({status:"APPROVED",manager_note:managerNote,updated_at:new Date().toISOString()})
-        .eq("id",storedRequest.id).eq("status","PENDING");
-      if(statusErr){
-        await supabaseAdmin.from("attendance").delete().eq("leave_request_id",storedRequest.id);
+        .eq("id",storedRequest.id).eq("status","PENDING")
+        .select("id").maybeSingle();
+      if(statusErr || !confirmed){
         if(data.leave_type==="YILLIK_IZIN")
           await supabaseAdmin.from("employees").update({leave_balance:employee.leave_balance}).eq("id",employee.id);
-        await supabaseAdmin.from("leave_requests").delete().eq("id",storedRequest.id);
-        throw statusErr;
+        await supabaseAdmin.from("leave_requests").delete().eq("id",storedRequest.id).eq("status","PENDING");
+        throw statusErr??new Error("İzin onay durumu güncellenemedi.");
       }
 
       await supabaseAdmin.from("transaction_logs").insert({

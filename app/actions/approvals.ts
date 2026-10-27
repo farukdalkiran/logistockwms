@@ -130,7 +130,6 @@ export async function processApproval(params: ProcessApprovalParams): Promise<Ac
       if (req.status !== "PENDING") return { success: false, message: "UYARI: Bu talep zaten karara bağlanmış." };
 
       const employee = req.employees;
-      let creditedRowsInserted = false;
       let annualBalanceAdjusted = false;
 
       try {
@@ -154,18 +153,15 @@ export async function processApproval(params: ProcessApprovalParams): Promise<Ac
           if((holidays??[]).some(h=>h.period==="FULL" || !req.is_half_day || h.period===period))
             return {success:false,message:"Talep edilen yıllık izin resmî tatil ile çakışıyor. İzin saatlerini düzeltiniz."};
         }
-        const {error:insertError}=await supabaseAdmin.from("attendance").insert(rows);
-        if(insertError) throw insertError;
-        creditedRowsInserted = true;
+        // Do NOT insert attendance here. The leave_requests APPROVED
+        // transition is the single, atomic DB source for linked attendance
+        // credits, including existing legacy leave reconciliation.
         if(req.leave_type==="YILLIK_IZIN"){
           const {error:balanceError}=await supabaseAdmin.from("employees")
             .update({leave_balance:Number(employee.leave_balance)-Number(req.requested_days)})
             .eq("id",employee.id);
-          if(balanceError){
-            await supabaseAdmin.from("attendance").delete().eq("leave_request_id",req.id);
-            throw balanceError;
-          }
-          annualBalanceAdjusted = true;
+          if(balanceError)throw balanceError;
+          annualBalanceAdjusted=true;
         }
       }
 
@@ -179,11 +175,9 @@ export async function processApproval(params: ProcessApprovalParams): Promise<Ac
       if(requestUpdateError || !updatedRequest)throw requestUpdateError??new Error("Talep zaten değişmiş.");
 
       } catch(error) {
-        // The REST API has no cross-request SQL transaction; compensate
-        // partial writes so a failed approval never leaves fake absence rows.
-        if (isApprove && creditedRowsInserted) {
-          await supabaseAdmin.from("attendance").delete().eq("leave_request_id",req.id);
-        }
+        // A failed status update rolls back the trigger-created attendance
+        // in PostgreSQL automatically; only the separate balance write needs
+        // compensation.
         if(isApprove && annualBalanceAdjusted && req.leave_type==="YILLIK_IZIN"){
           await supabaseAdmin.from("employees")
             .update({leave_balance:employee.leave_balance}).eq("id",employee.id);
