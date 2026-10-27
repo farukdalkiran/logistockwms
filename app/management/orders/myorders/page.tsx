@@ -36,8 +36,6 @@ export default function MyOrdersPage() {
   const [advanced, setAdvanced] = useState(false);
   const request = useRef(0);
   const listTop = useRef<HTMLDivElement>(null);
-  const selectedRef = useRef(selected);
-  selectedRef.current = selected;
 
   const load = useCallback(async (silent = false) => {
     const id = ++request.current;
@@ -73,12 +71,7 @@ export default function MyOrdersPage() {
     return () => window.clearTimeout(timer);
   }, [searchInput]);
 
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible" && !selectedRef.current) void load(true);
-    }, 60000);
-    return () => window.clearInterval(timer);
-  }, [load]);
+  // Orders refresh on first visit, filter/page changes, manual click and detail closure.
 
   const change = (patch: Partial<Filters>) =>
     setFilters((previous) => ({ ...previous, ...patch, page: patch.page ?? 1 }));
