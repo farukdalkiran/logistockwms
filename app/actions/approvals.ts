@@ -2,6 +2,7 @@
 
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import { leaveAttendanceRows } from "@/lib/attendance/leave-records";
 
 // ========================================================================
 // 🛡️ TİP TANIMLAMALARI (WMS STRICT TYPING)
@@ -130,59 +131,37 @@ export async function processApproval(params: ProcessApprovalParams): Promise<Ac
       const employee = req.employees;
 
       if (isApprove) {
-        // 1. Yıllık İzin Bakiye Kontrolü (Bakiye Yetersizse Reddet)
-        if (req.leave_type === "YILLIK_IZIN") {
-          // Bakiyeden düş
-          await supabaseAdmin.from("employees").update({
-            leave_balance: employee.leave_balance - req.requested_days
-          }).eq("id", employee.id);
-        }
-
-        // 2. Çoklu Tarih (Selected Dates) Akıllı Ayrıştırıcı
-        let dates: string[] = [];
-        if (req.selected_dates) {
-          dates = Array.isArray(req.selected_dates) 
-            ? req.selected_dates 
-            : JSON.parse(req.selected_dates as string);
-        } else {
-          dates = [req.start_date]; // Eski loglar için Fallback
-        }
-
-        // 3. Çalışma Saati Mantığı (Ücretsiz izinlerde 0 saat işlenir)
-        let workingHours = req.is_half_day ? 4 : 8;
-        if (req.leave_type === "UCRETSIZ" || req.leave_type === "ÜCRETSİZ") {
-          workingHours = 0; 
-        }
-
-        // 4. Puantaj (Attendance) Oluşturma Döngüsü
-        for (const dStr of dates) {
-          const dIn = new Date(dStr); 
-          dIn.setHours(5, 0, 0, 0); // Orijinal referansı bozmadan yeni instance oluşturuldu
-          
-          const dOut = new Date(dStr); 
-          dOut.setHours(req.is_half_day ? 9 : 13, 0, 0, 0);
-
-          await supabaseAdmin.from("attendance").insert({
-            employee_id: employee.id,
-            branch_id: req.branch_id,
-            check_in_time: dIn.toISOString(),
-            check_out_time: dOut.toISOString(),
-            rounded_check_in: dIn.toISOString(),
-            rounded_check_out: dOut.toISOString(),
-            break_hours: 0,
-            working_hours: workingHours,
-            status: `LEAVE_${req.leave_type}`
-          });
+        // Leave-only rows carry the exact selected clock window and a source
+        // request ID. Actual worked shifts for the same date remain intact.
+        const rows=leaveAttendanceRows({
+          id:req.id,employee_id:employee.id,branch_id:req.branch_id,
+          leave_type:req.leave_type,is_half_day:!!req.is_half_day,
+          half_day_period:req.half_day_period,selected_dates:req.selected_dates,
+          start_date:req.start_date,
+        });
+        const {error:insertError}=await supabaseAdmin.from("attendance").upsert(rows,{
+          onConflict:"leave_request_id,check_in_time",ignoreDuplicates:true,
+        });
+        if(insertError) throw insertError;
+        if(req.leave_type==="YILLIK_IZIN"){
+          const {error:balanceError}=await supabaseAdmin.from("employees")
+            .update({leave_balance:Number(employee.leave_balance)-Number(req.requested_days)})
+            .eq("id",employee.id);
+          if(balanceError){
+            await supabaseAdmin.from("attendance").delete().eq("leave_request_id",req.id);
+            throw balanceError;
+          }
         }
       }
 
       // 5. Talebi Güncelle ve Log Bırak
-      await supabaseAdmin.from("leave_requests").update({
+      const {error:requestUpdateError}=await supabaseAdmin.from("leave_requests").update({
         status: finalStatus,
         manager_id: params.manager_id,
         manager_note: params.manager_note,
         updated_at: new Date().toISOString()
-      }).eq("id", params.request_id);
+      }).eq("id", params.request_id).eq("status","PENDING");
+      if(requestUpdateError)throw requestUpdateError;
 
       await supabaseAdmin.from("transaction_logs").insert({
         employee_id: employee.id,
