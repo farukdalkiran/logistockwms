@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { requireWmsActor } from "@/lib/security/require-wms-actor";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -18,6 +19,7 @@ export type BoxInput = {
  */
 export async function createBoxAction(input: BoxInput, employeeId: string) {
   try {
+    await requireWmsActor();
     const cleanBarcode = input.box_barcode.trim();
 
     // .single() tuzağı yerine array length kontrolü ile PGRST116 hatası engellendi
@@ -63,6 +65,7 @@ export async function createBoxAction(input: BoxInput, employeeId: string) {
  */
 export async function bulkCreateBoxesAction(boxes: BoxInput[], employeeId: string) {
   try {
+    await requireWmsActor();
     if (!boxes || boxes.length === 0) {
       return { success: false, error: "Yüklenecek veri bulunamadı." };
     }
@@ -103,6 +106,7 @@ export async function bulkCreateBoxesAction(boxes: BoxInput[], employeeId: strin
  */
 export async function updateBoxAction(id: string, box_barcode: string, quantity: number, employeeId: string) {
   try {
+    await requireWmsActor();
     const cleanBarcode = box_barcode.trim();
 
     // Çift kayıt kontrolü (Kendi barkodu hariç, başka bir koli bu barkodu kullanıyor mu?)
@@ -145,6 +149,7 @@ export async function updateBoxAction(id: string, box_barcode: string, quantity:
  */
 export async function deleteBoxesAction(ids: string[], employeeId: string) {
   try {
+    await requireWmsActor();
     const { error } = await supabaseAdmin
       .from("boxes")
       .delete()

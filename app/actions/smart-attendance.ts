@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { requireWmsActor, assertBranchAccess } from "@/lib/security/require-wms-actor";
 
 // RLS kısıtlamalarını by-pass eden Master Admin İstemcisi
 const supabaseAdmin = createClient(
@@ -15,6 +16,14 @@ export async function analyzeAttendanceGaps(
   excludedDates: string[] = [] // İstenmeyen veya hariç tutulan günler (YYYY-MM-DD)
 ) {
   try {
+    const actor = await requireWmsActor();
+    if (!actor.isGlobal && employeeIds.length) {
+      const { data: allowed } = await supabaseAdmin.from("employees")
+        .select("id").in("id", employeeIds).eq("branch_id", actor.branchId!);
+      if (new Set(allowed?.map((e) => e.id)).size !== new Set(employeeIds).size) {
+        throw new Error("Seçilen personellerin tamamı bağlı olduğunuz şubeye ait olmalı.");
+      }
+    }
     if (employeeIds.length === 0) return { success: false, message: "Personel seçilmedi." };
 
     const start = new Date(`${startDateStr}T12:00:00`);
@@ -100,12 +109,16 @@ interface BulkGapPayload {
 
 export async function processBulkMissingAttendance(payloads: BulkGapPayload[], managerId: string) {
   try {
+    const actor = await requireWmsActor();
     let successCount = 0;
     const allInserts = [];
     const allLogs = [];
 
     const allEmpIds = [...new Set(payloads.flatMap(p => p.employeeIds))];
+    if (!allEmpIds.length) return { success: false, message: "Personel seçilmedi." };
     const { data: empData } = await supabaseAdmin.from("employees").select("id, branch_id").in("id", allEmpIds);
+    if ((empData || []).length !== allEmpIds.length) throw new Error("Personel bulunamadı.");
+    for (const emp of empData || []) assertBranchAccess(actor, emp.branch_id);
     const branchMap = new Map(empData?.map(e => [e.id, e.branch_id]));
 
     for (const group of payloads) {

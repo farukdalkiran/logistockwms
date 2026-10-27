@@ -2,6 +2,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import { requireWmsActor } from "@/lib/security/require-wms-actor";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -10,6 +11,7 @@ const supabaseAdmin = createClient(
 
 export async function uploadArasExcelToServer(parsedData: any[], employeeId: string, fileName: string) {
   try {
+    await requireWmsActor();
     if (!parsedData || parsedData.length === 0) {
       return { success: false, error: "Yüklenen Excel dosyası boş." };
     }

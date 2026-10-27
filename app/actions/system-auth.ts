@@ -2,6 +2,7 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { requireWmsActor } from "@/lib/security/require-wms-actor";
 
 // RLS kalkanını delen Admin İstemcisi
 const supabaseAdmin = createClient(
@@ -12,6 +13,7 @@ const supabaseAdmin = createClient(
 // 1. Guard İçin Yetki Çözücü
 export async function getRolePermissionsServer(roleCode: string) {
   try {
+    await requireWmsActor();
     const { data, error } = await supabaseAdmin
       .from("roles")
       .select("permissions")
@@ -33,6 +35,7 @@ export async function getRolePermissionsServer(roleCode: string) {
 // 2. Terminal İçin Şube ve Raf Çözücü (Zero-Latency)
 export async function initTerminalSessionServer(empId: string) {
   try {
+    await requireWmsActor();
     const { data: empData, error: empError } = await supabaseAdmin
       .from("employees")
       .select("branch_id, full_name, is_active")

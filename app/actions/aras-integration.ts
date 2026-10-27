@@ -2,6 +2,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import { requireWmsActor, requireSystemAdmin } from "@/lib/security/require-wms-actor";
 
 // Service Role ile RLS kalkanlarını delen, tam yetkili Supabase Admin istemcisi
 const supabaseAdmin = createClient(
@@ -35,6 +36,7 @@ async function fetchAllRows(queryBuilder: any) {
 
 export async function getArasFiles() {
   try {
+    await requireWmsActor();
     const { data, error } = await supabaseAdmin
       .from("aras_files")
       .select("id, filename, created_at")
@@ -49,6 +51,7 @@ export async function getArasFiles() {
 
 export async function deleteArasFile(fileId?: string) {
   try {
+    await requireSystemAdmin();
     if (fileId && fileId.trim() !== "") {
       const { error: err1 } = await supabaseAdmin.from("erp_raw_shipments").delete().eq("file_id", fileId);
       if (err1) return { success: false, error: `Kayıt Silme Hatası: ${err1.message}` };
@@ -75,6 +78,7 @@ export async function getShipmentsByDeliveryNumber(
   fileId?: string
 ) {
   try {
+    await requireWmsActor();
     const search = deliveryNumber.trim();
 
     if (!search) {
@@ -147,6 +151,7 @@ export async function getShipmentsByDeliveryNumber(
  */
 export async function saveArasTracking(deliveryNumber: string, trackingNumber: string, employeeId: string, fileId?: string) {
   try {
+    await requireWmsActor();
     // 1. ADIM: İLK TABLOYU GÜNCELLE VE GÜNCEL VERİYİ GERİ ÇEK (.select().single() ile)
     let query = supabaseAdmin
       .from("erp_raw_shipments")
@@ -229,6 +234,7 @@ export async function saveArasTracking(deliveryNumber: string, trackingNumber: s
 
 export async function getKargoStats(fileId?: string) {
   try {
+    await requireWmsActor();
     let query = supabaseAdmin
       .from("erp_raw_shipments")
       .select("delivery_number, is_processed_aras, processed_at");
@@ -272,6 +278,7 @@ export async function getKargoStats(fileId?: string) {
 
 export async function getProcessedExportData(fileId?: string) {
   try {
+    await requireWmsActor();
     let query = supabaseAdmin
       .from("erp_raw_shipments")
       .select("delivery_number, aras_tracking_number")
@@ -299,6 +306,7 @@ export async function getProcessedExportData(fileId?: string) {
 
 export async function getExactOriginalExportData(fileId?: string) {
   try {
+    await requireWmsActor();
     let query = supabaseAdmin
       .from("erp_raw_shipments")
       .select(`
@@ -327,6 +335,7 @@ export async function getExactOriginalExportData(fileId?: string) {
  */
 export async function getPerformanceByDateRange(startDate: string, endDate: string) {
   try {
+    await requireWmsActor();
     // Supabase tarafında aralık sorgusu yapabilmek için başlangıç ve bitiş saatlerini belirliyoruz
     const start = `${startDate}T00:00:00.000Z`;
     const end = `${endDate}T23:59:59.999Z`;

@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { requireWmsActor, requireSystemAdmin, assertBranchAccess } from "@/lib/security/require-wms-actor";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -10,6 +11,8 @@ const supabaseAdmin = createClient(
 // 1. Şubedeki Cihazlı/Cihazsız Çalışanları Çek (Hata Düzeltildi)
 export async function getBranchDevices(branchId: string) {
   try {
+    const actor = await requireWmsActor();
+    assertBranchAccess(actor, branchId);
     // DİKKAT: Veritabanında olmayan 'last_device_sync' sütunu sorgudan çıkarıldı, çökme engellendi.
     const { data, error } = await supabaseAdmin
       .from("employees")
@@ -30,6 +33,7 @@ export async function getBranchDevices(branchId: string) {
 // 2. Developer/Admin İçin Tüm Şubeleri Çek
 export async function getAllBranches() {
   try {
+    await requireSystemAdmin();
     const { data, error } = await supabaseAdmin
       .from("branches")
       .select("id, name")
@@ -46,6 +50,11 @@ export async function getAllBranches() {
 // 3. Cihaz Kilidini Kır (Revoke Token)
 export async function revokeDeviceToken(employeeId: string, managerId: string) {
   try {
+    const actor = await requireWmsActor();
+    const { data: employee, error: lookupError } = await supabaseAdmin
+      .from("employees").select("branch_id").eq("id", employeeId).single();
+    if (lookupError || !employee) throw new Error("Personel bulunamadı.");
+    assertBranchAccess(actor, employee.branch_id);
     // Sadece device_token'i null yap
     const { error: updateError } = await supabaseAdmin
       .from("employees")

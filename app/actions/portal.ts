@@ -1,122 +1,137 @@
-'use server'
+'use server';
 
 import { cookies } from 'next/headers';
 import { createClient } from '@supabase/supabase-js';
-import crypto from 'crypto';
+import crypto from 'node:crypto';
 
-// GÜVENLİK KONTROLÜ: Service Role Key var mı?
-if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  console.error("🚨 KRİTİK HATA: .env.local içinde SUPABASE_SERVICE_ROLE_KEY bulunamadı!");
+// Portal cookies are signed. A raw employee ID is NEVER authentication.
+function getSessionSecret(): string {
+  const secret = process.env.WMS_PORTAL_SESSION_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!secret || secret.length < 32) throw new Error('Portal session signing secret is not configured.');
+  return secret;
 }
-
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  { auth: { autoRefreshToken: false, persistSession: false } }
 );
-
 const PORTAL_COOKIE = 'wms_portal_session';
-const QR_SECRET = process.env.SUPABASE_SERVICE_ROLE_KEY || 'logistock_secret_key';
-const TIME_STEP_SEC = 15; // 15 saniyelik bloklar
+const QR_SECRET = process.env.WMS_QR_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const TIME_STEP_SEC = 15;
+const SESSION_AGE = 12 * 60 * 60;
+type PortalState = 'active' | 'password_change';
 
-// ==========================================
-// 1. PERSONEL GİRİŞ MOTORU
-// ==========================================
-export async function portalLogin(empId: string, passwordInput: string) {
-  try {
-    const { data: employee, error } = await supabaseAdmin
-      .from('employees')
-      .select('id, full_name, is_active, password')
-      .eq('id', empId)
-      .maybeSingle();
-
-    if (error) return { success: false, message: 'Veritabanı bağlantı hatası.' };
-    if (!employee) return { success: false, message: 'Bu ID sistemde kayıtlı değil!' };
-
-    const dbPassword = (employee.password || '').trim();
-    const inputPassword = (passwordInput || '').trim();
-
-    if (dbPassword !== inputPassword) return { success: false, message: 'Şifreniz hatalı!' };
-    if (!employee.is_active) return { success: false, message: 'Hesabınız pasife alınmış.' };
-
-    if (inputPassword.toLowerCase().startsWith('lgs')) {
-      return { success: true, requirePasswordChange: true };
-    }
-
-    const cookieStore = await cookies();
-    cookieStore.set(PORTAL_COOKIE, employee.id, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 365,
-    });
-
-    return { success: true, requirePasswordChange: false };
-  } catch (err: any) {
-    return { success: false, message: 'Beklenmeyen bir sunucu hatası oluştu.' };
-  }
+function signSession(employeeId: string, state: PortalState): string {
+  const expiry = Math.floor(Date.now() / 1000) + SESSION_AGE;
+  const payload = `${employeeId}.${state}.${expiry}`;
+  const signature = crypto.createHmac('sha256', getSessionSecret()).update(payload).digest('base64url');
+  return `${payload}.${signature}`;
 }
 
-// ==========================================
-// 2. KATI KURALLI ŞİFRE YENİLEME MOTORU
-// ==========================================
-export async function portalChangePassword(empId: string, newPassword: string) {
-  const pwd = newPassword.trim();
-  const hasLetter = /[a-zA-Z]/.test(pwd);
-  const hasSymbol = /[^a-zA-Z0-9\s]/.test(pwd);
-  const isLengthValid = pwd.length >= 8 && pwd.length <= 14;
+function verifySession(value: string | undefined): { id: string; state: PortalState } | null {
+  if (!value) return null;
+  const parts = value.split('.');
+  if (parts.length !== 4) return null;
+  const [id, state, expiry, signature] = parts;
+  if (!/^\d{3,10}$/.test(id) || (state !== 'active' && state !== 'password_change')) return null;
+  const exp = Number(expiry);
+  if (!Number.isSafeInteger(exp) || exp < Math.floor(Date.now() / 1000)) return null;
+  const expected = crypto.createHmac('sha256', getSessionSecret()).update(`${id}.${state}.${expiry}`).digest();
+  let provided: Buffer;
+  try { provided = Buffer.from(signature, 'base64url'); } catch { return null; }
+  if (provided.length !== expected.length || !crypto.timingSafeEqual(provided, expected)) return null;
+  return { id, state };
+}
 
-  if (!isLengthValid || !hasLetter || !hasSymbol) {
-    return { success: false, message: 'Şifreniz 8-14 karakter olmalı, harf ve sembol içermelidir.' };
-  }
-
-  const { error } = await supabaseAdmin.from('employees').update({ password: pwd }).eq('id', empId);
-  if (error) return { success: false, message: 'Şifre güncellenemedi.' };
-
-  const cookieStore = await cookies();
-  cookieStore.set(PORTAL_COOKIE, empId, {
+function setSessionCookie(employeeId: string, state: PortalState, cookieStore: Awaited<ReturnType<typeof cookies>>) {
+  cookieStore.set(PORTAL_COOKIE, signSession(employeeId, state), {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: 60 * 60 * 24 * 365,
+    path: '/',
+    maxAge: SESSION_AGE
   });
+}
 
+// Legacy plaintext credentials are accepted once and upgraded after a successful login.
+function verifyPassword(stored: string, supplied: string): boolean {
+  if (stored.startsWith('scrypt$')) {
+    const parts = stored.split('$');
+    if (parts.length !== 3 || !/^[a-f0-9]{32}$/.test(parts[1]) || !/^[a-f0-9]{128}$/.test(parts[2])) return false;
+    const derived = crypto.scryptSync(supplied, Buffer.from(parts[1], 'hex'), 64);
+    return crypto.timingSafeEqual(derived, Buffer.from(parts[2], 'hex'));
+  }
+  const a = Buffer.from(stored, 'utf8');
+  const b = Buffer.from(supplied, 'utf8');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function hashPassword(value: string): string {
+  const salt = crypto.randomBytes(16);
+  return `scrypt$${salt.toString('hex')}$${crypto.scryptSync(value, salt, 64).toString('hex')}`;
+}
+
+export async function portalLogin(empId: string, passwordInput: string) {
+  try {
+    if (!/^\d{3,10}$/.test(empId) || !passwordInput || passwordInput.length > 256) {
+      return { success: false, message: 'Personel ID veya şifre geçersiz.' };
+    }
+    const { data: employee, error } = await supabaseAdmin
+      .from('employees').select('id, is_active, password').eq('id', empId).maybeSingle();
+    if (error || !employee || !employee.is_active || !verifyPassword((employee.password || '').trim(), passwordInput.trim())) {
+      return { success: false, message: 'Personel ID veya şifre hatalı.' };
+    }
+    const requiresChange = passwordInput.trim().toLowerCase().startsWith('lgs');
+    if (!employee.password.startsWith('scrypt$')) {
+      const { error: upgradeError } = await supabaseAdmin.from('employees')
+        .update({ password: hashPassword(passwordInput.trim()) }).eq('id', employee.id);
+      if (upgradeError) throw upgradeError;
+    }
+    const cookieStore = await cookies();
+    setSessionCookie(employee.id, requiresChange ? 'password_change' : 'active', cookieStore);
+    return { success: true, requirePasswordChange: requiresChange };
+  } catch {
+    return { success: false, message: 'Giriş işlemi tamamlanamadı.' };
+  }
+}
+
+export async function portalChangePassword(empId: string, newPassword: string) {
+  const cookieStore = await cookies();
+  const current = verifySession(cookieStore.get(PORTAL_COOKIE)?.value);
+  if (!current || current.id !== empId) {
+    return { success: false, message: 'Şifre değiştirmek için kendi hesabınızla giriş yapmalısınız.' };
+  }
+  const pwd = newPassword.trim();
+  if (pwd.length < 8 || pwd.length > 64 || !/[a-zA-Z]/.test(pwd) || !/[^a-zA-Z0-9\s]/.test(pwd)) {
+    return { success: false, message: 'Şifreniz 8-64 karakter olmalı, harf ve sembol içermelidir.' };
+  }
+  const { data: employee, error: lookupError } = await supabaseAdmin.from('employees')
+    .select('id, is_active').eq('id', current.id).maybeSingle();
+  if (lookupError || !employee?.is_active) return { success: false, message: 'Personel hesabı etkin değil.' };
+  const { error } = await supabaseAdmin.from('employees')
+    .update({ password: hashPassword(pwd) }).eq('id', current.id);
+  if (error) return { success: false, message: 'Şifre güncellenemedi.' };
+  setSessionCookie(current.id, 'active', cookieStore);
   return { success: true };
 }
 
-// ==========================================
-// 3. OTURUM VE ÇIKIŞ İŞLEMLERİ
-// ==========================================
 export async function getPortalSession() {
   const cookieStore = await cookies();
-  const empId = cookieStore.get(PORTAL_COOKIE)?.value;
-  if (!empId) return null;
-
+  const token = verifySession(cookieStore.get(PORTAL_COOKIE)?.value);
+  if (!token || token.state !== 'active') return null;
   const { data: employee } = await supabaseAdmin
     .from('employees')
-    .select(`
-      id, 
-      full_name, 
-      branch_id,
-      branches (name)
-    `)
-    .eq('id', empId)
-    .single();
-
+    .select('id, full_name, branch_id, branches(name)')
+    .eq('id', token.id)
+    .eq('is_active', true)
+    .maybeSingle();
   if (!employee) return null;
 
   let branchName = 'MERKEZ KADRO';
   if (employee.branches) {
-    if (Array.isArray(employee.branches) && employee.branches.length > 0) {
-      branchName = employee.branches[0].name;
-    } else if (!Array.isArray(employee.branches) && (employee.branches as any).name) {
-      branchName = (employee.branches as any).name;
-    }
+    if (Array.isArray(employee.branches) && employee.branches.length > 0) branchName = employee.branches[0].name;
+    else if (!Array.isArray(employee.branches) && (employee.branches as any).name) branchName = (employee.branches as any).name;
   }
-
-  return {
-    ...employee,
-    resolvedBranchName: branchName
-  };
+  return { ...employee, resolvedBranchName: branchName };
 }
 
 export async function portalLogout() {
