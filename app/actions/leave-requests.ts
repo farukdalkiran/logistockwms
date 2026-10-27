@@ -132,6 +132,11 @@ if (data.leave_type === 'YILLIK_IZIN') {
         throw error;
       }
       
+      const {error:statusErr}=await supabaseAdmin.from("leave_requests")
+        .update({status:"APPROVED",manager_note:managerNote,updated_at:new Date().toISOString()})
+        .eq("id",storedRequest.id).eq("status","PENDING");
+      if(statusErr)throw statusErr;
+
       await supabaseAdmin.from("transaction_logs").insert({
         employee_id: data.employee_id,
         action_type: "LEAVE_AUTO_APPROVE",
