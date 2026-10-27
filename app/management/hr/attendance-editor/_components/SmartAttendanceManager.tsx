@@ -313,6 +313,76 @@ export default function DeveloperAttendancePanel({ managerId, managerName, manag
         </div>
       )}
 
+      {activeTab === "HOLIDAYS" && (
+        <div className="grid gap-5 bg-slate-50 p-4 md:grid-cols-12 md:p-7">
+          <form onSubmit={saveHoliday} className="space-y-5 self-start rounded-[5px] border border-slate-200 bg-white p-5 shadow-sm md:col-span-5">
+            <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+              <span className="rounded-[5px] bg-red-50 p-2 text-[#dc3545]"><Sun size={20}/></span>
+              <div>
+                <h2 className="text-sm font-black text-slate-900">Resmî tatil tanımla</h2>
+                <p className="mt-1 text-[11px] text-slate-500">Tüm şubeler için uygulanır. Puantaja tatil saat kredisi ekler.</p>
+              </div>
+            </div>
+            <label className="block text-xs font-bold text-slate-700">Tatil adı
+              <input required minLength={3} maxLength={160} value={holidayTitle} onChange={e=>setHolidayTitle(e.target.value)}
+                className="mt-2 h-11 w-full rounded-[5px] border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-[#dc3545] focus:outline-none"/>
+            </label>
+            <label className="block text-xs font-bold text-slate-700">Tarih
+              <input required type="date" value={holidayDate} onChange={e=>setHolidayDate(e.target.value)}
+                className="mt-2 h-11 w-full rounded-[5px] border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-[#dc3545] focus:outline-none"/>
+            </label>
+            <div>
+              <p className="mb-2 text-xs font-bold text-slate-700">Tatil süresi</p>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {(["AFTERNOON","MORNING","FULL"] as HolidayPeriod[]).map(period=>{
+                  const info=HOLIDAY_WINDOWS[period];
+                  return <button type="button" key={period} onClick={()=>setHolidayPeriod(period)}
+                    className={`rounded-[5px] border px-3 py-3 text-left transition-colors ${holidayPeriod===period?"border-[#dc3545] bg-red-50 text-red-800":"border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-400"}`}>
+                      <span className="block text-[11px] font-black">{period==="AFTERNOON"?"Öğleden sonra":period==="MORNING"?"Sabah":"Tam gün"}</span>
+                      <span className="mt-1 block text-[10px] font-mono">{info.start}–{info.end}</span>
+                      <span className="mt-1 block text-[10px] font-bold">{info.hours} saat</span>
+                    </button>;
+                })}
+              </div>
+            </div>
+            <div className="rounded-[5px] border border-blue-200 bg-blue-50 p-3 text-[11px] leading-5 text-blue-800">
+              <Info size={15} className="mr-1 inline"/> Resmî tatil gerçek mesai girişlerini değiştirmez. Örnek: sabah 4 saat çalışma/izin + 13.00–17.00 resmî tatil.
+            </div>
+            <button type="submit" disabled={loading||holidayLoading}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-[5px] bg-[#dc3545] text-xs font-black text-white hover:bg-red-700 disabled:opacity-50">
+              {loading?<RefreshCw className="animate-spin" size={16}/>:<Save size={16}/>} Tatili kaydet
+            </button>
+          </form>
+          <section className="self-start overflow-hidden rounded-[5px] border border-slate-200 bg-white shadow-sm md:col-span-7">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-[#101b2e] px-5 py-4 text-white">
+              <div>
+                <h2 className="text-sm font-black">Tanımlanmış resmî tatiller</h2>
+                <p className="mt-1 text-[11px] text-slate-300">Gerçek giriş–çıkış veya izin satırlarını silmez.</p>
+              </div>
+              <button type="button" onClick={()=>void fetchHolidays()} disabled={holidayLoading}
+                className="rounded-[5px] border border-white/20 p-2 hover:bg-white/10" title="Tatilleri yenile"><RefreshCw size={16} className={holidayLoading?"animate-spin":""}/></button>
+            </div>
+            <div className="max-h-[520px] divide-y divide-slate-100 overflow-y-auto">
+              {holidayList.length===0 && <p className="p-8 text-center text-xs text-slate-500">Henüz resmî tatil tanımlanmamış.</p>}
+              {holidayList.map(h=>(
+                <div key={h.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 hover:bg-slate-50">
+                  <div>
+                    <p className="text-[13px] font-black text-slate-800">{h.title}</p>
+                    <p className="mt-1 text-[11px] text-slate-500">{new Date(h.holiday_date+"T12:00:00+03:00").toLocaleDateString("tr-TR",{timeZone:"Europe/Istanbul",day:"numeric",month:"long",year:"numeric"})} · {h.start_time.slice(0,5)}–{h.end_time.slice(0,5)}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-[5px] border border-red-200 bg-red-50 px-2 py-1 text-[11px] font-black text-red-700">{h.credited_hours} saat</span>
+                    <button type="button" onClick={()=>{setHolidayDate(h.holiday_date);setHolidayTitle(h.title);setHolidayPeriod(h.period);}}
+                      className="rounded-[5px] border border-slate-200 p-2 text-slate-500 hover:border-slate-400" title="Düzenle"><Edit2 size={15}/></button>
+                    <button type="button" onClick={()=>void removeHoliday(h.id)} className="rounded-[5px] border border-red-200 p-2 text-red-600 hover:bg-red-50" title="Sil"><Trash2 size={15}/></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      )}
+
       {/* =========================================
           TAB 1: GEÇMİŞ & SORGULAMA 
           ========================================= */}
