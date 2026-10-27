@@ -19,12 +19,8 @@ async function fetchDashboardDataCore(userId: string) {
     .eq("id", userId)
     .single();
 
-  const isGlobal =
-    (userProfile && userProfile.role === "Developer") ||
-    userProfile.role === "Admin" ||
-    (userProfile && userProfile.role === "Admin");
-
   if (!userProfile) throw new Error("Kullanıcı profili bulunamadı.");
+  const isGlobal = userProfile.role === "Developer" || userProfile.role === "Admin";
   const targetBranchId = isGlobal ? null : userProfile.branch_id;
 
   // 1. Şube ve Personel Haritasını Oluştur (Sadece İlgili Şube veya Global)
