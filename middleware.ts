@@ -67,8 +67,8 @@ export async function middleware(req: NextRequest) {
   // Supabase ES256 JWTs can be verified with cached JWKS. Unlike getUser(),
   // getClaims() does not require a /auth/v1/user HTTP request per page hit.
   // Sensitive Server Actions still call getUser() to check live sessions.
-  const { data: { claims }, error: claimsError } = await supabase.auth.getClaims();
-  const user = !claimsError && claims?.sub ? { id: claims.sub } : null;
+  const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
+  const user = !claimsError && claimsData?.claims?.sub ? { id: claimsData.claims.sub } : null;
 
   // A. HİÇ OTURUM YOKSA VEYA TOKEN GEÇERSİZ KALMIŞSA (!user)
   if (!user) {
