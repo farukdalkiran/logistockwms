@@ -2,8 +2,7 @@
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { createClient as createSessionClient } from "@/lib/supabase/server";
 import { datesForLeave, isISODate } from "@/lib/attendance/leave-records";
-import { istanbulDate, timeAtIstanbul } from "@/lib/attendance/day-coverage";
-import type { HolidayPeriod } from "@/lib/attendance/day-coverage";
+import { istanbulDate, timeAtIstanbul, coveredDayHours, HOLIDAY_WINDOWS, type TimedAttendance, type PublicHoliday } from "@/lib/attendance/day-coverage";
 
 const db=createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.SUPABASE_SERVICE_ROLE_KEY!,
  {auth:{autoRefreshToken:false,persistSession:false}});
@@ -28,9 +27,6 @@ function datesBetween(start:string,end:string,excluded:string[]) {
  return dates;
 }
 function nextDate(day:string){return new Date(Date.parse(day+"T12:00:00Z")+86400000).toISOString().slice(0,10);}
-function isHolidayComplete(periods:Set<string>) {
- return periods.has("FULL")||(periods.has("MORNING")&&periods.has("AFTERNOON"));
-}
 export async function analyzeAttendanceGaps(
  employeeIds:string[],startDateStr:string,endDateStr:string,excludedDates:string[]=[],
 ){
@@ -42,44 +38,53 @@ export async function analyzeAttendanceGaps(
   const startISO=timeAtIstanbul(startDateStr,"00:00");
   const endISO=timeAtIstanbul(nextDate(endDateStr),"00:00");
   const [att,leaves,holidays]=await Promise.all([
-   db.from("attendance").select("employee_id,check_in_time,status")
+   db.from("attendance").select("employee_id,check_in_time,check_out_time,status,working_hours")
     .in("employee_id",ids).gte("check_in_time",startISO).lt("check_in_time",endISO),
    db.from("leave_requests").select("employee_id,selected_dates,start_date,is_half_day,half_day_period")
     .in("employee_id",ids).eq("status","APPROVED")
     .lte("start_date",endDateStr).gte("end_date",startDateStr),
-   db.from("wms_public_holidays").select("holiday_date,period")
+   db.from("wms_public_holidays").select("id,holiday_date,title,period,start_time,end_time,credited_hours")
     .gte("holiday_date",startDateStr).lte("holiday_date",endDateStr)
   ]);
   if(att.error||leaves.error||holidays.error)throw att.error??leaves.error??holidays.error;
-  const actual=new Set<string>();
-  for(const record of att.data??[]){
-   if(record.check_in_time&&!String(record.status||"").startsWith("LEAVE_"))
-    actual.add(record.employee_id+"_"+istanbulDate(record.check_in_time));
-  }
-  const portions=new Map<string,Set<string>>();
-  const add=(key:string,period:string)=>{
-   if(!portions.has(key))portions.set(key,new Set());
-   portions.get(key)!.add(period);
+  // Same-day physical work + approved leave + official holiday must occupy
+  // their OWN half-day windows, not all be treated as a full-day shortcut.
+  const byEmpDay=new Map<string,TimedAttendance[]>();
+  const add=(key:string,row:TimedAttendance)=>{
+    if(!byEmpDay.has(key))byEmpDay.set(key,[]);
+    byEmpDay.get(key)!.push(row);
   };
-  for(const holiday of holidays.data??[]){
-   for(const id of ids)add(id+"_"+holiday.holiday_date,holiday.period);
+  for(const row of att.data??[]){
+    if(!row.check_in_time)continue;
+    const day=istanbulDate(row.check_in_time);
+    add(row.employee_id+"_"+day,row);
   }
   for(const req of leaves.data??[]){
-   const portion=req.is_half_day?(req.half_day_period==="AFTERNOON"?"AFTERNOON":"MORNING"):"FULL";
-   for(const date of datesForLeave(req.selected_dates,req.start_date)){
-    if(date>=startDateStr&&date<=endDateStr)add(req.employee_id+"_"+date,portion);
-   }
+    const period=req.is_half_day
+      ? (req.half_day_period==="AFTERNOON"?"AFTERNOON":"MORNING")
+      : "FULL";
+    const window=HOLIDAY_WINDOWS[period];
+    for(const date of datesForLeave(req.selected_dates,req.start_date)){
+      if(date<startDateStr||date>endDateStr)continue;
+      add(req.employee_id+"_"+date,{
+        check_in_time:timeAtIstanbul(date,window.start),
+        check_out_time:timeAtIstanbul(date,window.end),
+        status:"LEAVE_APPROVED",
+      });
+    }
   }
+  const holidayRows=(holidays.data??[]) as PublicHoliday[];
   const results:{date:string;employeeIds:string[];partialEmployeeIds:string[]}[]=[];
   for(const date of weekdays){
-   const missing:string[]=[],partial:string[]=[];
-   for(const id of ids){
-    const key=id+"_"+date;
-    if(actual.has(key)||isHolidayComplete(portions.get(key)??new Set()))continue;
-    if((portions.get(key)?.size??0)>0)partial.push(id);
-    else missing.push(id);
-   }
-   if(missing.length||partial.length)results.push({date,employeeIds:missing,partialEmployeeIds:partial});
+    const missing:string[]=[],partial:string[]=[];
+    for(const id of ids){
+      const entries=byEmpDay.get(id+"_"+date)??[];
+      const credited=coveredDayHours(date,entries,holidayRows);
+      if(credited>=7.99)continue;
+      if(credited>0||entries.length>0||holidayRows.some(h=>h.holiday_date===date))partial.push(id);
+      else missing.push(id);
+    }
+    if(missing.length||partial.length)results.push({date,employeeIds:missing,partialEmployeeIds:partial});
   }
   return {success:true,data:results,message:"Eksik günler hesaplandı; yarım günler ayrı işaretlendi."};
  }catch(e){return {success:false,message:e instanceof Error?e.message:"Tarama hatası."};}
