@@ -9,14 +9,48 @@ import { usePathname } from "next/navigation";
 import { ArrowUpRight, MapPin, PackagePlus, Volume2, VolumeX, X } from "lucide-react";
 import { useWms } from "@/components/providers/WmsSessionProvider";
 import { getHomeWarehouseOrders } from "@/app/actions/home-warehouse-orders";
-import { supabase } from "@/lib/supabase";
 import type { OrderRow } from "@/lib/order-approvals/types";
 
 const SOUND_KEY = "wms:orders:sound:v1";
 const SEEN_KEY = "wms:orders:seen:v1:";
-// Fallback while Realtime is unavailable; 3x fewer server-side reads.
-const POLL_MS = 45000;
+// Only one automatic refresh per local hour during the warehouse shift.
+// This is a browser-side schedule: no worker, cron job, or background network traffic.
 const MIN_REFRESH_GAP_MS = 12000;
+const ISTANBUL_TIMEZONE = "Europe/Istanbul";
+const FIRST_CHECK_HOUR = 8;
+const LAST_CHECK_HOUR = 16;
+
+/** Returns the current business clock without depending on the user's OS timezone. */
+function istanbulClock(now = new Date()) {
+  const entries = new Intl.DateTimeFormat("en-GB", {
+    timeZone: ISTANBUL_TIMEZONE,
+    hourCycle: "h23",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(now);
+  const get = (name: Intl.DateTimeFormatPartTypes) =>
+    Number(entries.find((entry) => entry.type === name)?.value ?? 0);
+  return { hour: get("hour"), minute: get("minute"), second: get("second") };
+}
+
+function isNotificationHour(now = new Date()) {
+  const { hour } = istanbulClock(now);
+  return hour >= FIRST_CHECK_HOUR && hour <= LAST_CHECK_HOUR;
+}
+
+/** Align to 08:00, 09:00, ... 16:00 TRT; skip the night in one timeout. */
+function nextCheckDelayMs(now = new Date()): number {
+  const { hour, minute, second } = istanbulClock(now);
+  let hoursAhead: number;
+  if (hour < FIRST_CHECK_HOUR) hoursAhead = FIRST_CHECK_HOUR - hour;
+  else if (hour < LAST_CHECK_HOUR) hoursAhead = 1;
+  else hoursAhead = 24 - hour + FIRST_CHECK_HOUR;
+  return Math.max(
+    1000,
+    hoursAhead * 3600000 - minute * 60000 - second * 1000 - now.getMilliseconds(),
+  );
+}
 const MAX_SEEN = 500;
 
 type OrderAlert = { order: OrderRow; count: number };
@@ -185,7 +219,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
 
   const load = useCallback(async (force = false) => {
     if (!eligible || !userId || busyRef.current) return;
-    // Focus + visibilitychange + polling can fire together; de-duplicate them.
+    // Prevent duplicate loads during mount/manual refresh and scheduled checks.
     if (!force && Date.now() - lastLoadRef.current < MIN_REFRESH_GAP_MS) return;
     lastLoadRef.current = Date.now();
     busyRef.current = true;
@@ -218,7 +252,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
         : [];
       complete.forEach((x) => known.add(x.id));
       writeSeen(userId, Array.from(known));
-      if (fresh.length > 0 && notificationEnabled) {
+      if (fresh.length > 0 && notificationEnabled && isNotificationHour()) {
         setAlert({ order: fresh[0], count: fresh.length });
         if (soundRef.current && audioRef.current?.state === "running") void sound();
       }
@@ -235,26 +269,28 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
 
   useEffect(() => {
     if (!eligible) { setLoading(false); return; }
+
+    // The first read keeps the dashboard usable immediately after login.
     void load();
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void load();
-    }, POLL_MS);
-    const focused = () => {
-      if (document.visibilityState === "visible") void load();
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const scheduleNextCheck = () => {
+      timer = window.setTimeout(() => {
+        if (cancelled) return;
+        // Hidden tabs and after-hours sessions perform no automatic DB reads.
+        if (document.visibilityState === "visible" && isNotificationHour()) {
+          void load();
+        }
+        scheduleNextCheck();
+      }, nextCheckDelayMs());
     };
-    window.addEventListener("focus", focused);
-    document.addEventListener("visibilitychange", focused);
-    const channel = supabase
-      .channel("wms-order-alerts-" + userId)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "orders" }, focused)
-      .subscribe();
+    scheduleNextCheck();
+
     return () => {
-      clearInterval(timer);
-      window.removeEventListener("focus", focused);
-      document.removeEventListener("visibilitychange", focused);
-      void supabase.removeChannel(channel);
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [eligible, userId, load]);
+  }, [eligible, load]);
 
   const toggleSound = useCallback(() => {
     const next = !soundRef.current;
@@ -293,7 +329,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
                   Yeni mağaza talebi
                 </span>
                 <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[9px] font-bold text-emerald-700">
-                  Şimdi
+                  Son kontrolde
                 </span>
               </div>
               <p className="mt-1.5 text-[13px] font-extrabold leading-snug text-slate-900">
