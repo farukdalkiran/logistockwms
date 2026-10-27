@@ -68,6 +68,8 @@ export function NoticeCenterProvider({ children }: { children: ReactNode }) {
   const { userId } = useWms();
   const [developer, setDeveloper] = useState(false);
   const [announcements, setAnnouncements] = useState<WmsAnnouncement[]>([]);
+  const [branches, setBranches] = useState<{id:string;name:string}[]>([]);
+  const [targetBranchId, setTargetBranchId] = useState("");
   const [unreadIds, setUnreadIds] = useState<string[]>([]);
   const [ticketCount, setTicketCount] = useState(0);
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
@@ -108,6 +110,7 @@ export function NoticeCenterProvider({ children }: { children: ReactNode }) {
       const data = result.data;
       setDeveloper(data.developer);
       setAnnouncements(data.announcements);
+      setBranches(data.branches);
       setUnreadIds(data.unreadIds);
       setTicketCount(data.openTicketCount);
       // Don't interrupt an already open dialog or another announcement.
@@ -238,10 +241,13 @@ export function NoticeCenterProvider({ children }: { children: ReactNode }) {
     setError("");
     setNotice("");
     const form = e.currentTarget;
-    const response = await publishWmsAnnouncement(new FormData(form));
+    const payload = new FormData(form);
+    payload.set("target_branch_id", targetBranchId);
+    const response = await publishWmsAnnouncement(payload);
     setBusy(false);
     if (!response.ok) { setError(response.error); return; }
     setShowComposer(false);
+    setTargetBranchId("");
     setNotice("Duyuru yayınlandı. Açık oturumlar en geç sonraki saatlik kontrolde görecek.");
     await load(true);
   };
@@ -271,7 +277,7 @@ export function NoticeCenterProvider({ children }: { children: ReactNode }) {
 
       {popup && !panel && (
         <div className="fixed inset-0 z-[12000] flex items-center justify-center bg-slate-950/70 p-3 backdrop-blur-[3px]" role="presentation">
-          <section role="dialog" aria-modal="true" aria-label="Yeni duyuru" className="w-full max-w-xl overflow-hidden rounded-xl border border-slate-700 bg-white shadow-2xl">
+          <section role="dialog" aria-modal="true" aria-label="Yeni duyuru" className="w-full max-w-xl overflow-hidden rounded-[5px] border border-slate-700 bg-white shadow-2xl">
             <div className="flex items-center justify-between gap-3 border-b border-slate-700 bg-[#101b2f] px-5 py-4 text-white">
               <div className="flex items-center gap-3">
                 <span className="rounded-lg bg-red-600 p-2"><Megaphone size={19}/></span>
@@ -306,7 +312,7 @@ export function NoticeCenterProvider({ children }: { children: ReactNode }) {
       {panel && (
         <div className="fixed inset-0 z-[13000] flex items-center justify-center bg-slate-950/75 p-2 sm:p-5 backdrop-blur-sm">
           <div role="dialog" aria-modal="true" aria-label={panel === "support" ? "Destek merkezi" : "Duyuru merkezi"}
-            className="flex max-h-[94vh] min-h-[440px] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-slate-700 bg-white shadow-2xl">
+            className="flex max-h-[94vh] min-h-[440px] w-full max-w-5xl flex-col overflow-hidden rounded-[5px] border border-slate-700 bg-white shadow-2xl">
             <header className="flex shrink-0 items-center justify-between border-b border-slate-700 bg-[#0f1b2e] px-4 py-4 text-white sm:px-6">
               <div className="flex items-center gap-3">
                 <span className="rounded-lg bg-[#dc3545] p-2">{panel === "support" ? <Headset size={21}/> : <Megaphone size={21}/>}</span>
@@ -407,10 +413,10 @@ export function NoticeCenterProvider({ children }: { children: ReactNode }) {
               )}
 
               {panel === "announcements" && (
-                <div className="space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="space-y-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
                     <div>
-                      <h3 className="text-[15px] font-black text-slate-900">Operasyon duyuruları</h3>
+                      <h3 className="text-lg font-black tracking-tight text-slate-900">Operasyon duyuruları</h3>
                       <p className="mt-1 text-xs text-slate-500">Yayınlanan duyurular kullanıcı girişinde ve saatlik düşük trafikli kontrolde görüntülenir.</p>
                     </div>
                     {developer && (
@@ -420,8 +426,16 @@ export function NoticeCenterProvider({ children }: { children: ReactNode }) {
                     )}
                   </div>
                   {developer && showComposer && (
-                    <form onSubmit={publish} className="space-y-3 rounded-xl border border-red-200 bg-white p-4 sm:p-5">
-                      <div className="flex items-center gap-2 text-sm font-black text-slate-900"><Megaphone size={17} className="text-[#dc3545]"/> Duyuru oluştur</div>
+                    <form onSubmit={publish} className="space-y-4 rounded-[5px] border border-slate-300 bg-white p-4 shadow-sm sm:p-6">
+                      <div className="flex items-center gap-2 border-b border-slate-200 pb-3 text-sm font-black text-slate-900"><Megaphone size={17} className="text-[#dc3545]"/> Duyuru oluştur</div>
+                      <div className="rounded-[5px] border border-slate-200 bg-slate-50 p-4">
+                        <label htmlFor="announcement-target" className="mb-2 block text-[11px] font-extrabold uppercase tracking-wide text-slate-700">Hedef kitle</label>
+                        <select id="announcement-target" value={targetBranchId} onChange={e => setTargetBranchId(e.target.value)} className="w-full rounded-[5px] border border-slate-300 bg-white px-3 py-3 text-xs font-semibold text-slate-800">
+                          <option value="">Tüm şubeler • Genel duyuru</option>
+                          {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        </select>
+                        <p className="mt-2 text-[11px] leading-5 text-slate-500">{targetBranchId ? "Duyuru yalnızca seçilen şubeye bağlı kullanıcılara gösterilir." : "Duyuru bütün şubelerdeki kullanıcılara gösterilir."}</p>
+                      </div>
                       <label className="block text-[11px] font-extrabold text-slate-700">Başlık</label>
                       <input name="title" required minLength={5} maxLength={150} className="w-full rounded-lg border border-slate-300 p-3 text-xs text-slate-900" placeholder="Duyuru başlığı"/>
                       <label className="block text-[11px] font-extrabold text-slate-700">Metin</label>
@@ -431,22 +445,22 @@ export function NoticeCenterProvider({ children }: { children: ReactNode }) {
                       <button type="submit" disabled={busy} className="inline-flex items-center gap-2 rounded-lg bg-[#dc3545] px-5 py-3 text-xs font-extrabold text-white disabled:opacity-50">{busy ? <Loader2 size={16} className="animate-spin"/> : <Send size={16}/>} Duyuruyu yayınla</button>
                     </form>
                   )}
-                  <div className="grid gap-3 md:grid-cols-2">
+                  <div className="grid gap-4 md:grid-cols-2">
                     {announcements.length === 0 && <p className="rounded-lg border border-dashed border-slate-300 bg-white p-5 text-xs text-slate-500">Henüz duyuru bulunmuyor.</p>}
                     {announcements.map(a => (
-                      <article key={a.id} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                      <article key={a.id} className="overflow-hidden rounded-[5px] border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
                         {a.image_url && (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={a.image_url} alt="Duyuru" className="h-44 w-full border-b border-slate-100 object-contain"/>
                         )}
-                        <div className="space-y-3 p-4">
+                        <div className="space-y-3 p-5">
                           <div className="flex items-start justify-between gap-2">
                             <h4 className="text-sm font-black text-slate-900">{a.title}</h4>
                             <span className={`shrink-0 rounded border px-2 py-1 text-[9px] font-extrabold ${a.is_active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-100 text-slate-500"}`}>
                               {a.is_active ? "Yayında" : "Arşiv"}
                             </span>
                           </div>
-                          <p className="text-[10px] font-bold text-slate-500">{dateText(a.published_at)}</p>
+                          <div className="flex flex-wrap items-center gap-2 text-[10px] font-bold text-slate-500"><span>{dateText(a.published_at)}</span><span className="rounded-[5px] border border-slate-200 bg-slate-50 px-2 py-1 text-slate-700">{a.target_branch_id ? (branches.find(b => b.id === a.target_branch_id)?.name ?? "Şubeye özel") : "Tüm şubeler"}</span></div>
                           <p className="whitespace-pre-wrap break-words text-[12px] leading-6 text-slate-600">{a.body}</p>
                           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
                             {currentUnread.includes(a.id) ? (
