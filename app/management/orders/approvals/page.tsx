@@ -53,8 +53,6 @@ export default function OrderApprovalsPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [toast, setToast] = useState("");
   const request = useRef(0);
-  const selectedRef = useRef<string | null>(null);
-  selectedRef.current = selected;
 
   useEffect(() => {
     let active = true;
@@ -122,13 +120,7 @@ export default function OrderApprovalsPage() {
       request.current++;
     };
   }, [load]);
-  useEffect(() => {
-    const t = window.setInterval(() => {
-      if (document.visibilityState === "visible" && !selectedRef.current)
-        void load(true);
-    }, 90000);
-    return () => window.clearInterval(t);
-  }, [load]);
+  // Approval queue refreshes on entry/filter changes, manual refresh, and actions.
   useEffect(() => {
     if (!toast) return;
     const t = window.setTimeout(() => setToast(""), 6000);
@@ -284,7 +276,7 @@ export default function OrderApprovalsPage() {
         />
         <div className={s.pageFoot}>
           <span>Varsayılan sıralama: en eski talep önce</span>
-          <span>Görünür sayfa 30 saniyede bir yenilenir.</span>
+          <span>Manuel yenileme ve işlemler sonrası güncelleme.</span>
         </div>
       </div>
       {selected && (
