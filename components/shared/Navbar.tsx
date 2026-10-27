@@ -22,7 +22,9 @@ import {
   UserCog,
   Lock,
   Settings,
+  BellRing,
 } from "lucide-react";
+import { useNoticeCenter } from "@/components/providers/NoticeCenterProvider";
 
 // VERCEL TİP HATASI VE FORMAT ÇÖZÜMÜ
 const DynamicIcon = ({ name, size = 16, className = "" }: { name?: string | null, size?: number, className?: string }) => {
@@ -52,6 +54,7 @@ interface SystemModule {
 
 export const Navbar = () => {
   const { userProfile, isLoading } = useAuth();
+  const { isDeveloper, ticketCount, unreadCount, openSupport, openAnnouncements } = useNoticeCenter();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -232,10 +235,24 @@ export const Navbar = () => {
           {/* SAĞ: Destek & Profil */}
           <div className="flex items-center gap-3 md:gap-4 h-full shrink-0 z-10 bg-[#0b1120] pl-4 justify-end">
             <div className="flex items-center gap-1">
-              <Link href="/management/help" className="flex items-center gap-1.5 hover:bg-slate-800/80 px-2 py-1 rounded transition-colors group">
-                <MessageCircleQuestionMark size={14} className="text-slate-400 group-hover:text-white transition-colors" />
-                <span className="text-[10px] font-bold text-slate-400 group-hover:text-white uppercase hidden md:inline-block tracking-wider transition-colors">Destek</span>
-              </Link>
+              <button type="button" onClick={openSupport}
+                aria-label={isDeveloper ? "Destek taleplerini yönet" : "Destek talebi aç"}
+                title={isDeveloper ? "Destek Talepleri" : "Destek"}
+                className={`relative flex items-center gap-1.5 rounded px-2 py-1.5 transition-colors hover:bg-slate-800/80 ${isDeveloper && ticketCount > 0 ? "bg-red-600/15 text-red-300 animate-pulse" : "text-slate-400 hover:text-white"}`}>
+                <MessageCircleQuestionMark size={16} />
+                <span className="hidden text-[10px] font-bold uppercase tracking-wider md:inline">{isDeveloper ? "Destek Talepleri" : "Destek"}</span>
+                {isDeveloper && ticketCount > 0 && (
+                  <span className="inline-flex min-w-[17px] items-center justify-center rounded-full bg-[#dc3545] px-1 py-0.5 text-[9px] font-black leading-none text-white">{ticketCount > 99 ? "99+" : ticketCount}</span>
+                )}
+              </button>
+              <button type="button" onClick={openAnnouncements} title="Duyurular" aria-label="Duyuru merkezini aç"
+                className="relative flex items-center gap-1.5 rounded px-2 py-1.5 text-slate-400 transition-colors hover:bg-slate-800/80 hover:text-white">
+                <BellRing size={16} className={unreadCount > 0 ? "text-amber-400" : ""} />
+                <span className="hidden text-[10px] font-bold uppercase tracking-wider md:inline">Duyurular</span>
+                {unreadCount > 0 && (
+                  <span className="inline-flex min-w-[17px] items-center justify-center rounded-full bg-amber-500 px-1 py-0.5 text-[9px] font-black leading-none text-slate-950">{unreadCount > 99 ? "99+" : unreadCount}</span>
+                )}
+              </button>
               <button onClick={toggleFullScreen} className="text-slate-400 hover:text-white transition-colors p-1.5 hover:bg-slate-800/80 rounded">
                 {isFullscreen ? <Minimize size={14} /> : <Maximize size={14} />}
               </button>

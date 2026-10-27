@@ -8,6 +8,7 @@ import { AuthProvider } from "@/components/providers/AuthProvider";
 import { createClient } from "@/lib/supabase/server";
 import { WmsSessionProvider } from "@/components/providers/WmsSessionProvider";
 import { OrderNotificationProvider } from "@/components/providers/OrderNotificationProvider";
+import { NoticeCenterProvider } from "@/components/providers/NoticeCenterProvider";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -84,10 +85,12 @@ export default async function RootLayout({
         <AuthProvider>
           {/* TÜM UYGULAMAYI SARAN WMS ŞUBE KİLİDİ */}
           <WmsSessionProvider session={sessionData}>
-            <OrderNotificationProvider>
-              <Toaster position="top-right" />
-            {children}
-          </OrderNotificationProvider>
+            <NoticeCenterProvider>
+              <OrderNotificationProvider>
+                <Toaster position="top-right" />
+                {children}
+              </OrderNotificationProvider>
+            </NoticeCenterProvider>
           </WmsSessionProvider>
         </AuthProvider>
       </body>
