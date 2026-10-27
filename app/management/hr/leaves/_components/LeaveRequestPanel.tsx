@@ -655,7 +655,7 @@ export default function LeaveRequestPanel() {
                                 </span>
                               </td>
                               <td className="p-3 text-center align-middle font-mono text-sm font-black text-[#dc3545]">
-                                {req.requested_days} <span className="text-[9px] text-slate-500 ml-0.5">GÜN</span>
+                                {req.requested_days} <span className="text-[9px] text-slate-500 ml-0.5">GÜN</span>{req.is_half_day && <span className="block text-[9px] text-sky-700">{req.half_day_period==="AFTERNOON"?"13.00–17.00":"08.00–12.00"}</span>}
                               </td>
                               <td className="p-3 align-middle whitespace-normal min-w-[200px]">
                                 <div className="flex flex-col items-start gap-1.5">
