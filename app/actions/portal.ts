@@ -243,7 +243,7 @@ export async function getPortalStats() {
     date:string;checkIn:string;checkOut:string;
     hours:string;status:string|null
   }[]=[];
-  const coveredWorkDays=new Set<string>();
+  const workedHoursByDay=new Map<string,number>();
   const coveredAbsenceHours=new Map<string,number>();
   const dateFmt=new Intl.DateTimeFormat("tr-TR",{timeZone:"Europe/Istanbul",day:"2-digit",month:"short"});
   const timeFmt=new Intl.DateTimeFormat("tr-TR",{timeZone:"Europe/Istanbul",hour:"2-digit",minute:"2-digit"});
@@ -253,7 +253,7 @@ export async function getPortalStats() {
     const hours=Number(record.working_hours)||0;
     totalHours+=hours;
     if(!isLeaveRow(record.status)){
-      coveredWorkDays.add(date);
+      workedHoursByDay.set(date,(workedHoursByDay.get(date)??0)+hours);
       if(hours>8)overTime+=hours-8;
     } else {
       // Unpaid full-day leave still counts as an excused absence, despite 0 paid hours.
@@ -290,8 +290,8 @@ export async function getPortalStats() {
     const day=new Date(d);
     if(day.getUTCDay()===0||day.getUTCDay()===6)continue;
     const date=day.toISOString().slice(0,10);
-    if(coveredWorkDays.has(date))continue;
-    missingDays+=Math.max(0,1-Math.min(1,(coveredAbsenceHours.get(date)??0)/8));
+    const coveredHours=(workedHoursByDay.get(date)??0)+(coveredAbsenceHours.get(date)??0);
+    missingDays+=Math.max(0,1-Math.min(1,coveredHours/8));
   }
   return {
     totalHours:totalHours.toFixed(1),
