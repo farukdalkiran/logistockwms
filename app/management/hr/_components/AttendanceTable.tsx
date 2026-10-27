@@ -302,7 +302,7 @@ function StatusBadge({ record }: { record: AttendanceRecord }) {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wide text-blue-700">
         <Calendar size={13} />
-        İzinli
+        {record.check_in_time && record.check_out_time && (Date.parse(record.check_out_time)-Date.parse(record.check_in_time)) <= 4.1*3600000 ? "Yarım Gün İzin" : "İzinli"}
       </span>
     );
   }
