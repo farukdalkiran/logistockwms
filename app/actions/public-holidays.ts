@@ -45,7 +45,7 @@ export async function savePublicHoliday(input:{
   if(error||!data)throw error??new Error("Kayıt oluşturulamadı.");
   revalidatePath("/management/hr/attendance-editor");
   revalidatePath("/management/hr");
-  return {success:true,data:data as PublicHoliday,message:"Resmî tatil kaydedildi. Var olan giriş/çıkış kayıtları değiştirilmedi."};
+  return {success:true,data:data as PublicHoliday,message:"Resmî tatil kaydedildi ve tüm aktif personelin attendance tablosuna saat bazında işlendi. Gerçek giriş–çıkışlar korundu."};
  }catch(e){return {success:false,message:e instanceof Error?e.message:"Tatil kaydedilemedi."};}
 }
 export async function removePublicHoliday(id:string):Promise<Result<true>>{
@@ -56,6 +56,6 @@ export async function removePublicHoliday(id:string):Promise<Result<true>>{
   if(error)throw error;
   revalidatePath("/management/hr/attendance-editor");
   revalidatePath("/management/hr");
-  return {success:true,data:true,message:"Tatil kaldırıldı. Mesai kayıtlarına dokunulmadı."};
+  return {success:true,data:true,message:"Resmî tatil kaldırıldı. Sadece bu tatile ait attendance satırları temizlendi; gerçek mesai kayıtları korundu."};
  }catch(e){return {success:false,message:e instanceof Error?e.message:"Tatil silinemedi."};}
 }
