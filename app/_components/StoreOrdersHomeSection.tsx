@@ -35,13 +35,12 @@ export function StoreOrdersHomeSection() {
     }
   }, []);
 
+  // Store users typically work for a few minutes and close the application.
+  // Fetch once on entry; keep the existing manual refresh button.
   useEffect(() => {
     alive.current = true;
     void load();
-    const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible") void load();
-    }, 120000);
-    return () => { alive.current = false; window.clearInterval(interval); };
+    return () => { alive.current = false; };
   }, [load]);
 
   const metrics = result?.metrics;
@@ -147,7 +146,7 @@ export function StoreOrdersHomeSection() {
       </div>
       <footer className="flex shrink-0 items-center justify-between gap-2 border-t border-slate-200 bg-white px-3 py-2.5">
         <span className="text-[10px] font-semibold text-slate-500">
-          {result ? quantity(result.count) + " mağaza siparişi" : "Şube siparişleri"} · 2 dk güncelleme
+          {result ? quantity(result.count) + " mağaza siparişi" : "Şube siparişleri"} · Manuel yenileme
         </span>
         <Link href={HREF} className="text-[10px] font-extrabold text-[#dc3545] hover:underline">Tüm siparişlerim</Link>
       </footer>
