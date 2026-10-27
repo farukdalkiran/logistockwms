@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { requireWmsActor } from "@/lib/security/require-wms-actor";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -9,6 +10,7 @@ const supabaseAdmin = createClient(
 
 export async function getShipmentsForTable(searchQuery: string = "", filterStatus: "all" | "pending" | "processed" = "all") {
   try {
+    await requireWmsActor();
     let query = supabaseAdmin
       .from("erp_raw_shipments")
       .select("*")
