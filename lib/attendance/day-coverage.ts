@@ -26,9 +26,11 @@ export const timeAtIstanbul = (date: string, time: string) =>
   new Date(`${date}T${time}:00+03:00`).toISOString();
 
 export function istanbulDate(iso: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
+  const items = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Europe/Istanbul", year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(new Date(iso));
+  }).formatToParts(new Date(iso));
+  const get = (name: string) => items.find(x=>x.type===name)?.value || "00";
+  return `${get("year")}-${get("month")}-${get("day")}`;
 }
 export const isLeaveRow = (status?: string | null) => status?.startsWith("LEAVE_") ?? false;
 
