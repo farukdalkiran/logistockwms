@@ -3,6 +3,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { unstable_cache } from "next/cache";
+import { requireWmsActor } from "@/lib/security/require-wms-actor";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -19,11 +20,11 @@ async function fetchDashboardDataCore(userId: string) {
     .single();
 
   const isGlobal =
-    !userProfile ||
-    userProfile.role === "Developer" ||
+    (userProfile && userProfile.role === "Developer") ||
     userProfile.role === "Admin" ||
-    !userProfile.branch_id;
+    (userProfile && userProfile.role === "Admin");
 
+  if (!userProfile) throw new Error("Kullanıcı profili bulunamadı.");
   const targetBranchId = isGlobal ? null : userProfile.branch_id;
 
   // 1. Şube ve Personel Haritasını Oluştur (Sadece İlgili Şube veya Global)
@@ -303,13 +304,12 @@ export async function getDashboardDataServer(
   forceRefresh = false
 ) {
   try {
-    if (!userId) {
-      return { success: false, error: "Kullanıcı oturumu bulunamadı." };
-    }
-
+    // The client-supplied userId is intentionally ignored. The verified
+    // session is the only authority for access to service-role data.
+    const actor = await requireWmsActor();
     const data = forceRefresh
-      ? await fetchDashboardDataCore(userId)
-      : await getCachedDashboardData(userId);
+      ? await fetchDashboardDataCore(actor.id)
+      : await getCachedDashboardData(actor.id);
 
     return { success: true, data };
   } catch (err) {
@@ -323,6 +323,7 @@ export async function getDashboardDataServer(
 // ============================================================================
 export async function getTransferDetailsServer(transferId: string) {
   try {
+    const actor = await requireWmsActor();
     if (!transferId) {
       return { success: false, error: "Transfer ID belirtilmedi." };
     }
@@ -336,6 +337,10 @@ export async function getTransferDetailsServer(transferId: string) {
 
     if (txError || !transfer) {
       return { success: false, error: "Transfer kaydı bulunamadı." };
+    }
+
+    if (!actor.isGlobal && actor.branchId !== transfer.from_branch_id && actor.branchId !== transfer.to_branch_id) {
+      return { success: false, error: "Bu transferi görüntüleme yetkiniz yok." };
     }
 
     // 2. Sadece Bu Transfere Ait Kalemleri, Logları, İlgili 2 Şubeyi ve Kargo Firmasını Çek
