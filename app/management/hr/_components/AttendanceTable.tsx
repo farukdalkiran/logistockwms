@@ -386,6 +386,9 @@ export default function AttendanceTable({
   const [now, setNow] = useState<Date | null>(null);
 
   const requestIdRef = useRef(0);
+  // Holidays change rarely; cache per month to avoid extra Supabase calls for
+  // every attendance Realtime event. Refresh page to see newly saved holidays.
+  const holidayCacheRef=useRef<{month:string;fetchedAt:number;data:PublicHoliday[]} | null>(null);
 
   const canFetch = isDeveloper || (!!branchId && branchId !== "GLOBAL");
 
@@ -496,13 +499,21 @@ export default function AttendanceTable({
           if (requestId !== requestIdRef.current) return;
         }
 
-        const {data:holidayData,error:holidayError}=await supabase.from("wms_public_holidays")
-          .select("id,holiday_date,title,period,start_time,end_time,credited_hours")
-          .gte("holiday_date",istanbulDate(monthStart))
-          .lt("holiday_date",istanbulDate(nextMonthStart))
-          .lte("holiday_date",istanbulDate(new Date().toISOString()));
-        if(holidayError)throw holidayError;
-        const currentHolidays=(holidayData??[]) as PublicHoliday[];
+        const monthKey=istanbulDate(monthStart).slice(0,7);
+        let currentHolidays:PublicHoliday[]=[];
+        const cached=holidayCacheRef.current;
+        if(cached && cached.month===monthKey && Date.now()-cached.fetchedAt<30*60*1000){
+          currentHolidays=cached.data;
+        } else {
+          const {data:holidayData,error:holidayError}=await supabase.from("wms_public_holidays")
+            .select("id,holiday_date,title,period,start_time,end_time,credited_hours")
+            .gte("holiday_date",istanbulDate(monthStart))
+            .lt("holiday_date",istanbulDate(nextMonthStart))
+            .lte("holiday_date",istanbulDate(new Date().toISOString()));
+          if(holidayError)throw holidayError;
+          currentHolidays=(holidayData??[]) as PublicHoliday[];
+          holidayCacheRef.current={month:monthKey,fetchedAt:Date.now(),data:currentHolidays};
+        }
         const totals: Record<string, number> = {};
         const lates: Record<string, number> = {};
 
