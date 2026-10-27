@@ -28,6 +28,7 @@ export type WmsAnnouncement = {
   title: string;
   body: string;
   image_url: string | null;
+  target_branch_id: string | null;
   is_active: boolean;
   published_at: string;
   created_at: string;
@@ -70,6 +71,7 @@ function message(error: unknown) {
 export async function getNoticeCenterSnapshot(): Promise<Result<{
   developer: boolean;
   announcements: WmsAnnouncement[];
+  branches: { id: string; name: string }[];
   unreadIds: string[];
   openTicketCount: number;
 }>> {
@@ -77,13 +79,18 @@ export async function getNoticeCenterSnapshot(): Promise<Result<{
     const ctx = await actor();
     const now = new Date().toISOString();
     let query = ctx.db.from("wms_announcements")
-      .select("id,title,body,image_url,is_active,published_at,created_at")
+      .select("id,title,body,image_url,target_branch_id,is_active,published_at,created_at")
       .order("published_at", { ascending: false }).limit(30);
     if (!ctx.isDeveloper) {
-      query = query.eq("is_active", true).lte("published_at", now);
+      query = query.eq("is_active", true).lte("published_at", now)
+        .or(`target_branch_id.is.null,target_branch_id.eq.${ctx.branchId ?? "00000000-0000-0000-0000-000000000000"}`);
     }
     const { data: announcements, error } = await query;
     if (error) throw new Error("Duyurular yüklenemedi.");
+    const branchesResult = ctx.isDeveloper
+      ? await ctx.db.from("branches").select("id,name").order("name")
+      : { data: [] as { id: string; name: string }[], error: null };
+    if (branchesResult.error) throw new Error("Şubeler alınamadı.");
     const current = ((announcements ?? []) as WmsAnnouncement[])
       .filter(a => a.is_active && new Date(a.published_at).getTime() <= Date.now());
     const ids = current.map(a => a.id);
@@ -104,6 +111,7 @@ export async function getNoticeCenterSnapshot(): Promise<Result<{
       data: {
         developer: ctx.isDeveloper,
         announcements: (announcements ?? []) as WmsAnnouncement[],
+        branches: (branchesResult.data ?? []) as { id: string; name: string }[],
         unreadIds: ids.filter(id => !seen.has(id)),
         openTicketCount: ticketsResult.count ?? 0,
       },
@@ -120,6 +128,10 @@ export async function acknowledgeWmsAnnouncement(id: string): Promise<Result<tru
     const { data } = await ctx.db.from("wms_announcements").select("id")
       .eq("id", id).eq("is_active", true)
       .lte("published_at", new Date().toISOString()).maybeSingle();
+    if (data) {
+      const { data: target } = await ctx.db.from("wms_announcements").select("target_branch_id").eq("id", id).single();
+      if (target?.target_branch_id && target.target_branch_id !== ctx.branchId) throw new Error("Bu duyuru şubenize ait değil.");
+    }
     if (!data) throw new Error("Duyuru yayında değil.");
     const { error } = await ctx.db.from("wms_announcement_reads")
       .upsert({ announcement_id: id, user_id: ctx.id }, { onConflict: "announcement_id,user_id", ignoreDuplicates: true });
@@ -214,6 +226,14 @@ export async function publishWmsAnnouncement(formData: FormData): Promise<Result
     if (!ctx.isDeveloper) throw new Error("Duyuru yayınlama yetkiniz yok.");
     const title = String(formData.get("title") || "").trim();
     const body = String(formData.get("body") || "").trim();
+    const requestedBranch = String(formData.get("target_branch_id") || "").trim();
+    let targetBranchId: string | null = null;
+    if (requestedBranch) {
+      if (!isUuid(requestedBranch)) throw new Error("Geçersiz şube.");
+      const { data: branch } = await ctx.db.from("branches").select("id").eq("id", requestedBranch).maybeSingle();
+      if (!branch) throw new Error("Hedef şube bulunamadı.");
+      targetBranchId = branch.id;
+    }
     if (title.length < 5 || title.length > 150) throw new Error("Duyuru başlığı 5–150 karakter olmalı.");
     if (body.length < 5 || body.length > 6000) throw new Error("Duyuru metni 5–6000 karakter olmalı.");
 
@@ -231,8 +251,8 @@ export async function publishWmsAnnouncement(formData: FormData): Promise<Result
       imageUrl = ctx.db.storage.from("wms-announcements").getPublicUrl(uploadedPath).data.publicUrl;
     }
     const { data, error } = await ctx.db.from("wms_announcements")
-      .insert({ title, body, image_url: imageUrl, created_by: ctx.id, published_at: new Date().toISOString() })
-      .select("id,title,body,image_url,is_active,published_at,created_at")
+      .insert({ title, body, image_url: imageUrl, target_branch_id: targetBranchId, created_by: ctx.id, published_at: new Date().toISOString() })
+      .select("id,title,body,image_url,target_branch_id,is_active,published_at,created_at")
       .single();
     if (error || !data) throw new Error("Duyuru kaydedilemedi.");
     return { ok: true, data: data as WmsAnnouncement };
