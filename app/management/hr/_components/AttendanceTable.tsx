@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
 import { supabase } from "@/lib/supabase";
-import {holidayCreditForEmployee,istanbulDate,type PublicHoliday} from "@/lib/attendance/day-coverage";
+import {holidayCreditForEmployee,netCreditedAttendanceHours,istanbulDate,type PublicHoliday} from "@/lib/attendance/day-coverage";
 
 import {
   UserRound,
@@ -535,7 +535,7 @@ export default function AttendanceTable({
           byEmployee.get(entry.employee_id)!.push(entry);
         }
         for(const [employeeId,entries] of byEmployee) {
-          totals[employeeId]=(totals[employeeId]??0)+holidayCreditForEmployee(currentHolidays,entries);
+          totals[employeeId]=netCreditedAttendanceHours(entries)+holidayCreditForEmployee(currentHolidays,entries);
           totals[employeeId]=Math.round(totals[employeeId]*100)/100;
         }
         if (requestId !== requestIdRef.current) return;
