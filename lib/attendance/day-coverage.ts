@@ -76,3 +76,31 @@ export function holidayCreditForEmployee(holidays: PublicHoliday[], entries: Tim
     sum + uncoveredHolidayHours(day, entries), 0);
   return Math.round(total*100)/100;
 }
+
+/**
+ * Payroll-style credited hours: physical punches win over overlapping leave.
+ * All source rows stay visible in the attendance ledger.
+ */
+export function netCreditedAttendanceHours(entries: TimedAttendance[]): number {
+  const actual = entries.filter(r=>!isLeaveRow(r.status));
+  const leave = entries.filter(r=>isLeaveRow(r.status));
+  let total = actual.reduce((sum,r)=>sum+Math.max(0,Number(r.working_hours)||0),0);
+  const alreadyCounted:TimedAttendance[]=[];
+  for (const row of leave) {
+    const hours=Math.max(0,Number(row.working_hours)||0);
+    if(hours<=0 || !row.check_in_time || !row.check_out_time)continue;
+    const day=istanbulDate(row.check_in_time);
+    const fmt=new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/Istanbul",hour:"2-digit",minute:"2-digit",hourCycle:"h23"});
+    const window={
+      holiday_date:day,
+      start_time:fmt.format(new Date(row.check_in_time)),
+      end_time:fmt.format(new Date(row.check_out_time)),
+      credited_hours:hours,
+    };
+    // A paid leave overlaps physical clock time only once.
+    // For an 8h day, time is split around the unpaid 12–13 lunch period.
+    total+=Math.min(hours,uncoveredHolidayHours(window,[...actual,...alreadyCounted]));
+    alreadyCounted.push(row);
+  }
+  return Math.round(total*100)/100;
+}
