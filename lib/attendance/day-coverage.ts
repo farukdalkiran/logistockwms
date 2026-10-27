@@ -90,11 +90,14 @@ export function netCreditedAttendanceHours(entries: TimedAttendance[]): number {
     const hours=Math.max(0,Number(row.working_hours)||0);
     if(hours<=0 || !row.check_in_time || !row.check_out_time)continue;
     const day=istanbulDate(row.check_in_time);
+    // Legacy full-day leave was stored with 08–16 despite being 8 paid
+    // hours; normalize that placeholder to the actual 08–17 workday.
+    const isFull=hours>=7.9;
     const fmt=new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/Istanbul",hour:"2-digit",minute:"2-digit",hourCycle:"h23"});
     const window={
       holiday_date:day,
-      start_time:fmt.format(new Date(row.check_in_time)),
-      end_time:fmt.format(new Date(row.check_out_time)),
+      start_time:isFull?"08:00":fmt.format(new Date(row.check_in_time)),
+      end_time:isFull?"17:00":fmt.format(new Date(row.check_out_time)),
       credited_hours:hours,
     };
     // A paid leave overlaps physical clock time only once.
@@ -118,7 +121,15 @@ export function coveredDayHours(
   const spans: [number,number][] = [];
   for(const row of entries){
     if(!row.check_in_time || !row.check_out_time)continue;
-    const start=Date.parse(row.check_in_time),end=Date.parse(row.check_out_time);
+    let start=Date.parse(row.check_in_time),end=Date.parse(row.check_out_time);
+    // Old full-day leave entries sometimes used the 08–16 clock range
+    // despite representing 8h of excused time; honor the full-day meaning.
+    if(isLeaveRow(row.status) && Number.isFinite(start)&&Number.isFinite(end)
+       && (end-start)>=7.5*3600000){
+      const date=istanbulDate(row.check_in_time);
+      start=Date.parse(timeAtIstanbul(date,"08:00"));
+      end=Date.parse(timeAtIstanbul(date,"17:00"));
+    }
     if(Number.isFinite(start)&&Number.isFinite(end)&&end>start)spans.push([start,end]);
   }
   for(const h of holidays){
