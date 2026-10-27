@@ -80,6 +80,19 @@ if (data.leave_type === 'YILLIK_IZIN') {
     let managerNote = null;
     let feedbackMessage = "İZİN TALEBİNİZ YÖNETİCİ ONAYINA GÖNDERİLDİ";
 
+    // An annual-leave half cannot overlap a public-holiday half.
+    // For a 13–17 holiday, the user may still request 08–12 annual leave.
+    if(data.leave_type==="YILLIK_IZIN"){
+      const {data:holidays,error:holidayError}=await supabaseAdmin.from("wms_public_holidays")
+        .select("holiday_date,period").in("holiday_date",sortedDates);
+      if(holidayError)throw holidayError;
+      const conflict=(holidays??[]).find(h=>h.period==="FULL" || !data.is_half_day || h.period===period);
+      if(conflict)return {
+        success:false,
+        message:`${conflict.holiday_date} tarihi için resmî tatil bulunmaktadır. Sadece tatil olmayan yarım güne izin oluşturabilirsiniz.`,
+      };
+    }
+
     const {data:existingLeaves,error:overlapError}=await supabaseAdmin.from("leave_requests")
       .select("id,selected_dates,start_date,end_date,is_half_day,half_day_period")
       .eq("employee_id",data.employee_id).in("status",["PENDING","APPROVED"])
@@ -135,7 +148,13 @@ if (data.leave_type === 'YILLIK_IZIN') {
       const {error:statusErr}=await supabaseAdmin.from("leave_requests")
         .update({status:"APPROVED",manager_note:managerNote,updated_at:new Date().toISOString()})
         .eq("id",storedRequest.id).eq("status","PENDING");
-      if(statusErr)throw statusErr;
+      if(statusErr){
+        await supabaseAdmin.from("attendance").delete().eq("leave_request_id",storedRequest.id);
+        if(data.leave_type==="YILLIK_IZIN")
+          await supabaseAdmin.from("employees").update({leave_balance:employee.leave_balance}).eq("id",employee.id);
+        await supabaseAdmin.from("leave_requests").delete().eq("id",storedRequest.id);
+        throw statusErr;
+      }
 
       await supabaseAdmin.from("transaction_logs").insert({
         employee_id: data.employee_id,
