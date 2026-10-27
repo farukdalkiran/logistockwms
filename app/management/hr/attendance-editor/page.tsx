@@ -42,7 +42,7 @@ export default async function AttendanceEditorPage() {
   }
 
   return (
-    <div className="p-4 md:p-8 w-full min-h-[calc(100vh-4rem)] bg-slate-100 flex items-start justify-center">
+    <div className="w-full min-h-[calc(100vh-4rem)] bg-slate-50 p-0 sm:p-2 flex items-start justify-center">
       <SmartAttendanceManager 
         managerId={managerMock.id}
         managerName={managerMock.full_name}
