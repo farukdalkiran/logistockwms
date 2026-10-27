@@ -130,7 +130,10 @@ export async function processApproval(params: ProcessApprovalParams): Promise<Ac
       if (req.status !== "PENDING") return { success: false, message: "UYARI: Bu talep zaten karara bağlanmış." };
 
       const employee = req.employees;
+      let creditedRowsInserted = false;
+      let annualBalanceAdjusted = false;
 
+      try {
       if (isApprove) {
         // Leave-only rows carry the exact selected clock window and a source
         // request ID. Actual worked shifts for the same date remain intact.
@@ -153,6 +156,7 @@ export async function processApproval(params: ProcessApprovalParams): Promise<Ac
         }
         const {error:insertError}=await supabaseAdmin.from("attendance").insert(rows);
         if(insertError) throw insertError;
+        creditedRowsInserted = true;
         if(req.leave_type==="YILLIK_IZIN"){
           const {error:balanceError}=await supabaseAdmin.from("employees")
             .update({leave_balance:Number(employee.leave_balance)-Number(req.requested_days)})
@@ -161,17 +165,31 @@ export async function processApproval(params: ProcessApprovalParams): Promise<Ac
             await supabaseAdmin.from("attendance").delete().eq("leave_request_id",req.id);
             throw balanceError;
           }
+          annualBalanceAdjusted = true;
         }
       }
 
       // 5. Talebi Güncelle ve Log Bırak
-      const {error:requestUpdateError}=await supabaseAdmin.from("leave_requests").update({
+      const {data:updatedRequest,error:requestUpdateError}=await supabaseAdmin.from("leave_requests").update({
         status: finalStatus,
         manager_id: params.manager_id,
         manager_note: params.manager_note,
         updated_at: new Date().toISOString()
-      }).eq("id", params.request_id).eq("status","PENDING");
-      if(requestUpdateError)throw requestUpdateError;
+      }).eq("id", params.request_id).eq("status","PENDING").select("id").maybeSingle();
+      if(requestUpdateError || !updatedRequest)throw requestUpdateError??new Error("Talep zaten değişmiş.");
+
+      } catch(error) {
+        // The REST API has no cross-request SQL transaction; compensate
+        // partial writes so a failed approval never leaves fake absence rows.
+        if (isApprove && creditedRowsInserted) {
+          await supabaseAdmin.from("attendance").delete().eq("leave_request_id",req.id);
+        }
+        if(isApprove && annualBalanceAdjusted && req.leave_type==="YILLIK_IZIN"){
+          await supabaseAdmin.from("employees")
+            .update({leave_balance:employee.leave_balance}).eq("id",employee.id);
+        }
+        throw error;
+      }
 
       await supabaseAdmin.from("transaction_logs").insert({
         employee_id: employee.id,
