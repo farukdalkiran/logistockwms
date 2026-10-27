@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { istanbulDate } from "@/lib/attendance/day-coverage";
 
 // RLS kısıtlamalarını by-pass eden Master Admin İstemcisi
 const supabaseAdmin = createClient(
@@ -63,8 +64,11 @@ export async function upsertDirectAttendance(data: DirectAttendancePayload) {
         .from("attendance")
         .select("id")
         .eq("employee_id", data.employee_id)
-        .gte("check_in_time", `${data.target_date}T00:00:00Z`)
-        .lte("check_in_time", `${data.target_date}T23:59:59Z`)
+        .gte("check_in_time", `${data.target_date}T00:00:00+03:00`)
+        .lt("check_in_time", new Date(new Date(`${data.target_date}T00:00:00+03:00`).getTime()+86400000).toISOString())
+        .not("status", "like", "LEAVE_%")
+        .order("check_in_time", { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       if (fetchError && fetchError.code !== 'PGRST116') {
@@ -90,6 +94,10 @@ export async function upsertDirectAttendance(data: DirectAttendancePayload) {
     let resultId = null;
 
     if (existingRecordId) {
+      const {data:existing}=await supabaseAdmin.from("attendance").select("status,employee_id")
+        .eq("id",existingRecordId).maybeSingle();
+      if (!existing || existing.employee_id!==data.employee_id)throw new Error("Mesai kaydı bulunamadı.");
+      if (existing.status?.startsWith("LEAVE_"))throw new Error("İzin kaydı mesaiye çevrilemez. Önce izin talebini yönetin.");
       const { data: updated, error: updateError } = await supabaseAdmin
         .from("attendance")
         .update(payload)
@@ -130,14 +138,15 @@ export async function upsertDirectAttendance(data: DirectAttendancePayload) {
 
 export async function getAttendanceHistory(month: number, year: number, employeeId: string | null = null) {
   try {
-    const startDate = new Date(year, month - 1, 1).toISOString();
-    const endDate = new Date(year, month, 1).toISOString();
+    const startDate = new Date(`${year}-${String(month).padStart(2,"0")}-01T00:00:00+03:00`).toISOString();
+    const endDate = new Date(new Date(startDate).getTime() + 32*86400000);
+    const endBound = new Date(`${endDate.getUTCFullYear()}-${String(endDate.getUTCMonth()+1).padStart(2,"0")}-01T00:00:00+03:00`).toISOString();
 
     let query = supabaseAdmin
       .from("attendance")
       .select("id, employee_id, check_in_time, check_out_time, status, break_hours") 
       .gte("check_in_time", startDate)
-      .lt("check_in_time", endDate)
+      .lt("check_in_time", endBound)
       .order("check_in_time", { ascending: false });
 
     if (employeeId) {
@@ -152,7 +161,7 @@ export async function getAttendanceHistory(month: number, year: number, employee
     }
 
     const formattedData = data.map((record) => {
-      const derivedTargetDate = record.check_in_time ? record.check_in_time.substring(0, 10) : "-";
+      const derivedTargetDate = record.check_in_time ? istanbulDate(record.check_in_time) : "-";
       
       return {
         id: record.id,
@@ -177,6 +186,11 @@ export async function getAttendanceHistory(month: number, year: number, employee
 
 export async function deleteAttendance(recordId: string, managerId: string, isDeveloperOverride: boolean = false) {
   try {
+    const {data:existing}=await supabaseAdmin.from("attendance").select("status")
+      .eq("id",recordId).maybeSingle();
+    if(!existing)throw new Error("Kayıt bulunamadı.");
+    if(existing.status?.startsWith("LEAVE_"))
+      throw new Error("İzin kaydı silinemez. İzin talebi üzerinden iptal edin.");
     const { error: deleteError } = await supabaseAdmin
       .from("attendance")
       .delete()
@@ -196,6 +210,6 @@ export async function deleteAttendance(recordId: string, managerId: string, isDe
     return { success: true, message: "Kayıt başarıyla silindi." };
   } catch (error: any) {
     console.error("[DELETE_ATTENDANCE_ERROR]", error);
-    return { success: false, message: "Kayıt silinirken bir hata oluştu." };
+    return { success: false, message: error?.message || "Kayıt silinirken bir hata oluştu." };
   }
 }
