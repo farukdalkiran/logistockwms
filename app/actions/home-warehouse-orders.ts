@@ -48,20 +48,23 @@ export async function getHomeWarehouseOrders(): Promise<Result<ListResult>> {
     const scope = (query: any) =>
       query.or("approval_branch_id.is.null,approval_branch_id.eq." + branch.id);
 
-    const [orderResult, ...counts] = await Promise.all([
+    // Single secure aggregation RPC replaces three separate HEAD requests.
+    const [orderResult, countsResult] = await Promise.all([
       scope(admin.from("orders").select(
         "id,order_code,branch_id,status,created_at,approved_at,prepared_by_name,approval_branch_id",
       )).in("status", [...STATES])
         .order("created_at", { ascending: false }).limit(50),
-      ...STATES.map(status =>
-        scope(admin.from("orders").select("id", { count: "exact", head: true }))
-          .eq("status", status),
-      ),
+      admin.rpc("wms_home_order_counts", { p_branch_id: branch.id }),
     ]);
     if (orderResult.error) throw new Error(orderResult.error.message);
-    for (const count of counts) {
-      if (count.error) throw new Error(count.error.message);
-    }
+    if (countsResult.error) throw new Error(countsResult.error.message);
+    const totals = (Array.isArray(countsResult.data)
+      ? countsResult.data[0]
+      : countsResult.data) as {
+        pending: number | null;
+        preparing: number | null;
+        ready_to_ship: number | null;
+      } | null;
     const orders = (orderResult.data ?? []) as FeedOrder[];
     const orderIds = orders.map(o => o.id);
     const branchIds = [...new Set(orders.map(o => o.branch_id).filter(Boolean))] as string[];
@@ -119,9 +122,9 @@ export async function getHomeWarehouseOrders(): Promise<Result<ListResult>> {
       data: {
         rows, count: rows.length, page: 1,
         metrics: {
-          pending: counts[0].count ?? 0,
-          preparing: counts[1].count ?? 0,
-          ready_to_ship: counts[2].count ?? 0,
+          pending: Number(totals?.pending ?? 0),
+          preparing: Number(totals?.preparing ?? 0),
+          ready_to_ship: Number(totals?.ready_to_ship ?? 0),
           rejected: 0, pending_quantity: 0,
         },
         updatedAt: new Date().toISOString(),
