@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import type { HolidayPeriod, PublicHoliday } from "@/lib/attendance/day-coverage";
 type Result<T> = {success:true;data:T;message?:string}|{success:false;message:string};
 const PERIODS = ["FULL","MORNING","AFTERNOON"];
-const isDate = (s:string)=> /^\\d{4}-\\d{2}-\\d{2}$/.test(s) && !Number.isNaN(Date.parse(s+"T12:00:00Z"));
+const isDate = (s:string)=> /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s+"T12:00:00Z"));
 function db() {
  return createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.SUPABASE_SERVICE_ROLE_KEY!,
   {auth:{autoRefreshToken:false,persistSession:false}});
