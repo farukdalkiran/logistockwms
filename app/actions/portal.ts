@@ -1,5 +1,5 @@
-import { holidayCreditForEmployee, netCreditedAttendanceHours, istanbulDate, timeAtIstanbul, isLeaveRow, type PublicHoliday } from "@/lib/attendance/day-coverage";
 'use server'
+import { monthlyCreditedHours, holidayCreditForEmployee, coveredDayHours, istanbulDate, timeAtIstanbul, isLeaveRow, type PublicHoliday } from "@/lib/attendance/day-coverage";
 
 import { cookies } from 'next/headers';
 import { createClient } from '@supabase/supabase-js';
@@ -243,25 +243,20 @@ export async function getPortalStats() {
     date:string;checkIn:string;checkOut:string;
     hours:string;status:string|null
   }[]=[];
-  const workedHoursByDay=new Map<string,number>();
-  const coveredAbsenceHours=new Map<string,number>();
+  const byDay=new Map<string,typeof rows>();
+  for(const row of rows){
+    if(!row.check_in_time)continue;
+    const date=istanbulDate(row.check_in_time);
+    if(!byDay.has(date))byDay.set(date,[]);
+    byDay.get(date)!.push(row);
+  }
   const dateFmt=new Intl.DateTimeFormat("tr-TR",{timeZone:"Europe/Istanbul",day:"2-digit",month:"short"});
   const timeFmt=new Intl.DateTimeFormat("tr-TR",{timeZone:"Europe/Istanbul",hour:"2-digit",minute:"2-digit"});
   for(const record of rows){
     if(!record.check_in_time)continue;
     const date=istanbulDate(record.check_in_time);
     const hours=Number(record.working_hours)||0;
-    totalHours+=hours;
-    if(!isLeaveRow(record.status)){
-      workedHoursByDay.set(date,(workedHoursByDay.get(date)??0)+hours);
-      if(hours>8)overTime+=hours-8;
-    } else {
-      // Unpaid full-day leave still counts as an excused absence, despite 0 paid hours.
-      const a=Date.parse(record.check_in_time);
-      const b=record.check_out_time?Date.parse(record.check_out_time):a;
-      const approvedDuration=Math.min(8,Math.max(0,(b-a)/3600000));
-      coveredAbsenceHours.set(date,(coveredAbsenceHours.get(date)??0)+approvedDuration);
-    }
+    if(!isLeaveRow(record.status) && hours>8)overTime+=hours-8;
     logs.push({
       date:dateFmt.format(new Date(record.check_in_time)),
       checkIn:timeFmt.format(new Date(record.check_in_time)),
@@ -270,12 +265,10 @@ export async function getPortalStats() {
       status:record.status,
     });
   }
-  const creditedHolidays=holidayCreditForEmployee(holidays,rows);
-  totalHours=netCreditedAttendanceHours(rows)+creditedHolidays;
+  totalHours=monthlyCreditedHours(holidays,rows);
   for(const holiday of holidays){
     const hours=holidayCreditForEmployee([holiday],rows);
     if(hours<=0)continue;
-    coveredAbsenceHours.set(holiday.holiday_date,(coveredAbsenceHours.get(holiday.holiday_date)??0)+hours);
     logs.push({
       date:dateFmt.format(new Date(timeAtIstanbul(holiday.holiday_date,"12:00"))),
       checkIn:holiday.start_time.slice(0,5),
@@ -290,7 +283,7 @@ export async function getPortalStats() {
     const day=new Date(d);
     if(day.getUTCDay()===0||day.getUTCDay()===6)continue;
     const date=day.toISOString().slice(0,10);
-    const coveredHours=(workedHoursByDay.get(date)??0)+(coveredAbsenceHours.get(date)??0);
+    const coveredHours=coveredDayHours(date,byDay.get(date)??[],holidays);
     missingDays+=Math.max(0,1-Math.min(1,coveredHours/8));
   }
   return {
