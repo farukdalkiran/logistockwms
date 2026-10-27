@@ -6,13 +6,21 @@ import { istanbulDate, timeAtIstanbul, coveredDayHours, HOLIDAY_WINDOWS, type Ti
 
 const db=createAdminClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.SUPABASE_SERVICE_ROLE_KEY!,
  {auth:{autoRefreshToken:false,persistSession:false}});
-async function requireHRActor() {
+async function requireHRActor(employeeIds:string[]) {
  const session=await createSessionClient();
  const {data:claims,error}=await session.auth.getClaims();
  if(error||!claims?.claims?.sub)throw new Error("Giriş yapmanız gerekiyor.");
- const {data:profile}=await db.from("profiles").select("role").eq("id",claims.claims.sub).single();
- if(!profile || !["Developer","Admin"].includes(profile.role))
-   throw new Error("Toplu puantaj işlemi için yönetim yetkisi gerekli.");
+ const {data:profile}=await db.from("profiles").select("role,branch_id").eq("id",claims.claims.sub).single();
+ if(!profile)throw new Error("Kullanıcı profili bulunamadı.");
+ if(["Developer","Admin"].includes(profile.role))return;
+ if(!profile.branch_id)throw new Error("Şubeye bağlı bir kullanıcı hesabı gerekli.");
+ const unique=[...new Set(employeeIds.filter(Boolean))];
+ if(!unique.length)throw new Error("Personel seçiniz.");
+ const {data:personnel,error:empError}=await db.from("employees")
+   .select("id,branch_id").in("id",unique).eq("is_active",true);
+ if(empError || personnel?.length!==unique.length ||
+    personnel?.some(x=>x.branch_id!==profile.branch_id))
+   throw new Error("Yalnızca kendi şubenizdeki personellerin kayıtlarını yönetebilirsiniz.");
 }
 function datesBetween(start:string,end:string,excluded:string[]) {
  if(!isISODate(start)||!isISODate(end)||start>end)throw new Error("Tarih aralığı hatalı.");
@@ -31,8 +39,8 @@ export async function analyzeAttendanceGaps(
  employeeIds:string[],startDateStr:string,endDateStr:string,excludedDates:string[]=[],
 ){
  try{
-  await requireHRActor();
   const ids=[...new Set(employeeIds.filter(Boolean))];
+  await requireHRActor(ids);
   if(!ids.length||ids.length>500)throw new Error("1–500 çalışan seçiniz.");
   const weekdays=datesBetween(startDateStr,endDateStr,excludedDates);
   const startISO=timeAtIstanbul(startDateStr,"00:00");
@@ -92,10 +100,10 @@ export async function analyzeAttendanceGaps(
 type BulkGapPayload={date:string;isHoliday:boolean;checkIn:string;checkOut:string;breakMinutes:number;employeeIds:string[]};
 export async function processBulkMissingAttendance(payloads:BulkGapPayload[],managerId:string) {
  try{
-  await requireHRActor();
   if(!Array.isArray(payloads)||payloads.length>92)throw new Error("Tarih sayısı sınırlandı.");
   if(!payloads.length)return {success:true,message:"İşlenecek kayıt yok."};
   const selected=[...new Set(payloads.flatMap(x=>x.employeeIds))];
+  await requireHRActor(selected);
   if(!selected.length)return {success:true,message:"Gerçek eksik gün bulunmuyor."};
   const dates=payloads.map(x=>x.date).sort(),start=dates[0],end=dates[dates.length-1];
   datesBetween(start,end,[]);
