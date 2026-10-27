@@ -139,6 +139,22 @@ export async function processApproval(params: ProcessApprovalParams): Promise<Ac
           half_day_period:req.half_day_period,selected_dates:req.selected_dates,
           start_date:req.start_date,
         });
+        if(req.leave_type==="YILLIK_IZIN"){
+          // Holidays can be registered after a request was filed but before
+          // manager approval. Never deduct annual leave for the holiday half.
+          const dateStrings=rows.map(r=>{
+            const p=new Intl.DateTimeFormat("en-GB",{timeZone:"Europe/Istanbul",
+              year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date(r.check_in_time));
+            const value=(type:string)=>p.find(x=>x.type===type)?.value;
+            return `${value("year")}-${value("month")}-${value("day")}`;
+          });
+          const {data:holidays,error:holidayError}=await supabaseAdmin
+            .from("wms_public_holidays").select("holiday_date,period").in("holiday_date",dateStrings);
+          if(holidayError)throw holidayError;
+          const period=req.is_half_day?(req.half_day_period==="AFTERNOON"?"AFTERNOON":"MORNING"):null;
+          if((holidays??[]).some(h=>h.period==="FULL" || !req.is_half_day || h.period===period))
+            return {success:false,message:"Talep edilen yıllık izin resmî tatil ile çakışıyor. İzin saatlerini düzeltiniz."};
+        }
         const {error:insertError}=await supabaseAdmin.from("attendance").insert(rows);
         if(insertError) throw insertError;
         if(req.leave_type==="YILLIK_IZIN"){
