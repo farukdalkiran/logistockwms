@@ -44,13 +44,13 @@ export function OrderTrackingSection() {
             <div className="min-w-0">
               <h3 className="text-[14px] font-black leading-tight text-slate-900">Mağaza Sipariş Takibi</h3>
               <p className="mt-1 text-[10px] font-semibold tracking-[0.03em] text-slate-500">
-                CANLI OPERASYON · ÜRÜN & SARF TALEPLERİ
+                08.00–16.00 SAATLİK KONTROL · ÜRÜN & SARF TALEPLERİ
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <span className="hidden items-center gap-1.5 rounded border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[10px] font-extrabold text-emerald-700 sm:inline-flex">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" /> Canlı
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" /> Saatlik
             </span>
             <button
               type="button" aria-label="Siparişleri yenile" title="Siparişleri yenile"
