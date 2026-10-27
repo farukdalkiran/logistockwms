@@ -281,7 +281,9 @@ export default function DeveloperAttendancePanel({ managerId, managerName, manag
     {id:"HISTORY" as const,label:"Mesai Geçmişi",icon:Search},
     {id:"NEW_RECORD" as const,label:"Manuel Mesai",icon:PlusCircle},
     {id:"SMART_GAP" as const,label:"Eksik Gün Tarama",icon:Zap},
-    {id:"HOLIDAYS" as const,label:"Resmî Tatiller",icon:Sun},
+    ...(managerTitle === "Developer"
+      ? [{id:"HOLIDAYS" as const,label:"Resmî Tatiller",icon:Sun}]
+      : []),
   ];
   return (
     <div className="mx-auto flex w-full flex-col overflow-hidden rounded-[5px] border border-slate-200 bg-white shadow-sm">
