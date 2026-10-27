@@ -2,9 +2,14 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
+import { randomInt } from 'node:crypto';
+import { requireWmsActor, assertBranchAccess } from '@/lib/security/require-wms-actor';
 
 // Şube Filtreli Şube Getirme Motoru
 export async function getBranches(branchId: string | null, isGlobal: boolean) {
+  const actor = await requireWmsActor();
+  isGlobal = actor.isGlobal;
+  if (!actor.isGlobal) branchId = actor.branchId;
   const supabase = await createClient();
   let query = supabase.from('branches').select('id, name, type').order('name', { ascending: true });
 
@@ -20,6 +25,9 @@ export async function getBranches(branchId: string | null, isGlobal: boolean) {
 
 // Şube Filtreli Personel Getirme Motoru
 export async function getEmployees(branchId: string | null, isGlobal: boolean) {
+  const actor = await requireWmsActor();
+  isGlobal = actor.isGlobal;
+  if (!actor.isGlobal) branchId = actor.branchId;
   const supabase = await createClient();
   let query = supabase.from('employees').select('*, branches(name)').order('created_at', { ascending: false });
 
@@ -40,6 +48,8 @@ export async function createEmployee(formData: {
   position_title: string;
   branch_id: string;
 }) {
+  const actor = await requireWmsActor();
+  assertBranchAccess(actor, formData.branch_id);
   const supabase = await createClient();
   let finalId = formData.id?.trim();
 
@@ -47,7 +57,7 @@ export async function createEmployee(formData: {
   if (!finalId) {
     let isUnique = false;
     while (!isUnique) {
-      finalId = Math.floor(10000 + Math.random() * 90000).toString();
+      finalId = randomInt(10000, 100000).toString();
       const { data } = await supabase.from('employees').select('id').eq('id', finalId).single();
       if (!data) isUnique = true;
     }
@@ -82,7 +92,11 @@ export async function createEmployee(formData: {
 }
 
 export async function deleteEmployee(id: string) {
+  const actor = await requireWmsActor();
   const supabase = await createClient();
+  const { data: employee } = await supabase.from('employees').select('branch_id').eq('id', id).single();
+  if (!employee) throw new Error('Personel bulunamadı.');
+  assertBranchAccess(actor, employee.branch_id);
   const { error } = await supabase.from('employees').delete().eq('id', id);
 
   if (error) {
