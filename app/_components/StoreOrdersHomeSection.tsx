@@ -40,7 +40,7 @@ export function StoreOrdersHomeSection() {
     void load();
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") void load();
-    }, 30000);
+    }, 120000);
     return () => { alive.current = false; window.clearInterval(interval); };
   }, [load]);
 
@@ -147,7 +147,7 @@ export function StoreOrdersHomeSection() {
       </div>
       <footer className="flex shrink-0 items-center justify-between gap-2 border-t border-slate-200 bg-white px-3 py-2.5">
         <span className="text-[10px] font-semibold text-slate-500">
-          {result ? quantity(result.count) + " mağaza siparişi" : "Şube siparişleri"} · 30 sn güncelleme
+          {result ? quantity(result.count) + " mağaza siparişi" : "Şube siparişleri"} · 2 dk güncelleme
         </span>
         <Link href={HREF} className="text-[10px] font-extrabold text-[#dc3545] hover:underline">Tüm siparişlerim</Link>
       </footer>

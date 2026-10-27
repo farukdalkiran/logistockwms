@@ -14,7 +14,9 @@ import type { OrderRow } from "@/lib/order-approvals/types";
 
 const SOUND_KEY = "wms:orders:sound:v1";
 const SEEN_KEY = "wms:orders:seen:v1:";
-const POLL_MS = 15000;
+// Fallback while Realtime is unavailable; 3x fewer server-side reads.
+const POLL_MS = 45000;
+const MIN_REFRESH_GAP_MS = 12000;
 const MAX_SEEN = 500;
 
 type OrderAlert = { order: OrderRow; count: number };
@@ -86,6 +88,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
   const audioRef = useRef<AudioContext | null>(null);
   const soundRef = useRef(true);
   const busyRef = useRef(false);
+  const lastLoadRef = useRef(0);
   const activeUserRef = useRef(userId);
   const initialRef = useRef(true);
 
@@ -171,6 +174,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
   useEffect(() => {
     activeUserRef.current = userId;
     initialRef.current = true;
+    lastLoadRef.current = 0;
     setOrders([]);
     setMetrics({ pending: 0, preparing: 0, ready_to_ship: 0 });
     setCanRead(false);
@@ -179,8 +183,11 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
     setAlert(null);
   }, [userId]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
     if (!eligible || !userId || busyRef.current) return;
+    // Focus + visibilitychange + polling can fire together; de-duplicate them.
+    if (!force && Date.now() - lastLoadRef.current < MIN_REFRESH_GAP_MS) return;
+    lastLoadRef.current = Date.now();
     busyRef.current = true;
     if (initialRef.current) setLoading(true);
     else setRefreshing(true);
@@ -261,7 +268,7 @@ export function OrderNotificationProvider({ children }: { children: ReactNode })
     <Context.Provider value={{
       orders, metrics, loading, refreshing, canRead, error, lastUpdated,
       soundEnabled, audioUnlocked,
-      refresh: () => void load(), toggleSound,
+      refresh: () => void load(true), toggleSound,
       unlockSound: () => {
         if (!soundRef.current) toggleSound();
         else void unlock();

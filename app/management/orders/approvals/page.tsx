@@ -126,7 +126,7 @@ export default function OrderApprovalsPage() {
     const t = window.setInterval(() => {
       if (document.visibilityState === "visible" && !selectedRef.current)
         void load(true);
-    }, 30000);
+    }, 90000);
     return () => window.clearInterval(t);
   }, [load]);
   useEffect(() => {
