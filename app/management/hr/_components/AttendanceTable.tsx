@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
 import { supabase } from "@/lib/supabase";
+import {holidayCreditForEmployee,istanbulDate,type PublicHoliday} from "@/lib/attendance/day-coverage";
 
 import {
   UserRound,
@@ -56,6 +57,7 @@ interface MonthlyRecord {
   employee_id: string;
   working_hours: number | string | null;
   check_in_time: string | null;
+  check_out_time: string | null;
   status: string | null;
 }
 
@@ -377,6 +379,7 @@ export default function AttendanceTable({
 
   const [monthlyLates, setMonthlyLates] = useState<Record<string, number>>({});
 
+  const [holidays,setHolidays]=useState<PublicHoliday[]>([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -410,6 +413,7 @@ export default function AttendanceTable({
 
       if (!canFetch) {
         setRecords([]);
+        setHolidays([]);
         setMonthlyTotals({});
         setMonthlyLates({});
         setError(null);
@@ -468,7 +472,7 @@ export default function AttendanceTable({
         for (let from = 0; ; from += PAGE_SIZE) {
           let monthlyQuery = supabase
             .from("attendance")
-            .select("employee_id, working_hours, check_in_time, status")
+            .select("employee_id, working_hours, check_in_time, check_out_time, status")
             .gte("check_in_time", monthStart)
             .lt("check_in_time", nextMonthStart)
             .order("check_in_time", { ascending: true })
@@ -492,6 +496,13 @@ export default function AttendanceTable({
           if (requestId !== requestIdRef.current) return;
         }
 
+        const {data:holidayData,error:holidayError}=await supabase.from("wms_public_holidays")
+          .select("id,holiday_date,title,period,start_time,end_time,credited_hours")
+          .gte("holiday_date",istanbulDate(monthStart))
+          .lt("holiday_date",istanbulDate(nextMonthStart))
+          .lte("holiday_date",istanbulDate(new Date().toISOString()));
+        if(holidayError)throw holidayError;
+        const currentHolidays=(holidayData??[]) as PublicHoliday[];
         const totals: Record<string, number> = {};
         const lates: Record<string, number> = {};
 
@@ -518,8 +529,18 @@ export default function AttendanceTable({
           }
         }
 
+        const byEmployee=new Map<string,MonthlyRecord[]>();
+        for(const entry of monthlyData){
+          if(!byEmployee.has(entry.employee_id))byEmployee.set(entry.employee_id,[]);
+          byEmployee.get(entry.employee_id)!.push(entry);
+        }
+        for(const [employeeId,entries] of byEmployee) {
+          totals[employeeId]=(totals[employeeId]??0)+holidayCreditForEmployee(currentHolidays,entries);
+          totals[employeeId]=Math.round(totals[employeeId]*100)/100;
+        }
         if (requestId !== requestIdRef.current) return;
 
+        setHolidays(currentHolidays);
         setRecords((dailyData ?? []) as unknown as AttendanceRecord[]);
         setMonthlyTotals(totals);
         setMonthlyLates(lates);
@@ -613,6 +634,7 @@ export default function AttendanceTable({
     };
   }, [records]);
 
+  const todayHoliday=holidays.find(h=>h.holiday_date===istanbulDate(new Date().toISOString()));
   const currentTime = now ? formatTime(now.toISOString()) : "--:--";
 
   const currentDate = now ? formatDate(now) : "Tarih yükleniyor";
@@ -623,6 +645,13 @@ export default function AttendanceTable({
 
   return (
     <section className="flex h-[900px] w-full min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_4px_24px_rgba(15,23,42,0.06)]">
+      {todayHoliday && (
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-[11px] font-semibold text-amber-900">
+          <span>Resmî tatil: <strong>{todayHoliday.title}</strong> · {todayHoliday.start_time.slice(0,5)}–{todayHoliday.end_time.slice(0,5)}</span>
+          <span className="rounded border border-amber-300 bg-white px-2 py-1 font-bold">{todayHoliday.credited_hours} saat · gerçek girişler korunur</span>
+        </div>
+      )}
+
       {/* =====================================
           DARK HEADER
       ===================================== */}
@@ -1006,7 +1035,7 @@ export default function AttendanceTable({
                           <CalendarDays size={15} strokeWidth={2.1} />
 
                           <span className="text-[10px] font-extrabold uppercase tracking-wider">
-                            {leaveText}
+                            {leaveText} · {formatTime(record.check_in_time)}–{formatTime(record.check_out_time)}
                           </span>
                         </div>
                       </td>
