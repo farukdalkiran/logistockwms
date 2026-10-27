@@ -1,4 +1,4 @@
-import { holidayCreditForEmployee, istanbulDate, timeAtIstanbul, isLeaveRow, type PublicHoliday } from "@/lib/attendance/day-coverage";
+import { holidayCreditForEmployee, netCreditedAttendanceHours, istanbulDate, timeAtIstanbul, isLeaveRow, type PublicHoliday } from "@/lib/attendance/day-coverage";
 'use server'
 
 import { cookies } from 'next/headers';
@@ -271,7 +271,7 @@ export async function getPortalStats() {
     });
   }
   const creditedHolidays=holidayCreditForEmployee(holidays,rows);
-  totalHours+=creditedHolidays;
+  totalHours=netCreditedAttendanceHours(rows)+creditedHolidays;
   for(const holiday of holidays){
     const hours=holidayCreditForEmployee([holiday],rows);
     if(hours<=0)continue;
