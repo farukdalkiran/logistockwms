@@ -5,9 +5,10 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'node:crypto';
 
 // Portal cookies are signed. A raw employee ID is NEVER authentication.
-const SESSION_SECRET = process.env.WMS_PORTAL_SESSION_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY;
-if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
-  throw new Error('Portal session signing secret is not configured.');
+function getSessionSecret(): string {
+  const secret = process.env.WMS_PORTAL_SESSION_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!secret || secret.length < 32) throw new Error('Portal session signing secret is not configured.');
+  return secret;
 }
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -23,7 +24,7 @@ type PortalState = 'active' | 'password_change';
 function signSession(employeeId: string, state: PortalState): string {
   const expiry = Math.floor(Date.now() / 1000) + SESSION_AGE;
   const payload = `${employeeId}.${state}.${expiry}`;
-  const signature = crypto.createHmac('sha256', SESSION_SECRET!).update(payload).digest('base64url');
+  const signature = crypto.createHmac('sha256', getSessionSecret()).update(payload).digest('base64url');
   return `${payload}.${signature}`;
 }
 
@@ -35,7 +36,7 @@ function verifySession(value: string | undefined): { id: string; state: PortalSt
   if (!/^\d{3,10}$/.test(id) || (state !== 'active' && state !== 'password_change')) return null;
   const exp = Number(expiry);
   if (!Number.isSafeInteger(exp) || exp < Math.floor(Date.now() / 1000)) return null;
-  const expected = crypto.createHmac('sha256', SESSION_SECRET!).update(`${id}.${state}.${expiry}`).digest();
+  const expected = crypto.createHmac('sha256', getSessionSecret()).update(`${id}.${state}.${expiry}`).digest();
   let provided: Buffer;
   try { provided = Buffer.from(signature, 'base64url'); } catch { return null; }
   if (provided.length !== expected.length || !crypto.timingSafeEqual(provided, expected)) return null;
