@@ -64,7 +64,13 @@ export async function middleware(req: NextRequest) {
     }
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
+  // Our Supabase JWTs are ES256-signed: getClaims verifies with cached JWKS.
+  // getUser() issues a network request to /auth/v1/user on every middleware hit.
+  // Privileged Server Actions must still check the live session with getUser().
+  const { data: verifiedClaims, error: claimsError } = await supabase.auth.getClaims();
+  const user = !claimsError && verifiedClaims?.claims?.sub
+    ? { id: verifiedClaims.claims.sub }
+    : null;
 
   // A. HİÇ OTURUM YOKSA VEYA TOKEN GEÇERSİZ KALMIŞSA (!user)
   if (!user) {
@@ -90,13 +96,18 @@ export async function middleware(req: NextRequest) {
       }
     }
 
-    // KAYAN PENCERE (SLIDING WINDOW) - Aktif kullanıcı düşmez
-    res.cookies.set("wms_session_timestamp", Date.now().toString(), {
-      maxAge: 72 * 60 * 60, // 3 Gün (Saniye)
-      path: "/",
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-    });
+    // Avoid setting Set-Cookie on *every* middleware request (cache busting).
+    // Keep the original 72-hour sliding inactivity window with 10-minute writes.
+    const lastActivity = Number(authTimeCookie?.value || 0);
+    if (!Number.isFinite(lastActivity) || lastActivity <= 0 || Date.now() - lastActivity >= 10 * 60 * 1000) {
+      res.cookies.set("wms_session_timestamp", Date.now().toString(), {
+        maxAge: 72 * 60 * 60,
+        path: "/",
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+      });
+    }
 
     // Giriş yapmış cihaz manuel olarak /login rotasına giderse onu içeri it
     if (path === "/login") {
