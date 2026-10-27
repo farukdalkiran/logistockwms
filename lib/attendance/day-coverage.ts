@@ -40,26 +40,33 @@ export function uncoveredHolidayHours(
   holiday: Pick<PublicHoliday,"holiday_date"|"start_time"|"end_time"|"credited_hours">,
   entries: TimedAttendance[],
 ): number {
-  const date = holiday.holiday_date;
-  const start = Date.parse(timeAtIstanbul(date, holiday.start_time.slice(0,5)));
-  const end = Date.parse(timeAtIstanbul(date, holiday.end_time.slice(0,5)));
-  if (!(end > start)) return 0;
-  const spans: [number,number][] = [];
-  for (const entry of entries) {
-    if (!entry.check_in_time || !entry.check_out_time) continue;
-    const a = Math.max(start, Date.parse(entry.check_in_time));
-    const b = Math.min(end, Date.parse(entry.check_out_time));
-    if (Number.isFinite(a) && Number.isFinite(b) && b > a) spans.push([a,b]);
+  // The 08:00–17:00 full-day holiday has a non-working 12:00–13:00
+  // lunch gap. Each half counts exactly 4h, not a 9-hour fraction.
+  const windows = Number(holiday.credited_hours) >= 8
+    ? [["08:00","12:00"],["13:00","17:00"]]
+    : [[holiday.start_time.slice(0,5),holiday.end_time.slice(0,5)]];
+  let credit=0;
+  for(const [from,to] of windows) {
+    const start=Date.parse(timeAtIstanbul(holiday.holiday_date,from));
+    const end=Date.parse(timeAtIstanbul(holiday.holiday_date,to));
+    if(!(end>start))continue;
+    const spans:[number,number][]=[];
+    for(const entry of entries){
+      if(!entry.check_in_time||!entry.check_out_time)continue;
+      const a=Math.max(start,Date.parse(entry.check_in_time));
+      const b=Math.min(end,Date.parse(entry.check_out_time));
+      if(Number.isFinite(a)&&Number.isFinite(b)&&b>a)spans.push([a,b]);
+    }
+    spans.sort((a,b)=>a[0]-b[0]);
+    let occupied=0,cursor=start;
+    for(const [a,b] of spans) {
+      if(b<=cursor)continue;
+      occupied+=b-Math.max(a,cursor);
+      cursor=Math.max(cursor,b);
+    }
+    credit+=4*Math.max(0,(end-start-occupied)/(end-start));
   }
-  spans.sort((a,b)=>a[0]-b[0]);
-  let occupied = 0, cursor = start;
-  for (const [a,b] of spans) {
-    if (b <= cursor) continue;
-    occupied += b - Math.max(a,cursor);
-    cursor = Math.max(cursor,b);
-  }
-  const fraction = Math.max(0, (end - start - occupied) / (end - start));
-  return Math.round(Math.max(0, Number(holiday.credited_hours)) * fraction * 100) / 100;
+  return Math.round(credit*100)/100;
 }
 
 export function holidayCreditForEmployee(holidays: PublicHoliday[], entries: TimedAttendance[]): number {
