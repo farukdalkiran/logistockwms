@@ -1,3 +1,4 @@
+import { holidayCreditForEmployee, istanbulDate, timeAtIstanbul, isLeaveRow, type PublicHoliday } from "@/lib/attendance/day-coverage";
 'use server'
 
 import { cookies } from 'next/headers';
@@ -216,54 +217,86 @@ export async function verifyPortalQR(scannedQR: string) {
 export async function getPortalStats() {
   const emp = await getPortalSession();
   if (!emp) return null;
-
-  const date = new Date();
-  const firstDay = new Date(date.getFullYear(), date.getMonth(), 1).toISOString();
-  const today = new Date().toISOString();
-
-  const { data: attendances } = await supabaseAdmin
-    .from('attendance')
-    .select('check_in_time, check_out_time, working_hours, status')
-    .eq('employee_id', emp.id)
-    .gte('check_in_time', firstDay)
-    .lte('check_in_time', today)
-    .order('check_in_time', { ascending: false });
-
-  let totalHours = 0;
-  let overTime = 0;
-  const presentDaysCount = attendances?.length || 0;
-  const logs: any[] = [];
-
-  if (attendances) {
-    attendances.forEach(att => {
-      const hrs = att.working_hours || 0;
-      totalHours += hrs;
-      if (hrs > 8) overTime += (hrs - 8);
-
-      const inDate = new Date(att.check_in_time);
-      const outDate = att.check_out_time ? new Date(att.check_out_time) : null;
-
-      logs.push({
-        date: inDate.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' }),
-        checkIn: inDate.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
-        checkOut: outDate ? outDate.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : '-',
-        hours: hrs > 0 ? hrs.toFixed(1) : '-',
-        status: att.status
-      });
+  const now = new Date();
+  const todayTR = istanbulDate(now.toISOString());
+  const firstDayTR = todayTR.slice(0,7) + "-01";
+  const [{data:attendances,error:attError},{data:holidayData,error:holidayError}]=await Promise.all([
+    supabaseAdmin.from("attendance")
+      .select("check_in_time,check_out_time,working_hours,status")
+      .eq("employee_id",emp.id).gte("check_in_time",timeAtIstanbul(firstDayTR,"00:00"))
+      .lte("check_in_time",now.toISOString()).order("check_in_time",{ascending:false}),
+    supabaseAdmin.from("wms_public_holidays")
+      .select("id,holiday_date,title,period,start_time,end_time,credited_hours")
+      .gte("holiday_date",firstDayTR).lte("holiday_date",todayTR),
+  ]);
+  if(attError||holidayError) {
+    console.error("[WMS_PORTAL_STATS]",attError??holidayError);
+    return null;
+  }
+  const rows=(attendances??[]) as {
+    check_in_time:string|null;check_out_time:string|null;
+    working_hours:number|string|null;status:string|null
+  }[];
+  const holidays=(holidayData??[]) as PublicHoliday[];
+  let totalHours=0,overTime=0;
+  const logs:{
+    date:string;checkIn:string;checkOut:string;
+    hours:string;status:string|null
+  }[]=[];
+  const coveredWorkDays=new Set<string>();
+  const coveredAbsenceHours=new Map<string,number>();
+  const dateFmt=new Intl.DateTimeFormat("tr-TR",{timeZone:"Europe/Istanbul",day:"2-digit",month:"short"});
+  const timeFmt=new Intl.DateTimeFormat("tr-TR",{timeZone:"Europe/Istanbul",hour:"2-digit",minute:"2-digit"});
+  for(const record of rows){
+    if(!record.check_in_time)continue;
+    const date=istanbulDate(record.check_in_time);
+    const hours=Number(record.working_hours)||0;
+    totalHours+=hours;
+    if(!isLeaveRow(record.status)){
+      coveredWorkDays.add(date);
+      if(hours>8)overTime+=hours-8;
+    } else {
+      // Unpaid full-day leave still counts as an excused absence, despite 0 paid hours.
+      const a=Date.parse(record.check_in_time);
+      const b=record.check_out_time?Date.parse(record.check_out_time):a;
+      const approvedDuration=Math.min(8,Math.max(0,(b-a)/3600000));
+      coveredAbsenceHours.set(date,(coveredAbsenceHours.get(date)??0)+approvedDuration);
+    }
+    logs.push({
+      date:dateFmt.format(new Date(record.check_in_time)),
+      checkIn:timeFmt.format(new Date(record.check_in_time)),
+      checkOut:record.check_out_time?timeFmt.format(new Date(record.check_out_time)):"-",
+      hours:hours>0?hours.toFixed(1):"-",
+      status:record.status,
     });
   }
-
-  let pastWorkingDays = 0;
-  for (let d = new Date(firstDay); d <= new Date(); d.setDate(d.getDate() + 1)) {
-    if (d.getDay() !== 0 && d.getDay() !== 6) pastWorkingDays++; 
+  const creditedHolidays=holidayCreditForEmployee(holidays,rows);
+  totalHours+=creditedHolidays;
+  for(const holiday of holidays){
+    const hours=holidayCreditForEmployee([holiday],rows);
+    if(hours<=0)continue;
+    coveredAbsenceHours.set(holiday.holiday_date,(coveredAbsenceHours.get(holiday.holiday_date)??0)+hours);
+    logs.push({
+      date:dateFmt.format(new Date(timeAtIstanbul(holiday.holiday_date,"12:00"))),
+      checkIn:holiday.start_time.slice(0,5),
+      checkOut:holiday.end_time.slice(0,5),
+      hours:hours.toFixed(1),
+      status:"PUBLIC_HOLIDAY",
+    });
   }
-
-  const missingDays = Math.max(0, pastWorkingDays - presentDaysCount);
-
+  let missingDays=0;
+  const lastDate=Date.parse(todayTR+"T12:00:00Z");
+  for(let d=Date.parse(firstDayTR+"T12:00:00Z");d<=lastDate;d+=86400000){
+    const day=new Date(d);
+    if(day.getUTCDay()===0||day.getUTCDay()===6)continue;
+    const date=day.toISOString().slice(0,10);
+    if(coveredWorkDays.has(date))continue;
+    missingDays+=Math.max(0,1-Math.min(1,(coveredAbsenceHours.get(date)??0)/8));
+  }
   return {
-    totalHours: totalHours.toFixed(1),
-    overTime: overTime.toFixed(1),
-    missingDays,
-    logs
+    totalHours:totalHours.toFixed(1),
+    overTime:overTime.toFixed(1),
+    missingDays:Math.round(missingDays*2)/2,
+    logs,
   };
 }
