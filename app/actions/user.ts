@@ -1,6 +1,8 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { randomBytes } from "node:crypto";
+import { requireSystemAdmin } from "@/lib/security/require-wms-actor";
 
 // Admin yetkisiyle Supabase Client oluşturuyoruz (RLS Kalkanını Deler)
 const supabaseAdmin = createClient(
@@ -14,6 +16,7 @@ const supabaseAdmin = createClient(
 // 1. TÜM VERİLERİ ÇEK (RLS BYPASS)
 export async function fetchAdminAccounts() {
   try {
+    await requireSystemAdmin();
     // Tüm şubeleri al (Düzenleme modalında şube değiştirmek için gerekecek)
     const { data: branches } = await supabaseAdmin.from("branches").select("id, name").order("name");
 
@@ -45,7 +48,8 @@ export async function fetchAdminAccounts() {
 // 2. ŞİFRE SIFIRLAMA (AUTH + PROFILES GÜNCELLEMESİ)
 export async function adminResetPassword(userId: string) {
   try {
-    const newTempPassword = `Lgs${Math.floor(1000 + Math.random() * 9000)}!`;
+    await requireSystemAdmin();
+    const newTempPassword = `Lgs${randomBytes(12).toString("base64url")}!`;
 
     // Auth tablosunda şifreyi gerçekten değiştir (Giriş yapabilmesi için)
     const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(userId, {
@@ -69,6 +73,7 @@ export async function adminResetPassword(userId: string) {
 // 3. HESAP GÜNCELLEME (ŞUBE DÂHİL)
 export async function updateSystemUser(data: { id: string; fullName: string; email: string; role: string; branchId: string | null }) {
   try {
+    await requireSystemAdmin();
     const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(data.id, {
       email: data.email,
       user_metadata: { full_name: data.fullName }
@@ -92,6 +97,7 @@ export async function updateSystemUser(data: { id: string; fullName: string; ema
 // 4. SİSTEMDEN TAMAMEN SİLME (ÖNCE PROFILES -> SONRA AUTH)
 export async function deleteSystemUser(userId: string) {
   try {
+    await requireSystemAdmin();
     // 1. Önce Profiles tablosundan manuel siliyoruz (Veritabanında Cascade kuralı yoksa diye garantiye alıyoruz)
     const { error: profileError } = await supabaseAdmin
       .from("profiles")
@@ -113,6 +119,7 @@ export async function deleteSystemUser(userId: string) {
 
 export async function createSystemUser(data: { fullName: string; email: string; branchId: string; roleCode: string; tempPassword: string; }) {
   try {
+    await requireSystemAdmin();
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email: data.email, password: data.tempPassword, email_confirm: true, user_metadata: { full_name: data.fullName },
     });
