@@ -171,7 +171,7 @@ export async function processAttendanceScan(
       const diffInMilliseconds = roundedTime.getTime() - checkInDate.getTime();
       const totalHoursRounded = diffInMilliseconds / (1000 * 60 * 60);
 
-      const breakHours = totalHoursRounded > 5 ? 1 : 0;
+      const breakHours = totalHoursRounded >= 5 ? 1 : 0; // 08:00–13:00 includes 1h lunch; 4h net work
       const netWorkingHours = Math.max(0, totalHoursRounded - breakHours);
 
       const { error: updateError } = await supabase
