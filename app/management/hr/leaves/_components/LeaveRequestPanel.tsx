@@ -768,6 +768,11 @@ export default function LeaveRequestPanel() {
                                      leaveText === 'SAGLIK RAPORU' ? 'bg-red-50 text-red-700 border-red-300' : 'bg-blue-50 text-blue-700 border-blue-300'
                                    }`}>
                                      {leaveText === 'SAGLIK RAPORU' ? 'SAĞLIK RAPORU' : `${leaveText}`}
+                                      {log.check_in_time && log.check_out_time && (Date.parse(log.check_out_time)-Date.parse(log.check_in_time))/3600000<=4.1 && (
+                                        <span className="ml-2 inline-flex items-center rounded-[5px] bg-white px-2 py-1 font-mono text-[10px] text-blue-800">
+                                          Yarım gün · {formatTime(log.check_in_time)}–{formatTime(log.check_out_time)}
+                                        </span>
+                                      )}
                                    </span>
                                  ) : (
                                    <div className="flex items-center justify-center">
