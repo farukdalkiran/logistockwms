@@ -6,7 +6,6 @@ import {
   Hash, KeyRound, Laptop, LockKeyhole, Pencil, Plus, RefreshCw, Search, Shield,
   ShieldAlert, Smartphone, Trash2, UserPlus, Users, X,
 } from "lucide-react";
-import { WmsPageHeader, WmsMetric, WmsBadge } from "@/components/ui/wms";
 import {
   adminResetPassword, assignWebEmployeeIdentity, createSystemUser, createTerminalEmployee,
   deleteSystemUser, fetchAdminAccounts, updateSystemUser, updateTerminalEmployee,
@@ -157,26 +156,43 @@ export default function PasswordAccountsClient({initial}:{initial:PasswordDashbo
   const activeTerminals=dashboard.terminalAccounts.filter(t=>t.is_active).length;
 
   return <main className="mx-auto w-full max-w-[1620px] space-y-5 px-3 py-4 pb-20 text-slate-900 sm:px-5 lg:px-7">
-    <WmsPageHeader
-      eyebrow="Sistem / Güvenlik"
-      title="Kullanıcı, Şifre ve Personel ID Merkezi"
-      description="Web hesaplarını personel kimliklerine bağlayın; şifreleri, terminal yetkilerini ve şube erişimini güvenle yönetin."
-      actions={
-        <>
-          <WmsBadge tone="info"><Building2 size={14}/>{isDeveloper ? "Developer · Tüm şubeler" : dashboard.ownBranchName}</WmsBadge>
-          <button type="button" onClick={()=>void refresh()} disabled={refreshing||busy}
-            className="inline-flex min-h-10 items-center gap-2 rounded-[5px] border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-            <RefreshCw size={16} className={refreshing?"animate-spin":""}/>Yenile
-          </button>
-        </>
-      }
-    />
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      <WmsMetric label="Web Hesabı" value={accountCount}/>
-      <WmsMetric label="Aktif Terminal" value={activeTerminals}/>
-      <WmsMetric label="Terminal Kaydı" value={terminalCount}/>
-      <WmsMetric label="ID Eşleşmesi Eksik" value={missingIds}/>
-    </div>
+    <header className="overflow-hidden rounded-[7px] border border-slate-800 bg-slate-950 text-white shadow-md">
+      <div className="flex flex-col justify-between gap-5 p-5 sm:p-7 lg:flex-row lg:items-start">
+        <div className="flex min-w-0 items-start gap-4">
+          <div className="shrink-0 rounded-[6px] border border-rose-400/25 bg-rose-500/20 p-3"><KeyRound className="h-7 w-7 text-rose-200"/></div>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[.12em] text-rose-300">LogiStock WMS / Güvenlik ve Hesap Yönetimi</p>
+            <h1 className="mt-1.5 text-2xl font-bold tracking-tight text-white sm:text-3xl">Kullanıcı, Şifre ve Personel ID Merkezi</h1>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
+              Web hesaplarını personel kimliklerine bağlayın; şifreleri, terminal yetkilerini ve şube erişimini güvenle yönetin.
+              Yeni web hesabı oluşturulurken benzersiz 5 haneli personel ID otomatik atanır.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <span className="rounded-[4px] border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-bold text-white">
+                <Building2 size={13} className="mr-1.5 inline"/>{isDeveloper?"Developer · Tüm Şubeler":dashboard.ownBranchName}
+              </span>
+              <span className="rounded-[4px] border border-white/20 bg-white/10 px-3 py-1.5 text-xs text-slate-200">
+                <Shield size={13} className="mr-1.5 inline"/>Şube ve rol kontrolü sunucuda
+              </span>
+            </div>
+          </div>
+        </div>
+        <button type="button" onClick={()=>void refresh()} disabled={refreshing||busy} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-[5px] border border-white/25 bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/20 disabled:opacity-50">
+          <RefreshCw size={16} className={refreshing?"animate-spin":""}/>Verileri Yenile
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-px border-t border-white/10 bg-white/10 sm:grid-cols-4">
+        {[
+          {label:"Web Hesabı",value:accountCount},
+          {label:"Aktif Terminal",value:activeTerminals},
+          {label:"Terminal Kaydı",value:terminalCount},
+          {label:"ID Eşleşmesi Eksik",value:missingIds},
+        ].map(m=><div key={m.label} className="bg-slate-900 px-4 py-4 sm:px-6">
+          <p className="text-xs font-medium text-slate-300">{m.label}</p>
+          <p className="mt-1 text-2xl font-bold tabular-nums text-white">{m.value}</p>
+        </div>)}
+      </div>
+    </header>
 
     {error&&<div role="alert" className="flex items-start gap-2 rounded-[5px] border border-rose-300 bg-rose-50 p-4 text-sm font-medium text-rose-800"><ShieldAlert size={18} className="shrink-0"/>{error}</div>}
     {notice&&<div role="status" className="flex items-start gap-2 rounded-[5px] border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-900"><BadgeCheck size={18} className="shrink-0"/>{notice}</div>}

@@ -1,129 +1,67 @@
+/* 1. FONT IMPORT: Quicksand ve Paytone One sisteme dahil ediliyor */
+@import url('https://fonts.googleapis.com/css2?family=Paytone+One&family=Quicksand:wght@300..700&display=swap');
 @import "tailwindcss";
 
-/*
- * LogiStock WMS Design System v1
- * Single source of truth: design tokens, system fonts and accessible controls.
- * Legacy --color-* and --font-* aliases are retained for existing screens.
- */
+/* 2. TAILWIND v4 TEMA YAPILANDIRMASI */
 @theme {
+  /* Marka Renkleri */
   --color-primary: #dc3545;
-  --color-primary-hover: #bd2635;
-  --color-dark: #172033;
-  --color-dark-soft: #263247;
-  --font-sans: Arial, Helvetica, system-ui, sans-serif;
-  --font-quicksand: Arial, Helvetica, system-ui, sans-serif;
-  --font-paytone: Arial, Helvetica, system-ui, sans-serif;
+  --color-primary-hover: #c82333;
+  --color-dark: #1a1a1a;
+  --color-dark-soft: #2d2d2d;
+
+  /* Yazı Tipleri */
+  --font-quicksand: "Quicksand", sans-serif;
+  --font-paytone: "Paytone One", sans-serif;
+
+  /* Animasyonlar (Lazer Tarama vb.) */
   --animate-scan: scan 3s ease-in-out infinite;
+
   @keyframes scan {
-    0%, 100% { transform: translateY(0); opacity: .2; }
-    50% { transform: translateY(280px); opacity: .8; }
+    0%, 100% { transform: translateY(0); opacity: 0.2; }
+    50% { transform: translateY(280px); opacity: 0.8; }
   }
 }
 
+/* 3. GLOBAL ROOT VE BASE STİLLER */
 :root {
-  color-scheme: light;
-  --background: #f5f7fa;
-  --foreground: #172033;
-  --wms-brand: #dc3545;
-  --wms-brand-hover: #bd2635;
-  --wms-brand-soft: #fff1f2;
-  --wms-canvas: #f5f7fa;
-  --wms-surface: #ffffff;
-  --wms-subtle: #f8fafc;
-  --wms-border: #e2e8f0;
-  --wms-border-strong: #cbd5e1;
-  --wms-text: #172033;
-  --wms-muted: #64748b;
-  --wms-radius: 5px;
-  --wms-shadow: 0 1px 3px rgba(15,23,42,.06);
-  --wms-focus: 0 0 0 3px rgba(220,53,69,.17);
+  --background: #f8f9fa;
+  --foreground: #1a1a1a;
 }
 
-html { -webkit-text-size-adjust: 100%; }
 body {
-  min-height: 100vh;
-  margin: 0;
-  background: var(--wms-canvas);
-  color: var(--wms-text);
-  font-family: Arial, Helvetica, system-ui, sans-serif;
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-quicksand) !important;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-button, input, select, textarea { font: inherit; }
-button:not(:disabled), [role="button"]:not([aria-disabled="true"]) { cursor: pointer; }
-button:disabled { cursor: not-allowed; }
-:where(button, a, input, textarea, select, [role="button"]):focus-visible {
-  outline: 2px solid var(--wms-brand);
-  outline-offset: 2px;
-}
-::selection { background: #fecdd3; color: #881337; }
 
-/* Apply to the entire application, including existing management / terminal screens. */
-.wms-interface :is(.rounded-none, .rounded-sm, .rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl, .rounded-3xl) {
-  border-radius: var(--wms-radius);
+/* 4. LOGO VE ÖZEL SINIFLAR */
+.logistock-logo {
+  font-family: var(--font-paytone) !important;
+  user-select: none;
+  line-height: 1;
+  letter-spacing: -0.02em;
 }
-.wms-interface :where(h1) { letter-spacing: -.025em; line-height: 1.25; }
-.wms-interface :where(h2, h3) { letter-spacing: -.015em; line-height: 1.35; }
-.wms-interface :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea) {
-  border-radius: var(--wms-radius);
-}
-.wms-interface :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea):focus-visible {
-  outline: 2px solid rgba(220,53,69,.65);
-  outline-offset: 1px;
-}
-.wms-interface :where(table) { font-variant-numeric: tabular-nums; border-collapse: collapse; }
-.wms-interface :where(th) { font-weight: 700; letter-spacing: .02em; }
-.wms-interface :where(td, th) { vertical-align: middle; }
 
-/* Opt-in primitives for all new or migrated screens. */
-.wms-page { width: 100%; min-width: 0; display: flex; flex-direction: column; gap: 24px; }
-.wms-page-header {
-  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
-  gap: 16px; padding: 20px 24px; background: var(--wms-surface);
-  border: 1px solid var(--wms-border); border-left: 4px solid var(--wms-brand);
-  border-radius: var(--wms-radius); box-shadow: var(--wms-shadow);
+.logistock-logo.primary { 
+  color: var(--color-primary); 
 }
-.wms-page-title { margin: 0; color: var(--wms-text); font-size: clamp(1.25rem, 2vw, 1.65rem); font-weight: 800; line-height: 1.3; }
-.wms-eyebrow { display:block; margin-bottom: 5px; color: var(--wms-brand); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; font-weight: 750; }
-.wms-description { margin-top: 5px; color: var(--wms-muted); font-size: 13px; line-height: 1.6; }
-.wms-card { min-width: 0; background: var(--wms-surface); border: 1px solid var(--wms-border); border-radius: var(--wms-radius); box-shadow: var(--wms-shadow); }
-.wms-card-header { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:16px 20px; border-bottom: 1px solid var(--wms-border); }
-.wms-card-body { padding: 20px; }
-.wms-filter-bar { display:flex; flex-wrap:wrap; align-items:end; gap:12px; padding:16px 20px; background: var(--wms-surface); border:1px solid var(--wms-border); border-radius: var(--wms-radius); }
-.wms-field-label { display:block; margin-bottom:6px; color:#334155; font-size:12px; font-weight:700; }
-.wms-field {
-  display:block; width:100%; min-height:40px; padding:9px 12px; color: var(--wms-text);
-  background: white; border:1px solid var(--wms-border-strong); border-radius:var(--wms-radius);
-  font-size:13px; transition:border-color .15s, box-shadow .15s;
+
+.logistock-logo.secondary { 
+  color: var(--color-dark); 
 }
-.wms-field:focus-visible { outline:none !important; border-color:var(--wms-brand); box-shadow:var(--wms-focus); }
-.wms-field:disabled { background:var(--wms-subtle); color:var(--wms-muted); cursor:not-allowed; }
-.wms-table-scroll { width:100%; overflow-x:auto; }
-.wms-table { width:100%; text-align:left; font-size:13px; }
-.wms-table thead { background:var(--wms-subtle); }
-.wms-table th { padding:12px 16px; color:#475569; font-size:11px; font-weight:750; text-transform:uppercase; letter-spacing:.045em; white-space:nowrap; border-bottom:1px solid var(--wms-border); }
-.wms-table td { padding:12px 16px; color:#334155; border-bottom:1px solid #f1f5f9; }
-.wms-table tbody tr:last-child td { border-bottom:0; }
-.wms-table tbody tr:hover { background:#fafbfc; }
-.wms-empty-state { display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:8px; padding:48px 24px; color:var(--wms-muted); }
-.wms-empty-state h3 { font-size:15px; font-weight:750; color:var(--wms-text); }
-.wms-badge { display:inline-flex; align-items:center; gap:5px; padding:3px 8px; border-radius:var(--wms-radius); font-size:11px; line-height:1.5; font-weight:750; border:1px solid transparent; }
-.wms-badge-neutral { background:#f1f5f9; color:#475569; border-color:#e2e8f0; }
-.wms-badge-success { background:#ecfdf5; color:#047857; border-color:#a7f3d0; }
-.wms-badge-warning { background:#fffbeb; color:#92400e; border-color:#fde68a; }
-.wms-badge-danger { background:#fff1f2; color:#be123c; border-color:#fecdd3; }
-.wms-badge-info { background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe; }
-.wms-metric-label { font-size:11px; color:var(--wms-muted); font-weight:750; letter-spacing:.025em; }
-.wms-metric-value { margin-top:8px; color:var(--wms-text); font-weight:800; font-size:clamp(1.45rem,2.4vw,2rem); line-height:1.15; font-variant-numeric:tabular-nums; }
-.logistock-logo { font-family:Arial,Helvetica,system-ui,sans-serif !important; font-weight:900; letter-spacing:-.045em; line-height:1; user-select:none; }
-.logistock-logo.primary { color:var(--wms-brand); }
-.logistock-logo.secondary { color:var(--wms-text); }
-.viewfinder-corner { border-color:var(--wms-brand); position:absolute; width:2.5rem; height:2.5rem; border-width:4px; }
-@media (max-width: 640px) {
-  .wms-page { gap:16px; }
-  .wms-page-header { padding:16px; }
-  .wms-card-header, .wms-card-body, .wms-filter-bar { padding:14px; }
+
+/* Dokunmatik Dostu Global İyileştirmeler */
+button, a {
+  @apply transition-all duration-200 active:scale-95;
+  min-height: 38px; 
+  cursor: pointer;
 }
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { scroll-behavior:auto !important; animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; }
+
+/* Barkod Okuyucu Viewfinder */
+.viewfinder-corner {
+  border-color: var(--color-primary);
+  @apply absolute w-10 h-10 border-4;
 }

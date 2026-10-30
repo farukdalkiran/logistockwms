@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { WmsPageHeader } from "@/components/ui/wms";
-import { Button } from "@/components/ui/Button";
 import { supabase } from "@/lib/supabase";
 import ManualProductDrawer from "./ManualProductDrawer";
 import ExcelUploadDrawer from "./ExcelUploadDrawer";
@@ -128,17 +126,74 @@ export default function ProductsDashboard({
 {/* ==============================================
           1. ENDÜSTRİYEL MASTER PANEL (Ürün Yönetimi)
       ================================================ */}
-      <WmsPageHeader
-        eyebrow="Envanter / Master Veri"
-        title="Ürün Kataloğu ve Stok Kartları"
-        description="Ticari ürün ve sarf malzeme kartlarını yönetin; barkodları terminal işlemlerinden önce tanımlayın."
-        actions={
-          <>
-            <Button variant="outline" onClick={() => setIsExcelDrawerOpen(true)}><Upload size={16}/>Excel ile yükle</Button>
-            <Button onClick={() => setIsManualDrawerOpen(true)}><Plus size={16}/>Yeni ürün kartı</Button>
-          </>
-        }
-      />
+      <div className="relative w-full min-h-[220px] flex flex-col lg:flex-row justify-between p-6 md:p-8 bg-slate-900 border-b-2 border-slate-400 overflow-hidden gap-8 rounded-sm mb-6">
+        
+        {/* Arka Plan Görseli ve Endüstriyel Karartma */}
+        <img 
+          src="https://img.magnific.com/free-photo/spacious-warehouse-with-rows-shelves-forklift_84443-74085.jpg?t=st=1779108507~exp=1779112107~hmac=834c43fbd471b0766ff07fba31ef7c5cc6527409831e16ab7112e2dc4f5c9ac6&w=1480"
+          alt="Inventory Management"
+          className="absolute inset-0 w-full h-full object-cover opacity-30 mix-blend-luminosity"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-900/90 to-transparent"></div>
+        
+        {/* Sol Alan: Başlık ve Sistem Bilgi Kartı */}
+        <div className="relative z-10 flex flex-col gap-6 w-full lg:max-w-2xl justify-center">
+          <div className="flex items-center gap-4">
+            <div className="p-3.5 bg-[#dc3545] border border-red-400/50 rounded-sm shadow-[0_0_20px_rgba(220,53,69,0.3)]">
+              <Package className="w-7 h-7 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tight">Ürün Kataloğu ve Stok Kartları</h1>
+              <p className="text-[#dc3545] text-xs font-bold uppercase tracking-widest mt-1">Ticari Ürün & Sarf Malzeme Veritabanı</p>
+            </div>
+          </div>
+
+          {/* Endüstriyel Info Kartı */}
+          <div className="bg-slate-800/80 backdrop-blur-md border border-slate-700 border-l-4 border-l-[#dc3545] p-4 md:p-5 rounded-sm flex gap-4 items-start shadow-inner">
+            <Info className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" />
+            <div className="flex flex-col gap-1.5">
+              <h4 className="text-slate-200 text-xs font-bold uppercase tracking-widest">Master Veri Bilgilendirmesi</h4>
+              <p className="text-slate-400 text-xs font-semibold leading-relaxed">
+                Bu panel, depo içerisindeki tüm barkodlu ürünlerin (ticari veya sarf) ana kartlarının yönetildiği veri giriş merkezidir. Sisteme tanımlı olmayan hiçbir barkod <strong className="text-slate-200">mal kabul (putaway)</strong> veya <strong className="text-slate-200">sayım</strong> işlemlerinde el terminalleri tarafından okutulamaz.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Sağ Alan: Vurgulu Veri Giriş (Aksiyon) Paneli */}
+        <div className="relative z-10 w-full lg:w-80 flex flex-col justify-center">
+          <div className="bg-slate-800/90 backdrop-blur-md border border-slate-600 p-5 rounded-sm shadow-2xl">
+            <div className="flex items-center justify-between mb-4 border-b border-slate-700 pb-3">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Veri Giriş Kontrolü</label>
+              <span className="flex items-center gap-2 text-[10px] font-black text-green-400 uppercase tracking-widest">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+                </span>
+                Aktif
+              </span>
+            </div>
+            
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={() => setIsExcelDrawerOpen(true)}
+                className="w-full flex items-center justify-center gap-2 h-11 px-4 bg-slate-950 border border-slate-500 text-slate-200 rounded-sm text-[11px] font-black uppercase tracking-widest hover:bg-slate-800 hover:text-white hover:border-[#dc3545]/50 transition-all shadow-inner"
+              >
+                <Upload size={16} />
+                Excel İle Yükle
+              </button>
+              
+              <button
+                onClick={() => setIsManualDrawerOpen(true)}
+                className="w-full flex items-center justify-center gap-2 h-11 px-4 bg-[#dc3545] text-white border border-transparent rounded-sm text-[11px] font-black uppercase tracking-widest hover:bg-red-700 transition-all shadow-[0_0_15px_rgba(220,53,69,0.4)]"
+              >
+                <Plus size={16} strokeWidth={3} />
+                Yeni Ürün Kartı Aç
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* ==============================================
           2. BAĞIMSIZ BİLGİ KARTLARI (KPI)
