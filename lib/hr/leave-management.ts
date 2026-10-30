@@ -87,7 +87,7 @@ export async function getLeaveDashboard(yearInput?: number, branchInput?: string
     .select("id,employee_id,leave_type,custom_leave_type,start_date,end_date,status,requested_days,is_half_day,half_day_period,reason,manager_note")
     .in("employee_id",employeeIds)
     .gte("start_date",year + "-01-01").lte("start_date",year + "-12-31")
-    .order("start_date",{ascending:false}).limit(1500);
+    .order("start_date",{ascending:false}).limit(999);
   let auditQ = actor.db.from("transaction_logs")
     .select("id,employee_id,description,old_value,new_value,created_at")
     .in("employee_id",employeeIds)
@@ -104,7 +104,7 @@ export async function getLeaveDashboard(yearInput?: number, branchInput?: string
   if (leaveResult.error || auditResult.error || profileResult.error) {
     throw new Error(leaveResult.error?.message || auditResult.error?.message || profileResult.error?.message);
   }
-  if ((leaveResult.data || []).length >= 1500) {
+  if ((leaveResult.data || []).length >= 999) {
     throw new Error("İzin hareketi limiti aşıldı, lütfen şube filtresi uygulayın.");
   }
   const accountMap = new Map((profileResult.data || [])
