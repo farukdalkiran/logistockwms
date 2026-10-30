@@ -16,6 +16,11 @@ const card = "rounded-[5px] border border-slate-200 bg-white shadow-sm";
 const field = "w-full rounded-[5px] border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#dc3545]";
 const fmt = (n:number) => n.toLocaleString("tr-TR",{maximumFractionDigits:2});
 const trDate = (date:string|null) => date ? date.split("-").reverse().join(".") : "-";
+const formatStamp = (date:string) => new Date(date).toLocaleString("tr-TR",{timeZone:"Europe/Istanbul"});
+const requestLabel = (type:string) => ({
+  YILLIK_IZIN:"Yıllık izin", SAGLIK_RAPORU:"Sağlık raporu", MAZERET:"Mazeret",
+  UCRETSİZ:"Ücretsiz izin", EVLILIK:"Evlilik izni", DIGER:"Diğer",
+} as Record<string,string>)[type] || type.replace(/_/g," ");
 function Statistic({title,value,description,icon:Icon}:{title:string;value:string|number;description:string;icon:typeof Users}) {
   return <div className={card+" p-4"}>
     <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold text-slate-500">{title}<Icon className="h-4 w-4 text-[#dc3545]"/></div>
