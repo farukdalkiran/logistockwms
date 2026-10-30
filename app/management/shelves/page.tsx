@@ -11,7 +11,7 @@ export default function ShelvesPage() {
   const triggerRefresh = () => setRefreshKey(prev => prev + 1);
 
   return (
-    <div className="flex flex-col min-h-screen gap-6 bg-slate-50 p-4 md:p-6 lg:p-8">
+    <div className="wms-page">
       <ShelvesDashboard 
         selectedBranchId={selectedBranchId} 
         setSelectedBranchId={setSelectedBranchId}
@@ -25,7 +25,7 @@ export default function ShelvesPage() {
         Sadece mt-8 ile üstteki dashboard'dan ayırdık. 
       */}
       {selectedBranchId && (
-        <div className="mt-18">
+        <div className="mt-4">
           <ShelvesDragList 
             key={`${selectedBranchId}-${refreshKey}`} 
             branchId={selectedBranchId} 

@@ -10,7 +10,7 @@ export const number = (value: number) =>
   new Intl.NumberFormat("tr-TR").format(value);
 export const fold = (value: string) => value.toLocaleLowerCase("tr-TR");
 export const control =
-  "min-h-10 rounded-sm border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40";
+  "min-h-10 rounded-[5px] border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#dc3545] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40";
 
 export function CopyCode({
   value,

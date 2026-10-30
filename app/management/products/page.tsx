@@ -12,7 +12,7 @@ export default function ProductsPage() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen gap-6 bg-slate-50 p-4 md:p-6 lg:p-8">
+    <div className="wms-page">
       {/* Üst Kısım: İstatistikler ve Aksiyon Butonları */}
       <ProductsDashboard onUpdate={handleUpdate} />
 
