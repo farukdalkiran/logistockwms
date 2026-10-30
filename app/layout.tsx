@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "react-hot-toast";
 import { AuthProvider } from "@/components/providers/AuthProvider";
@@ -10,7 +9,6 @@ import { WmsSessionProvider } from "@/components/providers/WmsSessionProvider";
 import { OrderNotificationProvider } from "@/components/providers/OrderNotificationProvider";
 import { NoticeCenterProvider } from "@/components/providers/NoticeCenterProvider";
 
-const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "LogiStock WMS",
@@ -81,7 +79,7 @@ export default async function RootLayout({
       <head>
         <link rel="icon" href="/favicon.png" type="image/svg+xml" />
       </head>
-      <body className={inter.className}>
+      <body className="wms-interface">
         <AuthProvider>
           {/* TÜM UYGULAMAYI SARAN WMS ŞUBE KİLİDİ */}
           <WmsSessionProvider session={sessionData}>

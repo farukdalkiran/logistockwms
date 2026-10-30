@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import BarcodeScanner from "@/app/management/hr/_components/BarcodeScanner";
 import AttendanceTable from "@/app/management/hr/_components/AttendanceTable";
 import { AlertCircle, Clock, ShieldAlert, QrCode } from "lucide-react";
+import { WmsPageHeader, WmsBadge } from "@/components/ui/wms";
 
 export const metadata = {
   title: "Mesai Yönetimi | LogiStock WMS",
@@ -54,31 +55,13 @@ export default async function HRManagementPage() {
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10">
-      {/* 1. ENDÜSTRİYEL DARK HEADING */}
-      <div className="bg-[#0F172B] border-l-4 border-[#dc3545] p-5 rounded-sm shadow-md flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">
-            İNSAN KAYNAKLARI & OPERASYON
-          </span>
-          <h1 className="text-xl font-black text-white tracking-widest uppercase">
-            MESAİ YÖNETİM MERKEZİ
-          </h1>
-        </div>
-
-        {/* Aktif Şube Göstergesi */}
-        <div className="flex flex-col md:items-end bg-[#1E293B] px-4 py-2 rounded-sm border border-slate-700 shadow-inner">
-          <span className="block text-[9px] text-slate-400 uppercase tracking-widest mb-1 font-bold">
-            AKTİF TERMİNAL
-          </span>
-          <span className="inline-flex items-center gap-2 text-[#dc3545] font-black text-sm tracking-widest uppercase">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-sm bg-[#dc3545] opacity-75"></span>
-              <span className="relative inline-flex rounded-sm h-2.5 w-2.5 bg-[#dc3545]"></span>
-            </span>
-            {branchName}
-          </span>
-        </div>
-      </div>
+      {/* Ortak WMS başlığı */}
+      <WmsPageHeader
+        eyebrow="İnsan Kaynakları / Operasyon"
+        title="Mesai Yönetim Merkezi"
+        description="Dinamik QR, giriş-çıkış ve mesai kayıtlarını şube kapsamında yönetin."
+        actions={<WmsBadge tone="info">Aktif terminal: {branchName}</WmsBadge>}
+      />
 
       {/* 2. DEVELOPER UYARISI */}
       {!branchId && isDeveloper && (

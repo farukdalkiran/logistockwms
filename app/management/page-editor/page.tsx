@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { Button } from "@/components/ui/Button";
+import { WmsPageHeader } from "@/components/ui/wms";
 import * as Icons from "lucide-react";
 import {
   Layout,
@@ -228,37 +229,23 @@ export default function PageEditor() {
   const parentOptions = modules.filter(m => !m.parent_id && m.id !== formData.id);
 
   return (
-    <div className="flex flex-col w-full h-full bg-slate-50 font-['Quicksand'] relative">
+    <div className="flex flex-col w-full h-full bg-slate-50 relative">
       
-      {/* 1. DARK-INDUSTRIAL HEADER */}
-      <div className="bg-[#0b1120] px-6 py-5 border-b border-slate-800 shrink-0">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-lg font-black text-white tracking-widest uppercase flex items-center gap-2">
-              <Layout className="text-[#dc3545]" size={20} />
-              MODÜL & SAYFA YÖNETİMİ
-            </h1>
-            <p className="text-xs font-semibold text-slate-400 mt-1">
-              Sistem menülerini, sayfaları ve hiyerarşik yetki rotalarını buradan düzenleyin.
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={fetchData}
-              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors"
-              title="Yenile"
-            >
-              <RefreshCw size={18} className={isLoading ? "animate-spin" : ""} />
-            </button>
-            <Button
-              onClick={() => handleOpenDrawer()}
-              className="h-9 px-4 text-xs font-black uppercase tracking-wider bg-[#dc3545] hover:bg-red-700 text-white rounded shadow-md transition-colors flex items-center gap-2"
-            >
-              <Plus size={16} strokeWidth={2.5} /> YENİ MODÜL
+      <WmsPageHeader
+        eyebrow="Yönetim / Yapılandırma"
+        title="Modül ve Sayfa Yönetimi"
+        description="Menüleri, sayfa bağlantılarını ve rol erişimlerini yönetin."
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={fetchData} disabled={isLoading} aria-label="Yenile">
+              <RefreshCw size={16} className={isLoading ? "animate-spin" : ""} /> Yenile
             </Button>
-          </div>
-        </div>
-      </div>
+            <Button size="sm" onClick={() => handleOpenDrawer()}>
+              <Plus size={16} /> Yeni modül
+            </Button>
+          </>
+        }
+      />
 
       {/* 2. ANA İÇERİK: MODÜL TABLOSU */}
       <div className="flex-1 overflow-auto p-6">

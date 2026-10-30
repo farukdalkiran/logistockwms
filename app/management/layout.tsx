@@ -20,11 +20,11 @@ export default async function ManagementLayout({
 
   // 2. ORİJİNAL WMS ARAYÜZÜ VE ROTA KALKANI
   return (
-    <div className="flex flex-col min-h-screen bg-slate-50">
+    <div className="flex min-h-screen flex-col bg-[var(--wms-canvas)]">
       <Navbar />
 
-      <main className="flex-1 p-4 md:p-6">
-        <div className="2xl:max-w-[1400px] mx-auto w-full relative z-10">
+      <main className="flex-1 px-3 py-4 sm:px-5 md:px-6 md:py-6">
+        <div className="mx-auto w-full max-w-[1600px] min-w-0 relative z-10">
           {/* 
             3. İSTEMCİ TARAFLI ROTA BEKÇİSİ 
             İçerideki sayfalara güvenlik kodu yazmaya gerek kalmadan,

@@ -45,14 +45,14 @@ export default async function InventoryViewPage() {
   const branchId = profile?.branch_id;
 
   return (
-    <div className="flex flex-col min-h-screen gap-6 bg-slate-50 p-4 md:p-6 lg:p-8">
+    <div className="wms-page">
       {/* 
         YENİ ENDÜSTRİYEL HERO HEADER 
         Karanlık depo arka planı, Info kartı ve Sistem Aksiyon Statüsü
       */}
 
       {/* CLIENT PANEL */}
-      <div className="py-6">
+      <div className="w-full">
         <div className="max-w-[1400px] mx-auto">
           <InventoryViewPanel branchId={branchId} isGlobal={isGlobal} />
         </div>
