@@ -91,9 +91,9 @@ type Option = { value: string; label: string };
 
 const CARD = "rounded-[5px] border border-slate-200 bg-white shadow-sm";
 const LABEL =
-  "block text-xs font-semibold uppercase tracking-[.07em] text-slate-500";
+  "block text-sm font-semibold text-slate-700";
 const INPUT =
-  "h-11 w-full rounded-[4px] border border-slate-300 bg-white px-3 text-[14px] text-slate-900 outline-none transition focus:border-rose-500 focus:ring-2 focus:ring-rose-100 disabled:bg-slate-100";
+  "h-11 w-full rounded-[4px] border border-slate-300 bg-white px-3 text-base text-slate-900 outline-none transition focus:border-rose-500 focus:ring-2 focus:ring-rose-100 disabled:bg-slate-100";
 const BTN =
   "inline-flex min-h-10 items-center justify-center gap-2 rounded-[4px] border px-3.5 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50";
 const BTN_OUTLINE = `${BTN} border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50`;
@@ -710,7 +710,7 @@ export default function ArasTrackingPanel({
         <div className="min-w-0 space-y-4">
         <div className={CARD}>
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-100 px-3 py-3 sm:px-4">
-            <h2 className="flex items-center gap-2 text-sm font-bold">
+            <h2 className="flex items-center gap-2 text-base font-bold">
               <ScanLine className="h-4 w-4 text-rose-600" /> 01 · Gönderi
               Sorgulama
             </h2>
@@ -796,7 +796,7 @@ export default function ArasTrackingPanel({
 
         <div className={CARD}>
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-100 px-4 py-3">
-            <h2 className="flex items-center gap-2 text-sm font-bold">
+            <h2 className="flex items-center gap-2 text-base font-bold">
               <UserRound className="h-4 w-4 text-rose-600" /> 02 · Alıcı ve
               Gönderi Bilgileri
             </h2>
@@ -943,7 +943,7 @@ export default function ArasTrackingPanel({
         <div className="min-w-0 xl:sticky xl:top-4">
         <div className={`${CARD} min-w-0 overflow-hidden`}>
           <div className="border-b border-slate-200 bg-slate-50 px-4 py-3 text-slate-900">
-            <h2 className="flex items-center gap-2 text-sm font-bold">
+            <h2 className="flex items-center gap-2 text-base font-bold">
               <Clipboard className="h-4 w-4 text-rose-600" /> 03 · İşlem Durumu
               ve Kayıt
             </h2>
