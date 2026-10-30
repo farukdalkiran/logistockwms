@@ -277,7 +277,7 @@ function LateBadge({ count }: { count: number }) {
 function RoleAvatar({ role }: { role: RoleType }) {
   if (role === "DEVELOPER") {
     return (
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-violet-200 bg-violet-50 text-violet-700">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-violet-200 bg-violet-50 text-violet-700">
         <Code2 size={17} strokeWidth={2.2} />
       </div>
     );
@@ -285,14 +285,14 @@ function RoleAvatar({ role }: { role: RoleType }) {
 
   if (role === "MANAGER") {
     return (
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-[#b91c1c]">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-[#b91c1c]">
         <ShieldCheck size={17} strokeWidth={2.2} />
       </div>
     );
   }
 
   return (
-    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-100 text-slate-600">
+    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-slate-100 text-slate-600">
       <UserRound size={17} strokeWidth={2.1} />
     </div>
   );
@@ -301,7 +301,7 @@ function RoleAvatar({ role }: { role: RoleType }) {
 function StatusBadge({ record }: { record: AttendanceRecord }) {
   if (isLeaveStatus(record.status)) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wide text-blue-700">
+      <span className="inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide text-blue-700">
         <Calendar size={13} />
         {record.check_in_time && record.check_out_time && (Date.parse(record.check_out_time)-Date.parse(record.check_in_time)) <= 4.1*3600000 ? "Yarım Gün İzin" : "İzinli"}
       </span>
@@ -310,7 +310,7 @@ function StatusBadge({ record }: { record: AttendanceRecord }) {
 
   if (!record.check_out_time) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wide text-emerald-700">
+      <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide text-emerald-700">
         <span className="relative flex h-2 w-2">
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-40" />
           <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
@@ -321,7 +321,7 @@ function StatusBadge({ record }: { record: AttendanceRecord }) {
   }
 
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-100 px-2.5 py-1.5 text-[10px] font-extrabold uppercase tracking-wide text-slate-700">
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-700">
       <CheckCircle2 size={13} strokeWidth={2.5} />
       Tamamlandı
     </span>
@@ -668,7 +668,7 @@ export default function AttendanceTable({
   =========================================== */
 
   return (
-    <section className="flex h-[900px] w-full min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_4px_24px_rgba(15,23,42,0.06)]">
+    <section className="flex w-full min-w-0 flex-col rounded-[5px] border border-slate-200 bg-white shadow-sm">
       {todayHoliday && (
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-[11px] font-semibold text-amber-900">
           <span>Resmî tatil: <strong>{todayHoliday.title}</strong> · {todayHoliday.start_time.slice(0,5)}–{todayHoliday.end_time.slice(0,5)}</span>
@@ -852,7 +852,7 @@ export default function AttendanceTable({
       ===================================== */}
 
       {error && (
-        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-red-200 bg-red-50 px-3 py-1">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-red-200 bg-red-50 px-2 py-1.5">
           <div className="flex items-center gap-2 text-[11px] font-semibold text-red-700">
             <CircleAlert size={15} />
             {error}
@@ -872,61 +872,61 @@ export default function AttendanceTable({
           TABLE
       ===================================== */}
 
-      <div className="relative min-h-0 flex-1 overflow-auto bg-white">
-        <table className="w-full min-w-[1040px] border-separate border-spacing-0 text-left">
+      <div className="w-full min-w-0 overflow-x-auto bg-white">
+        <table className="w-full min-w-[820px] border-separate border-spacing-0 text-left">
           {/* TABLE HEADER */}
 
-          <thead className="sticky top-0 z-20">
+          <thead>
             <tr className="bg-slate-100">
-              <th className="w-[240px] border-b border-r border-slate-200 bg-slate-100 px-3 py-1.5 text-left">
+              <th className="w-[185px] border-b border-r border-slate-200 bg-slate-100 px-2 py-2 text-left">
                 <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
                   Personel Bilgisi
                 </span>
               </th>
 
-              <th className="w-[115px] border-b border-r border-slate-200 bg-slate-100 px-3 py-3.5 text-center">
+              <th className="w-[85px] border-b border-r border-slate-200 bg-slate-100 px-2 py-2 text-center">
                 <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
                   <LogIn size={13} />
                   Giriş
                 </span>
               </th>
 
-              <th className="w-[115px] border-b border-r border-slate-200 bg-slate-100 px-3 py-3.5 text-center">
+              <th className="w-[85px] border-b border-r border-slate-200 bg-slate-100 px-2 py-2 text-center">
                 <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
                   <LogOut size={13} />
                   Çıkış
                 </span>
               </th>
 
-              <th className="w-[95px] border-b border-r border-slate-200 bg-slate-100 px-3 py-3.5 text-center">
+              <th className="w-[70px] border-b border-r border-slate-200 bg-slate-100 px-2 py-2 text-center">
                 <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap text-[10px] font-extrabold uppercase tracking-wider text-amber-700">
                   <Coffee size={13} />
                   Mola
                 </span>
               </th>
 
-              <th className="w-[115px] border-b border-r border-slate-200 bg-slate-100 px-3 py-3.5 text-center">
+              <th className="w-[85px] border-b border-r border-slate-200 bg-slate-100 px-2 py-2 text-center">
                 <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
                   <Timer size={13} />
                   Günlük
                 </span>
               </th>
 
-              <th className="w-[95px] border-b border-r border-slate-200 bg-slate-100 px-3 py-3.5 text-center">
+              <th className="w-[70px] border-b border-r border-slate-200 bg-slate-100 px-2 py-2 text-center">
                 <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
                   <AlertTriangle size={13} className="text-[#dc3545]" />
                   İhlal
                 </span>
               </th>
 
-              <th className="w-[125px] border-b border-r border-[#cdd5e1] bg-[#e7ecf3] px-3 py-3.5 text-center">
+              <th className="w-[95px] border-b border-r border-[#cdd5e1] bg-[#e7ecf3] px-2 py-2 text-center">
                 <span className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap text-[10px] font-black uppercase tracking-wider text-[#0F172B]">
                   <CalendarDays size={13} />
                   Aylık
                 </span>
               </th>
 
-              <th className="w-[145px] border-b border-slate-200 bg-slate-100 px-3 py-1.5 text-right">
+              <th className="w-[110px] border-b border-slate-200 bg-slate-100 px-2 py-2 text-right">
                 <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-600">
                   Durum
                 </span>
@@ -1005,8 +1005,8 @@ export default function AttendanceTable({
                   >
                     {/* PERSONNEL */}
 
-                    <td className="border-b border-r border-slate-100 px-3 py-1">
-                      <div className="flex items-center gap-3">
+                    <td className="border-b border-r border-slate-100 px-2 py-1.5">
+                      <div className="flex items-center gap-2">
                         <RoleAvatar role={roleType} />
 
                         <div className="min-w-0">
@@ -1015,19 +1015,19 @@ export default function AttendanceTable({
                               record.employees?.full_name ??
                               "Bilinmeyen Personel"
                             }
-                            className="max-w-[190px] truncate text-[11px] font-extrabold uppercase tracking-[0.015em] text-[#0F172B]"
+                            className="max-w-[175px] truncate text-[11px] font-extrabold uppercase tracking-[0.015em] text-[#0F172B]"
                           >
                             {record.employees?.full_name ||
                               "BİLİNMEYEN PERSONEL"}
                           </div>
 
-                          <div className="mt-1 flex items-center gap-1.5">
+                          <div className="mt-0.5 flex items-center gap-1.5">
                             {roleType === "DEVELOPER" && (
                               <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
                             )}
 
                             <span
-                              className={`max-w-[180px] truncate text-[9px] font-bold uppercase tracking-wide ${
+                              className={`max-w-[170px] truncate text-[9px] font-bold uppercase tracking-wide ${
                                 roleType === "DEVELOPER"
                                   ? "text-violet-600"
                                   : roleType === "MANAGER"
@@ -1047,10 +1047,10 @@ export default function AttendanceTable({
                     {isLeave ? (
                       <td
                         colSpan={5}
-                        className="border-b border-r border-slate-100 px-4 py-3 text-center"
+                        className="border-b border-r border-slate-100 px-2 py-2 text-center"
                       >
                         <div
-                          className={`mx-auto flex max-w-[340px] items-center justify-center gap-2 rounded-md border px-3 py-2 ${
+                          className={`mx-auto flex max-w-[340px] items-center justify-center gap-2 rounded-[5px] border px-2 py-1.5 ${
                             leaveText === "RESMÎ TATİL"
                               ? "border-amber-200 bg-amber-50 text-amber-800"
                               : isMedicalLeave
@@ -1070,7 +1070,7 @@ export default function AttendanceTable({
                       <>
                         {/* CHECK IN */}
 
-                        <td className="border-b border-r border-slate-100 px-3 py-3 text-center">
+                        <td className="border-b border-r border-slate-100 px-2 py-2 text-center">
                           <div className="inline-flex items-center justify-center gap-2">
                             <EntryIndicator time={record.check_in_time} />
 
@@ -1082,7 +1082,7 @@ export default function AttendanceTable({
 
                         {/* CHECK OUT */}
 
-                        <td className="border-b border-r border-slate-100 px-3 py-3 text-center">
+                        <td className="border-b border-r border-slate-100 px-2 py-2 text-center">
                           {record.check_out_time ? (
                             <span className="text-[12px] font-bold text-slate-700 tabular-nums">
                               {formatTime(record.check_out_time)}
@@ -1096,7 +1096,7 @@ export default function AttendanceTable({
 
                         {/* BREAK */}
 
-                        <td className="border-b border-r border-slate-100 px-3 py-3 text-center">
+                        <td className="border-b border-r border-slate-100 px-2 py-2 text-center">
                           <span className="text-[11px] font-bold text-amber-700 tabular-nums">
                             {formatHours(record.break_hours ?? 0)}
                           </span>
@@ -1104,8 +1104,8 @@ export default function AttendanceTable({
 
                         {/* DAILY HOURS */}
 
-                        <td className="border-b border-r border-slate-100 px-3 py-3 text-center">
-                          <span className="inline-flex min-w-[64px] items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-extrabold text-slate-700 tabular-nums">
+                        <td className="border-b border-r border-slate-100 px-2 py-2 text-center">
+                          <span className="inline-flex min-w-[64px] items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-extrabold text-slate-700 tabular-nums">
                             {record.working_hours !== null &&
                             record.working_hours !== undefined
                               ? formatHours(record.working_hours)
@@ -1115,7 +1115,7 @@ export default function AttendanceTable({
 
                         {/* LATE VIOLATIONS */}
 
-                        <td className="border-b border-r border-slate-100 px-3 py-3 text-center">
+                        <td className="border-b border-r border-slate-100 px-2 py-2 text-center">
                           <LateBadge count={monthlyLate} />
                         </td>
                       </>
@@ -1123,7 +1123,7 @@ export default function AttendanceTable({
 
                     {/* MONTHLY HOURS */}
 
-                    <td className="border-b border-r border-[#e2e8f0] bg-[#f1f5f9]/70 px-3 py-3 text-center group-hover:bg-[#e7edf5]">
+                    <td className="border-b border-r border-[#e2e8f0] bg-[#f1f5f9]/70 px-2 py-2 text-center group-hover:bg-[#e7edf5]">
                       <div className="inline-flex items-center justify-center gap-1.5">
                         <span className="text-[12px] font-black text-[#0F172B] tabular-nums">
                           {formatHours(monthlyTotal)}
@@ -1133,7 +1133,7 @@ export default function AttendanceTable({
 
                     {/* STATUS */}
 
-                    <td className="border-b border-slate-100 px-3 py-1 text-right">
+                    <td className="border-b border-slate-100 px-2 py-1.5 text-right">
                       <StatusBadge record={record} />
                     </td>
                   </tr>

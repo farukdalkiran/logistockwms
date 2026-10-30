@@ -3,189 +3,153 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import BarcodeScanner from "@/app/management/hr/_components/BarcodeScanner";
 import AttendanceTable from "@/app/management/hr/_components/AttendanceTable";
-import { AlertCircle, Clock, ShieldAlert, QrCode } from "lucide-react";
+import { getIstanbulToday, getUpcomingEmployeeEvents, type EmployeeCelebrationSource } from "@/lib/hr/upcoming-events";
+import { AlertCircle, ArrowUpRight, Award, Cake, CalendarDays, Clock3, Fingerprint, UsersRound } from "lucide-react";
 
-export const metadata = {
-  title: "Mesai Yönetimi | LogiStock WMS",
-};
+export const metadata = { title: "Mesai Yönetimi | LogiStock WMS" };
+
+function formatEventDate(iso: string) {
+  return new Intl.DateTimeFormat("tr-TR", { day: "numeric", month: "long", timeZone: "UTC" })
+    .format(new Date(`${iso}T12:00:00Z`));
+}
+
+function countdown(days: number) {
+  if (days === 0) return "BUGÜN";
+  if (days === 1) return "YARIN";
+  return `${days} GÜN KALDI`;
+}
 
 export default async function HRManagementPage() {
   const supabase = await createClient();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) redirect("/login");
 
-  // 1. Oturum Kontrolü
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-
-  if (authError || !user) {
-    redirect("/login");
-  }
-
-  // 2. Kullanıcı Profili ve Şube Bilgisini Çek
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select(
-      `
-      role, 
-      branch_id, 
-      branches ( name )
-    `,
-    )
-    .eq("id", user.id)
-    .single();
+  const { data: profile } = await supabase.from("profiles")
+    .select("role, branch_id, branches(name)")
+    .eq("id", user.id).single();
 
   if (!profile) {
-    return (
-      <div className="p-8 text-center bg-red-50 text-[#dc3545] font-bold border-2 border-[#dc3545] rounded-sm m-6">
-        PROFİL BİLGİNİZ BULUNAMADI. LÜTFEN SİSTEM YÖNETİCİSİYLE İLETİŞİME GEÇİN.
-      </div>
-    );
+    return <div className="m-6 rounded-[5px] border border-red-200 bg-red-50 p-6 text-sm font-bold text-red-700">Profiliniz bulunamadı. Sistem yöneticisiyle iletişime geçin.</div>;
   }
 
-  const branchId = profile.branch_id;
-  
-  // TS Hatasını Çözen Kısım: Supabase veri tipini dizi veya obje olarak güvenli okuma
-  const branchData = profile.branches as unknown as { name: string } | { name: string }[];
-  const branchName = Array.isArray(branchData)
-    ? branchData[0]?.name
-    : branchData?.name || "GLOBAL / MERKEZ";
-
+  const branchId: string | null = profile.branch_id ?? null;
   const isDeveloper = profile.role === "Developer" || profile.role === "Admin";
-  if (!branchId && !isDeveloper) {
-    redirect("/management/unauthorized");
-  }
+  if (!branchId && !isDeveloper) redirect("/management/unauthorized");
+
+  const branchData = profile.branches as unknown as { name: string } | { name: string }[] | null;
+  const branchName = (Array.isArray(branchData) ? branchData[0]?.name : branchData?.name) || "TÜM ŞUBELER";
+
+  // Aynı terminal kapsamı: şubeli oturum yalnızca kendi deposunu, şubesiz global hesap tümünü görür.
+  let employeesQuery = supabase.from("employees")
+    .select("id, full_name, birthday, birthday_month_day, employment_date")
+    .eq("is_active", true)
+    .order("full_name", { ascending: true });
+  if (branchId && branchId !== "GLOBAL") employeesQuery = employeesQuery.eq("branch_id", branchId);
+  const { data: employees, error: employeesError } = await employeesQuery;
+
+  const today = getIstanbulToday();
+  const personnel = (employees || []) as EmployeeCelebrationSource[];
+  const events = getUpcomingEmployeeEvents(personnel, today, 90);
+  const upcomingBirthdays = events.filter(event => event.kind === "birthday").length;
+  const upcomingAnniversaries = events.filter(event => event.kind === "anniversary").length;
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500 pb-10">
-      {/* 1. ENDÜSTRİYEL DARK HEADING */}
-      <div className="bg-[#0F172B] border-l-4 border-[#dc3545] p-5 rounded-sm shadow-md flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-widest mb-1">
-            İNSAN KAYNAKLARI & OPERASYON
-          </span>
-          <h1 className="text-xl font-black text-white tracking-widest uppercase">
-            MESAİ YÖNETİM MERKEZİ
-          </h1>
-        </div>
+    <main className="space-y-4 pb-12">
+      <section className="overflow-hidden rounded-[5px] border border-slate-200 bg-white shadow-sm">
+        <div className="h-1 w-full bg-[#dc3545]" />
+        <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.08fr)]">
+          <div className="flex flex-col justify-between gap-5 p-5 sm:p-6">
+            <div>
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-[5px] bg-red-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[#b91c1c]">
+                  <Fingerprint size={13} /> İNSAN KAYNAKLARI · CANLI OPERASYON
+                </span>
+                <span className="rounded-[5px] border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold text-slate-600">{branchName}</span>
+              </div>
+              <h1 className="text-[24px] font-extrabold tracking-tight text-slate-900 sm:text-[28px]">Mesai Yönetim Merkezi</h1>
+              <p className="mt-2 max-w-[520px] text-[13px] leading-6 text-slate-600">
+                Günlük giriş ve çıkışları, aylık çalışma sürelerini ve personel hareketlerini tek ekrandan takip edin.
+                Terminalde <strong className="font-semibold text-slate-800">5 haneli personel ID</strong> ile mesai işlemi yapılır.
+              </p>
+              <div className="mt-4 flex flex-wrap items-center gap-2.5">
+                <span className="inline-flex items-center gap-1.5 rounded-[5px] border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700"><UsersRound size={14} className="text-[#dc3545]" /> {personnel.length} aktif personel</span>
+                <span className="inline-flex items-center gap-1.5 rounded-[5px] border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700"><Clock3 size={14} className="text-[#dc3545]" /> Türkiye saati (UTC+3)</span>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Link href="/management/hr/insights" className="inline-flex items-center gap-2 rounded-[5px] bg-[#dc3545] px-3.5 py-2.5 text-[11px] font-bold text-white transition-colors hover:bg-[#b91c1c]">
+                Personel 360 & Analiz <ArrowUpRight size={14} />
+              </Link>
+              <Link href="/management/hr/reports" className="inline-flex items-center gap-2 rounded-[5px] border border-slate-200 px-3.5 py-2.5 text-[11px] font-bold text-slate-700 transition-colors hover:bg-slate-50">
+                Mesai Raporları <ArrowUpRight size={14} />
+              </Link>
+            </div>
+          </div>
 
-        {/* Aktif Şube Göstergesi */}
-        <div className="flex flex-col md:items-end bg-[#1E293B] px-4 py-2 rounded-sm border border-slate-700 shadow-inner">
-          <span className="block text-[9px] text-slate-400 uppercase tracking-widest mb-1 font-bold">
-            AKTİF TERMİNAL
-          </span>
-          <span className="inline-flex items-center gap-2 text-[#dc3545] font-black text-sm tracking-widest uppercase">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-sm bg-[#dc3545] opacity-75"></span>
-              <span className="relative inline-flex rounded-sm h-2.5 w-2.5 bg-[#dc3545]"></span>
-            </span>
-            {branchName}
-          </span>
+          <section aria-label="Yaklaşan doğum günleri ve iş yıl dönümleri" className="border-t border-slate-200 bg-slate-50/80 p-5 sm:p-6 lg:border-l lg:border-t-0">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#dc3545]">PERSONEL TAKVİMİ</span>
+                <h2 className="mt-1 text-[17px] font-extrabold text-slate-900">Yaklaşan Özel Günler</h2>
+                <p className="mt-1 text-[11px] text-slate-500">Önümüzdeki 90 gün · Doğum günleri ve işe giriş yıl dönümleri</p>
+              </div>
+              <div className="flex gap-2">
+                <span title="Yaklaşan doğum günleri" className="inline-flex items-center gap-1 rounded-[5px] border border-red-100 bg-white px-2 py-1.5 text-[11px] font-bold text-[#b91c1c]"><Cake size={14} /> {upcomingBirthdays}</span>
+                <span title="Yaklaşan iş yıl dönümleri" className="inline-flex items-center gap-1 rounded-[5px] border border-amber-100 bg-white px-2 py-1.5 text-[11px] font-bold text-amber-700"><Award size={14} /> {upcomingAnniversaries}</span>
+              </div>
+            </div>
+            {employeesError ? (
+              <p className="mt-4 rounded-[5px] border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">Personel takvimi şu an getirilemiyor. Mesai terminali kullanılabilir.</p>
+            ) : events.length === 0 ? (
+              <div className="mt-4 flex items-center gap-3 rounded-[5px] border border-dashed border-slate-300 bg-white px-4 py-5 text-xs text-slate-500">
+                <CalendarDays size={18} /> Önümüzdeki 90 gün için kayıtlı özel gün bulunmuyor.
+              </div>
+            ) : (
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {events.slice(0, 6).map(event => (
+                  <div key={`${event.employeeId}-${event.kind}`} className="flex min-w-0 items-center gap-2.5 rounded-[5px] border border-slate-200 bg-white px-3 py-2.5">
+                    <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-[5px] ${event.kind === "birthday" ? "bg-red-50 text-[#dc3545]" : "bg-amber-50 text-amber-700"}`}>
+                      {event.kind === "birthday" ? <Cake size={16} /> : <Award size={16} />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div title={event.fullName} className="truncate text-[11px] font-bold text-slate-800">{event.fullName}</div>
+                      <div className="mt-0.5 truncate text-[10px] text-slate-500">
+                        {formatEventDate(event.date)} · {event.kind === "birthday" ? "Doğum günü" : `${event.years}. iş yıl dönümü`}
+                      </div>
+                    </div>
+                    <span className={`shrink-0 text-[9px] font-extrabold tabular-nums ${event.daysUntil <= 7 ? "text-[#dc3545]" : "text-slate-500"}`}>{countdown(event.daysUntil)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!employeesError && events.length > 6 && <p className="mt-2 text-right text-[10px] text-slate-500">+{events.length - 6} diğer özel gün</p>}
+          </section>
         </div>
-      </div>
+      </section>
 
-      {/* 2. DEVELOPER UYARISI */}
       {!branchId && isDeveloper && (
-        <div className="bg-amber-50 border-2 border-amber-500 text-amber-800 px-5 py-3 rounded-sm flex items-center gap-3 shadow-sm">
-          <AlertCircle className="w-5 h-5 text-amber-600" strokeWidth={2.5} />
-          <span className="text-xs font-bold uppercase tracking-wider">
-            <strong className="text-amber-900 mr-1">DEVELOPER MODU:</strong>
-            Global yetkiyle bağlısınız. Terminal girişleri tüm şubeleri etkiler.
-          </span>
+        <div className="flex items-start gap-2.5 rounded-[5px] border border-amber-200 bg-amber-50 px-4 py-2.5 text-[11px] font-semibold text-amber-800">
+          <AlertCircle size={16} className="mt-0.5 shrink-0" />
+          Developer / Admin genel görünümündesiniz. Mesai terminalinden işlem yaparken personel ve şube eşleşmesini kontrol edin.
         </div>
       )}
 
-      <Link href="/management/hr/insights" className="flex flex-col justify-between gap-3 rounded-[5px] border border-red-200 bg-red-50 p-5 transition hover:border-[#dc3545] sm:flex-row sm:items-center">
-        <div>
-          <span className="text-[10px] font-bold uppercase tracking-widest text-[#dc3545]">YENİ · PERSONEL 360</span>
-          <h2 className="mt-1 text-lg font-bold text-slate-900">İK Analiz, Raporlama ve Personel Dosyaları</h2>
-          <p className="mt-1 text-sm text-slate-600">Mesai, izin, bağlı hesaplar ve operasyon hareketleri tek ekranda.</p>
-        </div>
-        <span className="shrink-0 rounded-[5px] bg-[#dc3545] px-4 py-2 text-xs font-bold text-white">PANELİ AÇ →</span>
-      </Link>
-
-      {/* 3. İK BİLGİ VE KURAL KARTI (Yeni Dinamik QR Konsepti) */}
-      <div className="bg-white border border-slate-300 rounded-sm shadow-sm relative overflow-hidden flex flex-col md:flex-row min-h-[280px]">
-        {/* Arka Plan Görseli (Kare formata uygun, sağ tarafa hizalı ve degrade maskeli) */}
-        <div className="absolute top-0 py-2 right-0 w-full md:w-[450px] lg:w-[500px] h-full z-0 flex items-center justify-end pointer-events-none">
-          <img
-            src="https://img.magnific.com/free-vector/qr-code-inside-smartphone-computer-laptop-woman-man-vector-design_24877-62885.jpg?t=st=1789457421~exp=1789461021~hmac=8fa5c3f25ca73ad541ea673edfb297057e458c33da7df16db82303a273e81f5a&w=1480"
-            alt="Dynamic QR Vector"
-            className="w-full h-full object-contain md:object-cover md:object-center mix-blend-multiply opacity-15 md:opacity-100 z-0"
-          />
-        </div>
-
-        {/* Sol İçerik (Hoşgeldiniz ve Kurallar) */}
-        <div className="p-6 md:p-8 z-20 flex-1 max-w-3xl flex flex-col justify-center">
-          <h2 className="text-2xl font-black text-[#0F172B] tracking-widest uppercase mb-2">
-            YENİ DİNAMİK QR MESAİ SİSTEMİ
-          </h2>
-          <p className="text-sm font-bold text-slate-500 mb-6 tracking-wide leading-relaxed">
-            Sistem güvenliğini artırmak amacıyla personel giriş/çıkışları artık kişisel mobil cihazlardan, <strong className="text-[#dc3545]">15 saniyede bir yenilenen Dinamik QR kod</strong> ile yapılmaktadır. Cihaz zimmetleme aktif edilmiştir.
-          </p>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Kural 1 */}
-            <div className="bg-slate-50/95 backdrop-blur-sm border border-slate-200 p-4 rounded-sm shadow-sm">
-              <div className="flex items-center gap-2 mb-2">
-                <QrCode className="w-4 h-4 text-[#dc3545]" strokeWidth={2.5} />
-                <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-widest">
-                  Cihaz Zimmeti & Ekran Görüntüsü
-                </h3>
-              </div>
-              <p className="text-[11px] font-semibold text-slate-600 leading-relaxed">
-                Her personel yalnızca kendi eşleştirilmiş mobil cihazından işlem yapabilir. Ekran görüntüsü ile giriş denemeleri <strong className="text-[#0F172B]">zaman damgası uyuşmazlığı</strong> nedeniyle reddedilir.
-              </p>
-            </div>
-
-            {/* Kural 2 */}
-            <div className="bg-slate-50/95 backdrop-blur-sm border border-slate-200 p-4 rounded-sm shadow-sm border-l-2 border-l-amber-500">
-              <div className="flex items-center gap-2 mb-2">
-                <ShieldAlert
-                  className="w-4 h-4 text-amber-600"
-                  strokeWidth={2.5}
-                />
-                <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-widest">
-                  Sistem Hataları & Raporlama
-                </h3>
-              </div>
-              <p className="text-[11px] font-semibold text-slate-600 leading-relaxed">
-                QR sisteminin senkronizasyonunda nadiren gecikme veya hatalı okutmalar yaşanabilir. Bu tarz durumlarda panik yapmadan <strong className="text-amber-700">Geliştiriciye</strong> anında bilgi verilmelidir.
-              </p>
-            </div>
-
-            {/* Kural 3 */}
-            <div className="bg-slate-50/95 backdrop-blur-sm border border-slate-200 p-4 rounded-sm shadow-sm md:col-span-2">
-              <div className="flex items-center gap-2 mb-2">
-                <Clock
-                  className="w-4 h-4 text-[#dc3545]"
-                  strokeWidth={2.5}
-                />
-                <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-widest">
-                  15 Dakika Kuralı & Manuel İşlemler
-                </h3>
-              </div>
-              <p className="text-[11px] font-semibold text-slate-600 leading-relaxed">
-                Vardiya başlama saatinden <strong className="text-[#dc3545]">15 dakika sonrasına</strong> kadar QR okutmayan personel geç kalmış sayılır. Olası şarj/cihaz problemlerinde manuel giriş düzeltmeleri sadece Yönetici yetkisi ile kalıcı log bırakılarak yapılabilir.
-              </p>
-            </div>
-          </div>
-        </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-[5px] border border-slate-200 bg-white px-4 py-2.5 text-[11px] text-slate-600">
+        <span className="font-bold text-slate-800">Terminal kullanımı</span>
+        <span><strong>1.</strong> Giriş veya çıkış seçin</span>
+        <span><strong>2.</strong> 5 haneli ID girin</span>
+        <span><strong>3.</strong> İşlemi onaylayın</span>
+        <span className="ml-auto text-slate-500">Kayıtlar canlı mesai tablosuna yansır.</span>
       </div>
 
-      {/* 4. OPERASYONEL IZGARA (Terminal ve Tablo) */}
-      <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 items-start">
-        
-        {/* SOL: Barkod Terminali (Sticky) - 4 sütunun 1'ini alır (%25) */}
-        <div className="xl:col-span-1 xl:sticky xl:top-6">
-          <BarcodeScanner branchId={branchId || null} branchName={branchName} />
-        </div>
-
-        {/* SAĞ: Canlı Mesai Tablosu - 4 sütunun 3'ünü alır (%75) */}
-        <div className="xl:col-span-3">
+      <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[310px_minmax(0,1fr)]">
+        <aside className="min-w-0 xl:sticky xl:top-6 xl:self-start">
+          <BarcodeScanner branchId={branchId} branchName={branchName} />
+        </aside>
+        <div className="min-w-0">
           <AttendanceTable branchId={branchId} isDeveloper={isDeveloper} />
         </div>
       </div>
-    </div>
+    </main>
   );
 }
