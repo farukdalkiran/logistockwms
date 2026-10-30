@@ -138,14 +138,13 @@ export async function getCargoPerformance(startDate: string, endDate: string): P
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) throw new Error("Geçersiz tarih aralığı.");
     if ((endMs - startMs) / DAY_MS > 366) throw new Error("En fazla 367 günlük aralık seçebilirsiniz.");
     const admin = await getAuthorizedAdmin();
-    const all = await fetchAll(admin);
+    // Tarih filtresini sorguya uygula: önce bütün geçmişi indirip tarama.
     const begin = `${startDate}T00:00:00+03:00`;
     const afterEnd = new Date(endMs + DAY_MS).toISOString().slice(0, 10) + "T00:00:00+03:00";
-    // Date scoping in Istanbul local time (rather than UTC midnight).
-    const filtered = all.filter((r) => r.created_at >= new Date(begin).toISOString() && r.created_at < new Date(afterEnd).toISOString());
-    const globalBase = counts(all);
+    const filtered = await fetchAll(admin, new Date(begin).toISOString(), new Date(afterEnd).toISOString());
+    const globalBase = counts(filtered);
     const today = dayISO(new Date());
-    const global = { ...globalBase, today: latest(all.filter((r) => dayISO(new Date(r.created_at)) === today)).length };
+    const global = { ...globalBase, today: latest(filtered.filter((r) => dayISO(new Date(r.created_at)) === today)).length };
     const base = counts(filtered);
     const current = latest(filtered);
     const dates = new Map<string, { rows: Row[]; earliest: number; latest: number }>();
