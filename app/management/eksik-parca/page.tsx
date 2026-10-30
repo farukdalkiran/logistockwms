@@ -82,21 +82,6 @@ const quickLinks = [
     labelColor: "text-orange-700",
     numberColor: "text-orange-100",
   },
-  {
-    title: "Gönderim Performansı",
-    description:
-      "İşlem yoğunluğunu, gönderim istatistiklerini ve operasyon performansını analiz edin.",
-    href: "eksik-parca/performance",
-    icon: BarChart3,
-    number: "04",
-    category: "VERİ ANALİZİ",
-    primary: "#8b5cf6",
-    secondary: "#ec4899",
-    iconBg: "bg-violet-600",
-    surface: "bg-violet-50/60",
-    labelColor: "text-violet-700",
-    numberColor: "text-violet-100",
-  },
 ];
 
 const features = [
@@ -417,7 +402,7 @@ export default function EksikParcaHomePage() {
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
             {quickLinks.map((item) => {
               const Icon = item.icon;
 
