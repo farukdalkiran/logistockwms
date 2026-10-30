@@ -125,7 +125,7 @@ export async function getNoticeCenterSnapshot(): Promise<Result<{
     if (!ctx.isDeveloper) {
       const ownTickets = await ctx.db.from("wms_support_tickets")
         .select("id,last_message_at").eq("created_by", ctx.id).is("archived_at", null)
-        .not("last_message_at", "is", null).limit(100);
+        .not("last_message_at", "is", "null").limit(100);
       if (ownTickets.error) throw ownTickets.error;
       const ids = (ownTickets.data || []).map(t => t.id);
       if (ids.length) {
