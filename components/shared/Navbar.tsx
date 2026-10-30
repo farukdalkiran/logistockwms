@@ -241,7 +241,7 @@ export const Navbar = () => {
                 className={`relative flex items-center gap-1.5 rounded px-2 py-1.5 transition-colors hover:bg-slate-800/80 ${isDeveloper && ticketCount > 0 ? "bg-red-600/15 text-red-300 animate-pulse" : "text-slate-400 hover:text-white"}`}>
                 <MessageCircleQuestionMark size={16} />
                 <span className="hidden text-[10px] font-bold uppercase tracking-wider md:inline">{isDeveloper ? "Destek Talepleri" : "Destek"}</span>
-                {isDeveloper && ticketCount > 0 && (
+                {ticketCount > 0 && (
                   <span className="inline-flex min-w-[17px] items-center justify-center rounded-full bg-[#dc3545] px-1 py-0.5 text-[9px] font-black leading-none text-white">{ticketCount > 99 ? "99+" : ticketCount}</span>
                 )}
               </button>

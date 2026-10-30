@@ -29,6 +29,10 @@ export type WmsAnnouncement = {
   body: string;
   image_url: string | null;
   target_branch_id: string | null;
+  target_branch_ids?: string[] | null;
+  expires_at?: string | null;
+  deleted_at?: string | null;
+  revision?: number;
   is_active: boolean;
   published_at: string;
   created_at: string;
@@ -79,11 +83,10 @@ export async function getNoticeCenterSnapshot(): Promise<Result<{
     const ctx = await actor();
     const now = new Date().toISOString();
     let query = ctx.db.from("wms_announcements")
-      .select("id,title,body,image_url,target_branch_id,is_active,published_at,created_at")
-      .order("published_at", { ascending: false }).limit(30);
+      .select("id,title,body,image_url,target_branch_id,target_branch_ids,expires_at,deleted_at,revision,is_active,published_at,created_at")
+      .order("published_at", { ascending: false }).limit(100);
     if (!ctx.isDeveloper) {
-      query = query.eq("is_active", true).lte("published_at", now)
-        .or(`target_branch_id.is.null,target_branch_id.eq.${ctx.branchId ?? "00000000-0000-0000-0000-000000000000"}`);
+      query = query.eq("is_active", true).lte("published_at", now).is("deleted_at", null);
     }
     const { data: announcements, error } = await query;
     if (error) throw new Error("Duyurular yüklenemedi.");
@@ -91,29 +94,59 @@ export async function getNoticeCenterSnapshot(): Promise<Result<{
       ? await ctx.db.from("branches").select("id,name").order("name")
       : { data: [] as { id: string; name: string }[], error: null };
     if (branchesResult.error) throw new Error("Şubeler alınamadı.");
-    const current = ((announcements ?? []) as WmsAnnouncement[])
-      .filter(a => a.is_active && new Date(a.published_at).getTime() <= Date.now());
+    const isTargeted = (a: WmsAnnouncement) => a.target_branch_ids
+      ? Boolean(ctx.branchId && a.target_branch_ids.includes(ctx.branchId))
+      : (!a.target_branch_id || a.target_branch_id === ctx.branchId);
+    const visible = ((announcements ?? []) as WmsAnnouncement[]).filter(a =>
+      ctx.isDeveloper || (
+        !a.deleted_at && a.is_active && Date.parse(a.published_at) <= Date.now() &&
+        (!a.expires_at || Date.parse(a.expires_at) > Date.now()) && isTargeted(a)
+      )
+    );
+    const current = visible.filter(a =>
+      !a.deleted_at && a.is_active && Date.parse(a.published_at) <= Date.now() &&
+      (!a.expires_at || Date.parse(a.expires_at) > Date.now()) && isTargeted(a)
+    );
     const ids = current.map(a => a.id);
     const [readResult, ticketsResult] = await Promise.all([
       ids.length
         ? ctx.db.from("wms_announcement_reads")
-          .select("announcement_id").eq("user_id", ctx.id).in("announcement_id", ids)
+          .select("announcement_id,revision").eq("user_id", ctx.id).in("announcement_id", ids)
         : Promise.resolve({ data: [], error: null }),
       ctx.isDeveloper
         ? ctx.db.from("wms_support_tickets").select("id", { count: "exact", head: true })
-          .neq("status", "COMPLETED")
+          .neq("status", "COMPLETED").is("archived_at", null)
         : Promise.resolve({ count: 0, error: null }),
     ]);
     if (readResult.error || ticketsResult.error) throw new Error("Bildirim sayacı yüklenemedi.");
-    const seen = new Set((readResult.data ?? []).map(r => r.announcement_id));
+    const versions = new Map((readResult.data ?? []).map(r => [r.announcement_id, r.revision]));
+    // Personel için yalnızca okunmamış destek yanıtlarının sayısı. Genel yenileme sıklığı değişmez.
+    let supportIndicator = ticketsResult.count ?? 0;
+    if (!ctx.isDeveloper) {
+      const ownTickets = await ctx.db.from("wms_support_tickets")
+        .select("id,last_message_at").eq("created_by", ctx.id).is("archived_at", null)
+        .not("last_message_at", "is", "null").limit(100);
+      if (ownTickets.error) throw ownTickets.error;
+      const ids = (ownTickets.data || []).map(t => t.id);
+      if (ids.length) {
+        const views = await ctx.db.from("wms_support_ticket_views")
+          .select("ticket_id,last_read_at").eq("user_id", ctx.id).in("ticket_id", ids);
+        if (views.error) throw views.error;
+        const lastRead = new Map((views.data || []).map(v => [v.ticket_id, v.last_read_at]));
+        supportIndicator = (ownTickets.data || []).filter(t =>
+          t.last_message_at && (!lastRead.get(t.id) ||
+          Date.parse(t.last_message_at) > Date.parse(lastRead.get(t.id)!))
+        ).length;
+      }
+    }
     return {
       ok: true,
       data: {
         developer: ctx.isDeveloper,
-        announcements: (announcements ?? []) as WmsAnnouncement[],
+        announcements: visible,
         branches: (branchesResult.data ?? []) as { id: string; name: string }[],
-        unreadIds: ids.filter(id => !seen.has(id)),
-        openTicketCount: ticketsResult.count ?? 0,
+        unreadIds: current.filter(a => versions.get(a.id) !== (a.revision ?? 1)).map(a => a.id),
+        openTicketCount: supportIndicator,
       },
     };
   } catch (error) {
@@ -125,17 +158,22 @@ export async function acknowledgeWmsAnnouncement(id: string): Promise<Result<tru
   try {
     if (!isUuid(id)) throw new Error("Geçersiz duyuru.");
     const ctx = await actor();
-    const { data } = await ctx.db.from("wms_announcements").select("id")
-      .eq("id", id).eq("is_active", true)
-      .lte("published_at", new Date().toISOString()).maybeSingle();
-    if (data) {
-      const { data: target } = await ctx.db.from("wms_announcements").select("target_branch_id").eq("id", id).single();
-      if (target?.target_branch_id && target.target_branch_id !== ctx.branchId) throw new Error("Bu duyuru şubenize ait değil.");
+    const { data, error } = await ctx.db.from("wms_announcements")
+      .select("revision,deleted_at,is_active,published_at,expires_at,target_branch_id,target_branch_ids")
+      .eq("id", id).maybeSingle();
+    if (error || !data || data.deleted_at || !data.is_active ||
+      Date.parse(data.published_at) > Date.now() ||
+      (data.expires_at && Date.parse(data.expires_at) <= Date.now())) {
+      throw new Error("Duyuru yayında değil.");
     }
-    if (!data) throw new Error("Duyuru yayında değil.");
-    const { error } = await ctx.db.from("wms_announcement_reads")
-      .upsert({ announcement_id: id, user_id: ctx.id }, { onConflict: "announcement_id,user_id", ignoreDuplicates: true });
-    if (error) throw new Error("Okundu bilgisi kaydedilemedi.");
+    const allowed = data.target_branch_ids
+      ? Boolean(ctx.branchId && data.target_branch_ids.includes(ctx.branchId))
+      : (!data.target_branch_id || ctx.branchId === data.target_branch_id);
+    if (!allowed) throw new Error("Bu duyuru şubenize ait değil.");
+    const { error: saveError } = await ctx.db.from("wms_announcement_reads")
+      .upsert({ announcement_id: id, user_id: ctx.id, revision: data.revision, read_at: new Date().toISOString() },
+        { onConflict: "announcement_id,user_id" });
+    if (saveError) throw new Error("Okundu bilgisi kaydedilemedi.");
     return { ok: true, data: true };
   } catch (error) { return { ok: false, error: message(error) }; }
 }
