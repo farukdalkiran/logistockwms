@@ -58,8 +58,8 @@ export async function getLeaveActor() {
 
 export async function getLeaveDashboard(yearInput?: number, branchInput?: string): Promise<LeaveDashboardData> {
   const actor = await getLeaveActor();
-  const year = Number.isInteger(yearInput) && yearInput! >= 2024 && yearInput! <= 2100
-    ? yearInput! : Number(new Intl.DateTimeFormat("en-US", {
+  const year = typeof yearInput === "number" && Number.isInteger(yearInput) && yearInput >= 2024 && yearInput <= 2100
+    ? yearInput : Number(new Intl.DateTimeFormat("en-US", {
       timeZone: "Europe/Istanbul", year: "numeric",
     }).format(new Date()));
   const branchId = actor.isGlobal
