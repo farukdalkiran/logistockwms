@@ -58,7 +58,9 @@ function getWorkbookChanges(rows:Record<string,unknown>[], employees:LeaveEmploy
   const issues:string[]=[];
   rows.forEach((row,index)=>{
     const line=index+2;
-    const id=clean(row["PERSONEL ID"]);
+    const rawId=row["PERSONEL ID"];
+    const id=typeof rawId==="number" && Number.isInteger(rawId)
+      ? String(rawId).padStart(5,"0") : clean(rawId);
     if(!id && !clean(row["PERSONEL ADI SOYADI"])) return;
     if(!/^\d{5}$/.test(id)) {issues.push(`Satır ${line}: PERSONEL ID tam 5 haneli olmalı.`);return;}
     if(seen.has(id)){issues.push(`Satır ${line}: ${id} birden fazla kez kullanılmış.`);return;}
@@ -76,7 +78,7 @@ function getWorkbookChanges(rows:Record<string,unknown>[], employees:LeaveEmploy
     const rawDate=row["İŞE GİRİŞ TARİHİ"];
     const date=parseHireDate(rawDate);
     if(clean(rawDate) && !date){issues.push(`Satır ${line}: İşe giriş tarihi geçersiz.`);return;}
-    if((employee.leave_balance??0)!==amount || (date && date!==employee.employment_date)){
+    if(employee.leave_balance!==amount || (date && date!==employee.employment_date)){
       changes.push({employee,newBalance:amount,newDate:date});
     }
   });
@@ -96,8 +98,8 @@ export default function LeaveManagementPanel({data}:{data:LeaveDashboardData}){
   const [updating,setUpdating]=useState(false);
   const [error,setError]=useState("");
   const [success,setSuccess]=useState("");
-  const [manual,setManual]=useState<string>("");
-  const [manualDate,setManualDate]=useState<string>("");
+  const [manual,setManual]=useState<string>(String(data.employees[0]?.leave_balance??""));
+  const [manualDate,setManualDate]=useState<string>(data.employees[0]?.employment_date||"");
   const [manualReason,setManualReason]=useState("");
   const [manualBusy,setManualBusy]=useState(false);
 
