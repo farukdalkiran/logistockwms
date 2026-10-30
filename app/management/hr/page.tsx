@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import BarcodeScanner from "@/app/management/hr/_components/BarcodeScanner";
 import AttendanceTable from "@/app/management/hr/_components/AttendanceTable";
 import { AlertCircle, Clock, ShieldAlert, QrCode } from "lucide-react";
@@ -50,7 +51,10 @@ export default async function HRManagementPage() {
     ? branchData[0]?.name
     : branchData?.name || "GLOBAL / MERKEZ";
 
-  const isDeveloper = profile.role === "Developer";
+  const isDeveloper = profile.role === "Developer" || profile.role === "Admin";
+  if (!branchId && !isDeveloper) {
+    redirect("/management/unauthorized");
+  }
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-10">
@@ -90,6 +94,15 @@ export default async function HRManagementPage() {
           </span>
         </div>
       )}
+
+      <Link href="/management/hr/insights" className="flex flex-col justify-between gap-3 rounded-[5px] border border-red-200 bg-red-50 p-5 transition hover:border-[#dc3545] sm:flex-row sm:items-center">
+        <div>
+          <span className="text-[10px] font-bold uppercase tracking-widest text-[#dc3545]">YENİ · PERSONEL 360</span>
+          <h2 className="mt-1 text-lg font-bold text-slate-900">İK Analiz, Raporlama ve Personel Dosyaları</h2>
+          <p className="mt-1 text-sm text-slate-600">Mesai, izin, bağlı hesaplar ve operasyon hareketleri tek ekranda.</p>
+        </div>
+        <span className="shrink-0 rounded-[5px] bg-[#dc3545] px-4 py-2 text-xs font-bold text-white">PANELİ AÇ →</span>
+      </Link>
 
       {/* 3. İK BİLGİ VE KURAL KARTI (Yeni Dinamik QR Konsepti) */}
       <div className="bg-white border border-slate-300 rounded-sm shadow-sm relative overflow-hidden flex flex-col md:flex-row min-h-[280px]">

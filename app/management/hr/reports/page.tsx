@@ -42,7 +42,7 @@ export default function HRReportsPage() {
     new Date().getFullYear(),
   );
   const [selectedDate, setSelectedDate] = useState<string>(
-    new Date().toISOString().split("T")[0],
+    new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Istanbul", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()),
   );
 
   // Kişi Bazlı 30 Günlük Döküm Filtresi
@@ -94,7 +94,8 @@ export default function HRReportsPage() {
         if (error || !prof) throw new Error("Profil bilgisi alınamadı.");
 
         const _isGlobal =
-          prof.role === "Developer" || prof.role === "Admin" || !prof.branch_id;
+          prof.role === "Developer" || prof.role === "Admin";
+        if (!_isGlobal && !prof.branch_id) throw new Error("Şube atamanız bulunmuyor.");
         setIsGlobal(_isGlobal);
 
         // TS Hatasını Çözen Kısım: Supabase veri tipini dizi veya obje olarak güvenli okuma
@@ -144,19 +145,12 @@ export default function HRReportsPage() {
 
       // MOD 1: AYLIK KİŞİ BAZLI LİSTELEME
       if (activeTab === "MONTHLY") {
-        const startDate = new Date(selectedYear, selectedMonth, 1);
-        const endDate = new Date(
-          selectedYear,
-          selectedMonth + 1,
-          0,
-          23,
-          59,
-          59,
-        );
+        const startDate = new Date(Date.UTC(selectedYear, selectedMonth, 1, -3));
+        const endDate = new Date(Date.UTC(selectedYear, selectedMonth + 1, 1, -3));
 
         query = query
           .gte("check_in_time", startDate.toISOString())
-          .lte("check_in_time", endDate.toISOString())
+          .lt("check_in_time", endDate.toISOString())
           .order("check_in_time", { ascending: true });
 
         const { data: records, error } = await query;
@@ -215,14 +209,13 @@ export default function HRReportsPage() {
       }
       // MOD 2: GÜNLÜK TÜM ŞUBE LİSTELEME
       else {
-        const dStart = new Date(selectedDate);
-        dStart.setHours(0, 0, 0, 0);
-        const dEnd = new Date(selectedDate);
-        dEnd.setHours(23, 59, 59, 999);
+        const [yr, mo, day] = selectedDate.split("-").map(Number);
+        const dStart = new Date(Date.UTC(yr, mo - 1, day, -3));
+        const dEnd = new Date(Date.UTC(yr, mo - 1, day + 1, -3));
 
         query = query
           .gte("check_in_time", dStart.toISOString())
-          .lte("check_in_time", dEnd.toISOString())
+          .lt("check_in_time", dEnd.toISOString())
           .order("check_in_time", { ascending: false });
 
         const { data: records, error } = await query;

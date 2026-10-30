@@ -111,7 +111,7 @@ export default function CreateEmployeeClient({
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm(`ID: ${id} numaralı personeli silmek istediğinize emin misiniz?`)) return;
+    if (!confirm(`ID: ${id} numaralı personel pasife alınacak. Geçmiş mesai/izin kayıtları korunacaktır. Onaylıyor musunuz?`)) return;
 
     try {
       await deleteEmployee(id);
@@ -560,7 +560,7 @@ export default function CreateEmployeeClient({
 
                     <td className="px-6 py-3">
                       <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border uppercase tracking-wider ${
-                        emp.position_title.includes("Supervisor") || emp.position_title.includes("Yönetici")
+                        (emp.position_title || "").includes("Supervisor") || emp.position_title.includes("Yönetici")
                           ? "bg-blue-50 text-blue-700 border-blue-200"
                           : emp.position_title.includes("Depo")
                             ? "bg-amber-50 text-amber-700 border-amber-200"
@@ -586,7 +586,7 @@ export default function CreateEmployeeClient({
                           onClick={() => handleDelete(emp.id)}
                           className="text-[10px] font-black px-4 py-1.5 bg-red-50 text-red-600 border border-red-100 rounded-md hover:bg-red-600 hover:text-white transition-colors uppercase tracking-widest"
                         >
-                          SİL
+                          PASİFE AL
                         </button>
                       </div>
                     </td>

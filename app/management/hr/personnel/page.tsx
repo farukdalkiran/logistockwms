@@ -23,7 +23,8 @@ export default async function PersonnelPage() {
   if (!profile) redirect('/login');
 
   const managerBranchId = profile.branch_id;
-  const isGlobal = profile.role === 'Developer' || profile.role === 'Admin' || !profile.branch_id;
+  if (!managerBranchId && profile.role !== 'Developer' && profile.role !== 'Admin') redirect('/management/unauthorized');
+  const isGlobal = profile.role === 'Developer' || profile.role === 'Admin';
   
   // Developer kontrolü (Client bileşenine gönderilecek)
   const isDeveloper = profile.role === 'Developer';
@@ -116,10 +117,18 @@ export default async function PersonnelPage() {
         </div>
       </div>
 
+      <a href="/management/hr/insights" className="mb-5 inline-flex rounded-[5px] border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-[#dc3545] hover:bg-red-100">Personel 360 ve detaylı İK raporlarını aç →</a>
+
       {/* 3. İstemci bileşenine güvenli verileri ve DEV yetkisini besle */}
       <CreateEmployeeClient 
         branches={branches || []} 
-        initialEmployees={employees || []} 
+        initialEmployees={(employees || []).map(emp => ({
+          ...emp,
+          branch_id: emp.branch_id || "",
+          position_title: emp.position_title || "",
+          is_active: Boolean(emp.is_active),
+          branches: Array.isArray(emp.branches) ? emp.branches[0] : emp.branches,
+        }))} 
         isDeveloper={isDeveloper}
       />
     </div>

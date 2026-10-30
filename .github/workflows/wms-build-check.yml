@@ -31,6 +31,8 @@ jobs:
         run: node --experimental-strip-types --test tests/multinet.test.mjs
       - name: Aras CSV reason regression
         run: node --experimental-strip-types --test tests/cargo-export.test.mjs
+      - name: HR leave import regression
+        run: node --experimental-strip-types --test tests/hr-leave-management.test.mjs
       - name: TypeScript
         run: npx tsc --noEmit
       - name: Next.js build
