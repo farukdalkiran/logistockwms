@@ -214,8 +214,10 @@ async function eligibleAnnouncements(ctx: Awaited<ReturnType<typeof actor>>) {
   );
 }
 
+export type AnnouncementMetric = { target: number; seen: number; percent: number };
 export async function getAdvancedAnnouncements(): Promise<Result<{
   announcements: Announcement[]; branches: Branch[]; developer: boolean; unreadIds: string[];
+  metrics: Record<string, AnnouncementMetric>;
 }>> {
   try {
     const ctx = await actor();
@@ -234,9 +236,36 @@ export async function getAdvancedAnnouncements(): Promise<Result<{
       : { data: [], error: null };
     if (result.error) throw result.error;
     const readMap = new Map((result.data || []).map(r => [r.announcement_id, r.revision]));
+    const metrics: Record<string, AnnouncementMetric> = {};
+    if (ctx.developer && announcements.length) {
+      // Tek seferde okuma geçmişi + hesaplar. Her duyuru için ayrı sorgu açma.
+      const [peopleResult, allReadsResult] = await Promise.all([
+        ctx.db.from("profiles").select("id,branch_id").limit(2500),
+        ctx.db.from("wms_announcement_reads").select("announcement_id,user_id,revision")
+          .in("announcement_id", announcements.map(a => a.id)).limit(10000),
+      ]);
+      if (peopleResult.error || allReadsResult.error) throw new Error("Duyuru okunma sayaçları yüklenemedi.");
+      const people = peopleResult.data || [];
+      const readsByAnnouncement = new Map<string, Set<string>>();
+      for (const a of announcements) readsByAnnouncement.set(a.id, new Set<string>());
+      for (const read of (allReadsResult.data || [])) {
+        const a = announcements.find(item => item.id === read.announcement_id);
+        if (a && a.revision === read.revision) readsByAnnouncement.get(a.id)?.add(read.user_id);
+      }
+      for (const a of announcements) {
+        const targeted = people.filter(p => isTargeted(a, p.branch_id));
+        const readSet = readsByAnnouncement.get(a.id)!;
+        const seen = targeted.filter(p => readSet.has(p.id)).length;
+        metrics[a.id] = {
+          target: targeted.length, seen,
+          percent: targeted.length ? Math.round(seen / targeted.length * 100) : 0,
+        };
+      }
+    }
     return { ok: true, data: {
       announcements, branches: (branchResult.data || []) as Branch[], developer: ctx.developer,
       unreadIds: announcements.filter(a => ids.includes(a.id) && readMap.get(a.id) !== a.revision).map(a => a.id),
+      metrics,
     } };
   } catch (e) { return { ok: false, error: errorMessage(e) }; }
 }

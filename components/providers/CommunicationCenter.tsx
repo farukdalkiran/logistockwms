@@ -240,6 +240,7 @@ function AnnouncementView({onChanged}:{onChanged:()=>void}) {
   const [branches,setBranches]=useState<Branch[]>([]);
   const [developer,setDeveloper]=useState(false);
   const [unread,setUnread]=useState<string[]>([]);
+  const [metrics,setMetrics]=useState<Record<string,{target:number;seen:number;percent:number}>>({});
   const [search,setSearch]=useState("");
   const [viewFilter,setViewFilter]=useState("ALL");
   const [editing,setEditing]=useState<Announcement|null>(null);
@@ -261,7 +262,7 @@ function AnnouncementView({onChanged}:{onChanged:()=>void}) {
     const result=await getAdvancedAnnouncements();setLoading(false);
     if(!result.ok){setError(result.error);return;}
     setAnnouncements(result.data.announcements);setDeveloper(result.data.developer);
-    setUnread(result.data.unreadIds);setBranches(result.data.branches);
+    setUnread(result.data.unreadIds);setBranches(result.data.branches);setMetrics(result.data.metrics);
   },[]);
   useEffect(()=>{void refresh();},[refresh]);
   const clearComposer=()=>{setEditing(null);setCompose(false);setTitle("");setBody("");setTargets([]);
@@ -389,6 +390,15 @@ function AnnouncementView({onChanged}:{onChanged:()=>void}) {
           </div>
           <h4 className="break-words text-base font-bold text-slate-900">{a.title}</h4>
           <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-700">{a.body}</p>
+          {developer&&metrics[a.id]&&<div className="rounded-[5px] border border-emerald-200 bg-emerald-50/50 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <span className="font-semibold text-emerald-900">Okunma durumu</span>
+              <span className="font-bold tabular-nums text-emerald-900">{metrics[a.id].seen} / {metrics[a.id].target} hesap · %{metrics[a.id].percent}</span>
+            </div>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-emerald-100">
+              <div className="h-full rounded-full bg-emerald-600" style={{width:metrics[a.id].percent+"%"}}/>
+            </div>
+          </div>}
           <div className="space-y-1 text-xs text-slate-600">
             <p><strong>Hedef:</strong> {branchLabel(a)}</p>
             <p><strong>Yayın:</strong> {fmt(a.published_at)} · <strong>Bitiş:</strong> {fmt(a.expires_at)}</p>
