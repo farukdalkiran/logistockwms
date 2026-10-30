@@ -90,7 +90,7 @@ async function pages<T>(
 
 export async function getHRIntelligenceData(monthValue?: string, branchValue?: string): Promise<HRIntelligence> {
   const actor = await getHRActor();
-  const { candidate, begin, end, firstDay, lastDay } = parseMonth(monthValue);
+  const { candidate, begin, end } = parseMonth(monthValue);
   const selectedBranch = actor.isGlobal
     ? (branchValue && branchValue !== "ALL" ? assertHRBranch(actor, branchValue) : null)
     : actor.branchId;
@@ -110,7 +110,7 @@ export async function getHRIntelligenceData(monthValue?: string, branchValue?: s
   const branches = (branchesResult.data || []) as { id: string; name: string }[];
   const employeeIds = employeeRows.map((e: any) => String(e.id));
   if (!employeeIds.length) {
-    return { month: candidate, selectedBranch, ownBranchId: actor.branchId, isGlobal: actor.isGlobal, canManage: true,
+    return { month: candidate, selectedBranch, ownBranchId: actor.branchId, isGlobal: actor.isGlobal, canManage: actor.canManage,
       branches, employees: [], attendance: [], leaves: [], corrections: [], operations: [], cargoSessions: [], truncated };
   }
 
@@ -159,6 +159,6 @@ export async function getHRIntelligenceData(monthValue?: string, branchValue?: s
     created_at: e.created_at, account: accountMap.get(e.id) || null,
   }));
   return { month: candidate, selectedBranch, ownBranchId: actor.branchId,
-    isGlobal: actor.isGlobal, canManage: true, branches, employees,
+    isGlobal: actor.isGlobal, canManage: actor.canManage, branches, employees,
     attendance, leaves, corrections, operations, cargoSessions, truncated };
 }
