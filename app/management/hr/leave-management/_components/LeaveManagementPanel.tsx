@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   AlertTriangle, ArrowRight, CalendarDays, CheckCircle2, Clock3, Download,
   FileSpreadsheet, History, Search, ShieldCheck, UploadCloud, UserRound, Users, X,
@@ -53,6 +54,16 @@ export default function LeaveManagementPanel({data}:{data:LeaveDashboardData}){
   const low=active.filter(e=>(e.leave_balance??0)>=0&&(e.leave_balance??0)<=3);
   const annual=data.leaves.filter(l=>l.leave_type==="YILLIK_IZIN"&&l.status==="APPROVED");
   const pending=data.leaves.filter(l=>l.status==="PENDING");
+  const monthlyUsage=Array.from({length:12},(_,i)=>{
+    const month=String(i+1).padStart(2,"0");
+    const approvedInMonth=annual.filter(l=>l.start_date.slice(5,7)===month);
+    return {month: ["Oca","Şub","Mar","Nis","May","Haz","Tem","Ağu","Eyl","Eki","Kas","Ara"][i],
+      days:Number(approvedInMonth.reduce((total,l)=>total+l.requested_days,0).toFixed(2))};
+  });
+  const byType=Object.entries(data.leaves.filter(l=>l.status==="APPROVED")
+    .reduce((map,l)=>{ const key=requestLabel(l.leave_type);
+      map[key]=(map[key]||0)+l.requested_days;return map;},{} as Record<string,number>))
+    .sort((a,b)=>b[1]-a[1]);
   const used=annual.reduce((a,l)=>a+l.requested_days,0);
   const total=active.reduce((a,e)=>a+Number(e.leave_balance??0),0);
   const shown=data.employees.filter(e=>{
@@ -191,6 +202,35 @@ export default function LeaveManagementPanel({data}:{data:LeaveDashboardData}){
       <Statistic title="Kritik bakiye" value={low.length} description="0 ile 3 gün arası" icon={Clock3}/>
       <Statistic title="Kullanılan yıllık izin" value={fmt(used)+" gün"} description={data.year+" başlangıç tarihli onaylı"} icon={CheckCircle2}/>
       <Statistic title="Onay bekleyen" value={pending.length} description="Seçili yılın talepleri" icon={History}/>
+    </div>
+
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+      <div className={card+" p-4"}>
+        <h2 className="mb-3 text-sm font-bold text-slate-900">Aylara göre onaylı yıllık izin kullanımı · {data.year}</h2>
+        <div className="h-52">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={monthlyUsage} margin={{top:6,right:6,left:-20,bottom:0}}>
+              <CartesianGrid vertical={false} strokeDasharray="3 3"/>
+              <XAxis dataKey="month" tick={{fontSize:10}}/>
+              <YAxis tick={{fontSize:10}} allowDecimals={false}/>
+              <Tooltip formatter={v=>[fmt(Number(v??0))+" gün","Yıllık izin"]}/>
+              <Bar dataKey="days" fill="#dc3545" radius={[3,3,0,0]} maxBarSize={28}/>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+      <div className={card+" p-4"}>
+        <h2 className="mb-3 text-sm font-bold text-slate-900">İzin türlerine göre onaylanan günler</h2>
+        <div className="space-y-3">
+          {byType.length ? byType.slice(0,6).map(([type,days])=><div key={type} className="space-y-1">
+            <div className="flex justify-between gap-2 text-xs"><span className="text-slate-700">{type}</span><strong className="text-slate-900">{fmt(days)} gün</strong></div>
+            <div className="h-2 overflow-hidden rounded-[5px] bg-slate-100">
+              <div className="h-full rounded-[5px] bg-[#dc3545]" style={{width:((days/(byType[0]?.[1]||1))*100)+"%"}}/>
+            </div>
+          </div>):<p className="py-12 text-center text-xs text-slate-500">Bu yılda onaylı izin bulunmuyor.</p>}
+        </div>
+        <p className="mt-3 text-xs text-slate-500">Bu grafik izin türlerini gösterir; rapor ve ücretsiz izin günleri yıllık izin bakiyesinden ayrıca düşülmez.</p>
+      </div>
     </div>
 
     <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
