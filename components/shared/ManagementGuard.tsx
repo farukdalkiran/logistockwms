@@ -20,6 +20,7 @@ const ROUTE_PERMISSIONS = [
   { path: "/management/hr/personnel", module: "hr_personnel", exact: false },
   { path: "/management/hr/logs", module: "hr_logs", exact: false },
   { path: "/management/hr/reports", module: "hr_reports", exact: false },
+  { path: "/management/hr/insights", module: "hr_reports", exact: false },
   { path: "/management/hr/leave-management", module: "hr_leave_management", exact: false },
   { path: "/management/hr", module: "hr_tracking", exact: true },
   { path: "/management/cargo", module: "cargo", exact: false },
