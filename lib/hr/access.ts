@@ -4,7 +4,7 @@ import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 
 const FULL_ACCESS_ROLES = new Set(["Developer", "Admin"]);
-const VIEW_PERMISSIONS = new Set(["hr_tracking", "hr_reports", "hr_personnel", "hr_leave_management", "hr_logs"]);
+const VIEW_PERMISSIONS = new Set(["hr_reports", "hr_personnel", "hr_leave_management"]);
 const MANAGE_PERMISSIONS = new Set(["hr_personnel"]);
 
 export async function getHRActor(manage = false) {
@@ -32,6 +32,7 @@ export async function getHRActor(manage = false) {
   const branchId: string | null = profile.branch_id;
   if (!isGlobal && !branchId) throw new Error("İşlem için şube ataması gerekiyor.");
 
+  let canManage = isGlobal || role === "HR";
   if (!isGlobal) {
     const { data: assignedRole, error: roleError } = await db
       .from("roles").select("permissions").eq("role_code", role).maybeSingle();
@@ -42,13 +43,14 @@ export async function getHRActor(manage = false) {
       : typeof rawPermissions === "string"
         ? rawPermissions.replace(/[{}"]/g, "").split(",").map(v => v.trim())
         : [];
+    canManage = role === "HR" || permissions.some(permission => MANAGE_PERMISSIONS.has(permission));
     const allowed = manage ? MANAGE_PERMISSIONS : VIEW_PERMISSIONS;
     if (role !== "HR" && !permissions.some(permission => allowed.has(permission))) {
       throw new Error("İnsan kaynakları yönetim yetkiniz bulunmuyor.");
     }
   }
 
-  return { db, userId: user.id, role, branchId, isGlobal, isDeveloper: role === "Developer" };
+  return { db, userId: user.id, role, branchId, isGlobal, canManage, isDeveloper: role === "Developer" };
 }
 
 export function assertHRBranch(
