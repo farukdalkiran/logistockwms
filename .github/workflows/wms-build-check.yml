@@ -29,6 +29,8 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Multinet calculations
         run: node --experimental-strip-types --test tests/multinet.test.mjs
+      - name: Aras CSV reason regression
+        run: node --experimental-strip-types --test tests/cargo-export.test.mjs
       - name: TypeScript
         run: npx tsc --noEmit
       - name: Next.js build

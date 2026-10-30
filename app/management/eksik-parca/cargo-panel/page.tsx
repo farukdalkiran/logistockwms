@@ -541,7 +541,7 @@ export default function ArasTrackingPanel({
       if (mode === "short") {
         downloadCsv(
           `ARAS_CIKTI_${target}_${stamp}.csv`,
-          ["Delivery Number", "Aras Takip No"],
+          ["Delivery Number", "Takip Numarası / Eksik Bilgi Nedeni"],
           data.map((row) =>
             Array.isArray(row)
               ? [row[0], row[1]]
@@ -603,110 +603,46 @@ export default function ArasTrackingPanel({
   };
 
   return (
-    <main className="mx-auto w-full min-w-0 max-w-[1400px] space-y-4 overflow-x-hidden bg-slate-50 px-3 py-3 text-slate-900 sm:px-5 sm:py-5 lg:px-7">
-      {/* HEAD - koyu, sade, köşeli. Yeni font yok. */}
-      <header className="rounded-[5px] border border-slate-900 bg-slate-900 p-4 text-white sm:p-6">
-        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
-          <div className="flex items-start gap-3">
-            <div className="rounded-[4px] border border-rose-400/50 bg-rose-600 p-2.5">
-              <Package className="h-6 w-6" />
-            </div>
-            <div>
-              <div className="mb-1 text-[11px] font-bold uppercase tracking-[.14em] text-rose-300">
-                WMS / B2C KARGO MODÜLÜ
-              </div>
-              <h1 className="text-xl font-bold leading-tight sm:text-2xl">
-                Eksik Parça · Aras Operasyon Paneli
-              </h1>
-              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-300">
-                Barkod eşleştirme, alıcı bilgileri, adres kontrolü ve işlem
-                kaydı tek çalışma alanında.
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-2 rounded-[4px] border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-200">
-              <ShieldCheck className="h-4 w-4 text-emerald-400" /> Yetkili işlem
-              • {employeeId}
-            </span>
-            <button
-              type="button"
-              className={`${BTN} border-slate-600 bg-slate-800 text-white hover:bg-slate-700`}
-              onClick={() => {
-                void loadFiles();
-                void loadStats(selectedFileId);
-              }}
-            >
-              <RefreshCcw className="h-4 w-4" /> Yenile
-            </button>
-          </div>
+    <main className="mx-auto w-full min-w-0 max-w-[1600px] space-y-4 overflow-x-hidden bg-slate-50 px-3 py-3 text-slate-900 sm:px-5 sm:py-5 lg:px-7">
+      <header className="flex flex-wrap items-center justify-between gap-3 rounded-[5px] border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">WMS / Eksik Parça</p>
+          <h1 className="mt-0.5 text-lg font-bold text-slate-900 sm:text-xl">Kargo İşleme Formu</h1>
+          <p className="mt-1 text-xs text-slate-500">Delivery Number ara, alıcıyı doğrula, sonucu kaydet.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-[4px] bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600">Personel: {employeeId}</span>
+          <button type="button" onClick={() => { void loadFiles(); void loadStats(selectedFileId); }} className={BTN_OUTLINE}>
+            <RefreshCcw className="h-4 w-4" /> Yenile
+          </button>
         </div>
       </header>
 
-      {/* KPI */}
-      <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        {[
-          {
-            label: "Toplam gönderi",
-            value: stats.total,
-            icon: Package,
-            accent: "border-l-slate-700",
-            color: "text-slate-700",
-          },
-          {
-            label: "İşlenen",
-            value: stats.processed,
-            icon: PackageCheck,
-            accent: "border-l-emerald-500",
-            color: "text-emerald-600",
-          },
-          {
-            label: "Kalan",
-            value: remaining,
-            icon: PackageOpen,
-            accent: "border-l-amber-500",
-            color: "text-amber-600",
-          },
-          {
-            label: "Bugün işlenen",
-            value: stats.today,
-            icon: Truck,
-            accent: "border-l-blue-500",
-            color: "text-blue-600",
-          },
-        ].map((item) => (
-          <div
-            key={item.label}
-            className={`${CARD} min-w-0 border-l-4 ${item.accent} p-3 sm:p-4`}
-          >
-            <div className="mb-2 flex items-center justify-between gap-1 text-xs font-semibold text-slate-500">
-              <span>{item.label}</span>
-              <item.icon className={`h-4 w-4 ${item.color}`} />
+      <section className={`${CARD} p-3 sm:px-4`}>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+          {[
+            ["Toplam gönderi", stats.total],
+            ["İşlenen", stats.processed],
+            ["Kalan", remaining],
+            ["Bugün işlenen", stats.today],
+          ].map(([label, value]) => (
+            <div key={label} className="min-w-0">
+              <p className="text-[11px] font-medium text-slate-500">{label}</p>
+              <p className="mt-0.5 text-lg font-bold tabular-nums text-slate-900">{Number(value).toLocaleString("tr-TR")}</p>
             </div>
-            <div className="text-xl font-bold tabular-nums sm:text-3xl">
-              {item.value.toLocaleString("tr-TR")}
-            </div>
+          ))}
+        </div>
+        <div className="mt-3 flex items-center gap-3 border-t border-slate-100 pt-3">
+          <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full bg-emerald-500" style={{ width: `${percentage}%` }} />
           </div>
-        ))}
-      </section>
-
-      <section className={`${CARD} p-4`}>
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-          <span>Profil işlem ilerlemesi</span>
-          <span className="font-bold text-slate-700">
-            %{percentage} tamamlandı
-          </span>
-        </div>
-        <div className="h-2 overflow-hidden rounded-[3px] bg-slate-100">
-          <div
-            className="h-full bg-emerald-500 transition-all"
-            style={{ width: `${percentage}%` }}
-          />
+          <span className="shrink-0 text-xs font-semibold tabular-nums text-slate-600">%{percentage} tamamlandı</span>
         </div>
       </section>
 
-      {/* Ana operasyon: her ekranda dikey akış. İşlem bölümü altta. */}
-      <section className="flex min-w-0 flex-col gap-4">
+      {/* Masaüstünde sorgu/alıcı solda, işlem formu sağda. */}
+      <section className="grid min-w-0 grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(370px,.85fr)]">
+        <div className="min-w-0 space-y-4">
         <div className={CARD}>
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-100 px-3 py-3 sm:px-4">
             <h2 className="flex items-center gap-2 text-sm font-bold">
@@ -747,7 +683,6 @@ export default function ArasTrackingPanel({
                 <Barcode className="pointer-events-none absolute left-3 top-3 h-5 w-5 text-slate-400" />
                 <input
                   ref={inputRef}
-                  autoFocus
                   value={deliveryNo}
                   onChange={(e) => setDeliveryNo(e.target.value)}
                   onKeyDown={(e) => {
@@ -807,7 +742,7 @@ export default function ArasTrackingPanel({
             )}
           </div>
           {!group ? (
-            <div className="flex min-h-[265px] flex-col items-center justify-center gap-3 p-6 text-center">
+            <div className="flex min-h-[160px] flex-col items-center justify-center gap-3 p-6 text-center">
               <div className="rounded-[5px] bg-slate-100 p-4">
                 <ScanLine className="h-9 w-9 text-slate-400" />
               </div>
@@ -819,7 +754,7 @@ export default function ArasTrackingPanel({
             </div>
           ) : (
             <div className="space-y-4 p-3 sm:p-4">
-              <div className="grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="grid min-w-0 gap-2 sm:grid-cols-2">
                 <InfoBox
                   title="Müşteri"
                   value={group.primary.customer_name || "—"}
@@ -939,52 +874,41 @@ export default function ArasTrackingPanel({
           )}
         </div>
 
+        </div>
+        <div className="min-w-0 xl:sticky xl:top-4">
         <div className={`${CARD} min-w-0 overflow-hidden`}>
-          <div className="border-b border-slate-200 bg-slate-900 px-4 py-3 text-white">
+          <div className="border-b border-slate-200 bg-slate-50 px-4 py-3 text-slate-900">
             <h2 className="flex items-center gap-2 text-sm font-bold">
-              <Clipboard className="h-4 w-4 text-rose-400" /> 03 · İşlem Durumu
+              <Clipboard className="h-4 w-4 text-rose-600" /> 03 · İşlem Durumu
               ve Kayıt
             </h2>
-            <p className="mt-1 text-xs text-slate-300">
+            <p className="mt-1 text-xs text-slate-500">
               İşlem tipine göre gereken alanlar otomatik belirlenir.
             </p>
           </div>
           <div className="space-y-4 p-3 sm:p-5">
-            <div>
-              <label className={LABEL} htmlFor="aras-status">
-                İşlem türü
-              </label>
-              <div className="relative mt-1.5">
-                <select
-                  id="aras-status"
-                  value={type}
-                  disabled={!group || saving}
-                  onChange={(e) =>
-                    chooseType(e.target.value as CargoProcessType)
-                  }
-                  className={`${INPUT} appearance-none pr-9`}
-                >
-                  <option value="success">Başarılı kargo gönderimi</option>
-                  <option value="missing">
-                    Eksik / hatalı adres veya iletişim bilgisi
-                  </option>
-                  <option value="returned">İade / gönderilemedi</option>
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-3 top-3.5 h-4 w-4 text-slate-400" />
+            <fieldset disabled={!group || saving}>
+              <legend className={LABEL}>İşlem sonucu</legend>
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                {([
+                  { value: "success", label: "Gönderildi" },
+                  { value: "missing", label: "Eksik bilgi" },
+                  { value: "returned", label: "İade" },
+                ] as const).map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    aria-pressed={type === item.value}
+                    onClick={() => chooseType(item.value)}
+                    className={`min-h-11 rounded-[4px] border px-2 py-2 text-xs font-bold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-500 ${type === item.value
+                      ? "border-rose-600 bg-rose-50 text-rose-800"
+                      : "border-slate-200 bg-white text-slate-600 hover:border-slate-400"}`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
               </div>
-            </div>
-            <label className="flex cursor-pointer items-center gap-2 rounded-[4px] border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-semibold text-slate-700">
-              <input
-                type="checkbox"
-                checked={type === "missing"}
-                disabled={!group || saving}
-                onChange={(e) =>
-                  chooseType(e.target.checked ? "missing" : "success")
-                }
-                className="h-4 w-4 accent-rose-600"
-              />
-              <span>Eksik adres / iletişim bilgisi var</span>
-            </label>
+            </fieldset>
             <div
               className={`flex items-start gap-3 rounded-[4px] border p-3 ${type === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : type === "missing" ? "border-amber-200 bg-amber-50 text-amber-900" : "border-rose-200 bg-rose-50 text-rose-900"}`}
             >
@@ -1114,6 +1038,7 @@ export default function ArasTrackingPanel({
             </p>
           </div>
         </div>
+        </div>
       </section>
 
       {/* DISA AKTARMA */}
@@ -1128,7 +1053,7 @@ export default function ArasTrackingPanel({
               <span className="font-semibold text-slate-800">
                 {selectedFileName}
               </span>
-              . Mevcut dışa aktarma action'ları korunur.
+              . İkinci sütunda takip numarası; eksik bilgi veya iade varsa kayıtlı gerekçe bulunur.
             </p>
           </div>
           <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:w-auto">
@@ -1143,7 +1068,7 @@ export default function ArasTrackingPanel({
               ) : (
                 <Download className="h-4 w-4" />
               )}{" "}
-              2 Sütun CSV
+              2 Sütun: Takip / Sebep
             </button>
             <button
               type="button"
