@@ -4,7 +4,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Navbar } from "@/components/shared/Navbar";
-import { WmsPageHeader, WmsBadge } from "@/components/ui/wms";
 import { Footer } from "@/components/shared/Footer";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { getDashboardDataServer } from "@/app/actions/dashboard";
@@ -157,7 +156,7 @@ export default function ManagementDashboard() {
 
   if (isAuthLoading || (loading && !data)) {
     return (
-      <div className="min-h-screen flex flex-col bg-slate-50 overflow-x-hidden">
+      <div className="min-h-screen flex flex-col bg-slate-50 font-['Quicksand'] overflow-x-hidden">
         <Navbar />
         <main className="flex-1 w-full flex flex-col items-center justify-center min-h-[80vh] p-4">
           <div className="flex flex-col items-center justify-center animate-in fade-in duration-500">
@@ -182,33 +181,83 @@ export default function ManagementDashboard() {
   const hasPending = pendingTotal > 0;
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-800 selection:bg-[#dc3545] selection:text-white overflow-x-hidden">
+    <div className="min-h-screen flex flex-col bg-slate-50 font-['Quicksand'] text-slate-800 selection:bg-[#dc3545] selection:text-white overflow-x-hidden">
       <Navbar />
 
       <main className="flex-1 w-full max-w-[1400px] mx-auto px-4 md:px-6 lg:px-8 py-6 flex flex-col gap-6 overflow-hidden pb-16">
         
-        {/* Tek tip açık tema sayfa başlığı ve operasyon bilgisi */}
-        <WmsPageHeader
-          eyebrow="LogiStock WMS / Operasyon"
-          title="Operasyon Merkezi"
-          description="Tüm şube, depo ve personel operasyonlarının merkezi görünümü."
-          actions={
-            <div className="flex flex-wrap items-center gap-3">
-              <WmsBadge tone={isGlobal ? "info" : "success"}>{isGlobal ? "Global erişim" : (profileSafe?.branch_name || "Şube erişimi")}</WmsBadge>
-              <span className="text-xs font-semibold text-slate-500">Sistem yükü %{data?.systemLoad || 0}</span>
-              <span className="text-sm font-bold tabular-nums text-slate-700">{new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}</span>
-              <button
-                type="button"
-                onClick={() => fetchData(true)}
-                disabled={isRefreshing}
-                title="Verileri yenile"
-                className="inline-flex min-h-10 items-center gap-2 rounded-[5px] border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              >
-                <RefreshCw size={16} className={isRefreshing ? "animate-spin" : ""} /> Yenile
-              </button>
+        {/* =========================================
+            ÜST BLOK: HERO HEADER (YENİLENMİŞ ENDÜSTRİYEL TASARIM)
+            ========================================= */}
+        <div className="w-full bg-[#0b1120] border border-slate-800 border-l-[6px] border-l-[#dc3545] rounded-lg shadow-xl relative overflow-hidden flex flex-col md:flex-row justify-between">
+          {/* Background Grid Pattern */}
+          <div className="absolute inset-0 opacity-20 bg-[linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] [background-size:20px_20px] pointer-events-none z-0"></div>
+
+          {/* Sol Taraf: Karşılama ve Bilgi */}
+          <div className="relative z-10 p-5 sm:p-6 md:p-8 flex flex-col gap-4 flex-1">
+            <div className="flex flex-wrap items-center gap-2 mb-1">
+              <span className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded shadow-sm tracking-wider font-mono">
+                <div className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-sm bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-sm h-2 w-2 bg-emerald-500"></span>
+                </div>
+                {isGlobal ? "MASTER YETKİ" : "LOKAL BAĞLANTI"}
+              </span>
+              <span className="flex items-center gap-1.5 bg-slate-800 border border-slate-700 text-slate-300 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded shadow-sm tracking-wider font-mono">
+                <Building2 size={14} className={isGlobal ? "text-blue-400" : "text-amber-400"} />
+                {isGlobal ? "MERKEZ KOMUTA" : profileSafe?.branch_name || "ŞUBE ATANMADI"}
+              </span>
             </div>
-          }
-        />
+
+            <div className="flex flex-col">
+              <h1 className="text-2xl sm:text-3xl md:text-4xl font-black text-white tracking-tight uppercase leading-tight">
+                LogiStock <span className="text-[#dc3545]">WMS</span>
+              </h1>
+              <p className="text-slate-400 text-xs sm:text-sm font-medium mt-2 max-w-2xl leading-relaxed border-l-2 border-slate-700 pl-3">
+                Tüm şube, depo ve personel operasyonlarını gerçek zamanlı yönetebileceğiniz, sıfır hata toleranslı merkezi kontrol paneli.
+              </p>
+            </div>
+          </div>
+
+          {/* Sağ Taraf: Metrikler ve Aksiyon */}
+          <div className="relative z-10 bg-slate-900/60 border-t md:border-t-0 md:border-l border-slate-800 p-5 sm:p-6 flex flex-row items-center justify-between md:flex-col md:justify-center gap-5 min-w-[280px]">
+            <div className="flex flex-col w-full gap-5">
+              
+              {/* Sistem Yükü */}
+              <div className="flex flex-col gap-2 w-full">
+                <div className="flex items-center justify-between text-[10px] sm:text-xs font-bold text-slate-400 tracking-wider font-mono">
+                  <span className="flex items-center gap-1.5"><Database size={14} className="text-[#dc3545]"/> DB Doluluk Yükü</span>
+                  <span className="text-white">%{data?.systemLoad || 0}</span>
+                </div>
+                <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden border border-slate-700">
+                  <div 
+                    className="bg-[#dc3545] h-full transition-all duration-700 ease-out" 
+                    style={{ width: `${data?.systemLoad || 0}%` }}
+                  ></div>
+                </div>
+              </div>
+
+              {/* Sistem Saati ve Yenileme */}
+              <div className="flex items-center justify-between mt-1">
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-slate-500 font-bold tracking-wider uppercase font-mono">Sistem Saati</span>
+                  <span className="text-xl sm:text-2xl font-black text-emerald-400 font-mono tracking-tight">
+                    {new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </div>
+                <button
+                  onClick={() => fetchData(true)}
+                  disabled={isRefreshing}
+                  title="Verileri Şimdi Yenile"
+                  className="p-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-md text-slate-300 transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
+                >
+                  <RefreshCw size={18} className={isRefreshing ? "animate-spin text-[#dc3545]" : ""} />
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </div>
 
         {/* Uyarı Paneli (Mobil uyumlu hale getirildi) */}
         {hasPending && (

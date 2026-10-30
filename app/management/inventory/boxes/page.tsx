@@ -12,7 +12,7 @@ export default function BoxesPage() {
   };
 
   return (
-    <div className="wms-page">
+    <div className="flex flex-col min-h-screen gap-6 bg-slate-50 p-4 md:p-6 lg:p-8">
       {/* Üst Kısım: İstatistikler ve Aksiyon Butonları */}
       <BoxesDashboard onUpdate={handleUpdate} />
 

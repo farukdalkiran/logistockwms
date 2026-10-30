@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { WmsPageHeader } from "@/components/ui/wms";
 import { supabase } from "@/lib/supabase";
 import { Info, Plus, LayoutGrid, Package, ShieldAlert, AlertTriangle, Edit2, Trash2, Building2, Check, X, PackagePlus, Archive } from "lucide-react";
 import toast from "react-hot-toast";
@@ -136,20 +135,69 @@ export default function ShelvesDashboard({ selectedBranchId, setSelectedBranchId
       <div className="bg-white border border-slate-300 shadow-sm flex flex-col">
         
 {/* A. Depo Seçimi, Görsel Banner ve Detaylı Bilgi Paneli */}
-        <WmsPageHeader
-          eyebrow="Envanter / Lokasyon"
-          title="Raf Yönetimi"
-          description="Fiziksel raf adreslerini yönetin, bloke ve hasarlı lokasyonları izleyin."
-          actions={
-            <label className="block min-w-[210px]">
-              <span className="wms-field-label">İşlem yapılan tesis</span>
-              <select value={selectedBranchId} onChange={(e) => setSelectedBranchId(e.target.value)} className="wms-field">
-                {branches.length === 0 ? <option value="">Tesis bulunamadı</option> :
-                  branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+        <div className="relative w-full min-h-[220px] flex flex-col lg:flex-row justify-between p-6 md:p-8 bg-slate-900 border-b-2 border-slate-400 overflow-hidden gap-8 rounded-sm mb-6">
+          
+          {/* Arka Plan Görseli ve Endüstriyel Karartma */}
+          <img 
+            src="https://img.magnific.com/free-photo/spacious-warehouse-with-rows-shelves-forklift_84443-74085.jpg?t=st=1779108507~exp=1779112107~hmac=834c43fbd471b0766ff07fba31ef7c5cc6527409831e16ab7112e2dc4f5c9ac6&w=1480"
+            alt="Warehouse Operations"
+            className="absolute inset-0 w-full h-full object-cover opacity-30 mix-blend-luminosity"
+          />
+          <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-900/90 to-transparent"></div>
+          
+          {/* Sol Alan: Başlık ve Sistem Bilgi Kartı */}
+          <div className="relative z-10 flex flex-col gap-6 w-full lg:max-w-2xl justify-center">
+            <div className="flex items-center gap-4">
+              <div className="p-3.5 bg-[#dc3545] border border-red-400/50 rounded-sm shadow-[0_0_20px_rgba(220,53,69,0.3)]">
+                <Building2 className="w-7 h-7 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tight">Raf Yönetimi</h1>
+                <p className="text-[#dc3545] text-xs font-bold uppercase tracking-widest mt-1">Fiziksel Lokasyon & Hiyerarşi Yönetimi</p>
+              </div>
+            </div>
+
+            {/* Endüstriyel Info Kartı */}
+            <div className="bg-slate-800/80 backdrop-blur-md border border-slate-700 border-l-4 border-l-[#dc3545] p-4 md:p-5 rounded-sm flex gap-4 items-start shadow-inner">
+              <Info className="w-5 h-5 text-slate-400 shrink-0 mt-0.5" />
+              <div className="flex flex-col gap-1.5">
+                <h4 className="text-slate-200 text-xs font-bold uppercase tracking-widest">Sistem Bilgilendirmesi</h4>
+                <p className="text-slate-400 text-xs font-semibold leading-relaxed">
+                  Bu panel, tesisin fiziksel haritasını (koridor, ünite, raf) dijitalleştirir. Buradaki kayıtlar ve sıralamalar, el terminalindeki <strong className="text-slate-200">Smart Picking (Akıllı Toplama)</strong> rotasını doğrudan belirler. Yanlış adresleme operasyonel hız kaybına yol açar.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Sağ Alan: Vurgulu Tesis Seçim Paneli */}
+          <div className="relative z-10 w-full lg:w-80 flex flex-col justify-center">
+            <div className="bg-slate-800/90 backdrop-blur-md border border-slate-600 p-5 rounded-sm shadow-2xl">
+              <div className="flex items-center justify-between mb-3 border-b border-slate-700 pb-3">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sistem Bağlantısı</label>
+                <span className="flex items-center gap-2 text-[10px] font-black text-green-400 uppercase tracking-widest">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+                  </span>
+                  Aktif
+                </span>
+              </div>
+              
+              <label className="text-[11px] font-bold text-white uppercase tracking-widest mb-2 block">İşlem Yapılan Tesis</label>
+              <select 
+                value={selectedBranchId}
+                onChange={(e) => setSelectedBranchId(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-500 text-white font-bold text-sm p-3.5 rounded-sm outline-none focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] cursor-pointer transition-all shadow-inner"
+              >
+                {branches.length === 0 ? (
+                  <option value="">Tesis Bulunamadı</option>
+                ) : (
+                  branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)
+                )}
               </select>
-            </label>
-          }
-        />
+            </div>
+          </div>
+        </div>
 
         {/* B. Sıkıştırılmış İstatistik Şeridi */}
         <div className="bg-slate-50 border-b border-slate-300 p-3 flex flex-wrap lg:flex-nowrap items-center justify-between gap-4">
