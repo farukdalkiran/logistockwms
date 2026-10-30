@@ -84,7 +84,7 @@ export async function getAdvancedSupportOverview(includeArchived = false): Promi
     let query = ctx.db.from("wms_support_tickets").select("*")
       .order("updated_at", { ascending: false }).limit(200);
     if (!ctx.developer) query = query.eq("created_by", ctx.id);
-    if (!includeArchived) query = query.is("archived_at", null);
+    query = includeArchived ? query.not("archived_at", "is", "null") : query.is("archived_at", null);
     const [ticketsResult, branchesResult, contactsResult] = await Promise.all([
       query,
       ctx.db.from("branches").select("id,name").order("name").limit(200),
