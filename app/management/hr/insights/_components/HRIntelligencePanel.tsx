@@ -288,7 +288,7 @@ export default function HRIntelligencePanel({ initial }: { initial: HRIntelligen
                   <CartesianGrid strokeDasharray="3 3" vertical={false}/>
                   <XAxis dataKey="date" tick={{fontSize:10}}/>
                   <YAxis tick={{fontSize:10}}/>
-                  <Tooltip formatter={(v) => [hours(toNumber(v)) + " saat", "Fiili mesai"]}/>
+                  <Tooltip formatter={(v) => [hours(Number(v ?? 0)) + " saat", "Fiili mesai"]}/>
                   <Bar dataKey="hours" fill="#dc3545" radius={[3,3,0,0]} maxBarSize={22}/>
                 </BarChart>
               </ResponsiveContainer>
