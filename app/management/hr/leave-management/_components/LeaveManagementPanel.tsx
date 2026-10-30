@@ -9,36 +9,12 @@ import {
 } from "lucide-react";
 import type { LeaveDashboardData, LeaveEmployee } from "@/lib/hr/leave-management";
 import { applyLeaveBalanceChanges, type LeaveBalanceChange } from "@/app/actions/hr-leave-management";
+import { previewLeaveImport, parseLeaveAmount, type LeaveSheetChange } from "@/lib/hr/leave-import";
 
 const card = "rounded-[5px] border border-slate-200 bg-white shadow-sm";
 const field = "w-full rounded-[5px] border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#dc3545]";
 const fmt = (n:number) => n.toLocaleString("tr-TR",{maximumFractionDigits:2});
 const trDate = (date:string|null) => date ? date.split("-").reverse().join(".") : "-";
-const clean = (v:unknown) => String(v??"").trim();
-const formatStamp = (date:string) => new Date(date).toLocaleString("tr-TR",{timeZone:"Europe/Istanbul"});
-const requestLabel = (type:string) => ({
-  YILLIK_IZIN:"Yıllık izin", SAGLIK_RAPORU:"Sağlık raporu", MAZERET:"Mazeret",
-  UCRETSİZ:"Ücretsiz izin", EVLILIK:"Evlilik izni", DIGER:"Diğer",
-} as Record<string,string>)[type] || type.replace(/_/g," ");
-const parseAmount = (v:unknown) => {
-  if (v===null||v===undefined||clean(v)==="") return NaN;
-  const text=typeof v==="number" ? String(v) : clean(v).replace(",",".");
-  return Number(text);
-};
-const parseHireDate = (v:unknown):string|null => {
-  if(v===null || v===undefined || clean(v)==="") return null;
-  if(typeof v==="number"){
-    const dt=new Date(Math.round((v-25569)*86400000));
-    return isNaN(dt.getTime())?null:dt.toISOString().slice(0,10);
-  }
-  const s=clean(v);
-  const m=s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
-  const out=m ? `${m[3]}-${m[2]}-${m[1]}` : s;
-  if(!/^\d{4}-\d{2}-\d{2}$/.test(out)) return null;
-  const dt=new Date(out+"T12:00:00Z");
-  return !Number.isFinite(dt.getTime()) || dt.toISOString().slice(0,10)!==out ? null : out;
-};
-
 function Statistic({title,value,description,icon:Icon}:{title:string;value:string|number;description:string;icon:typeof Users}) {
   return <div className={card+" p-4"}>
     <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold text-slate-500">{title}<Icon className="h-4 w-4 text-[#dc3545]"/></div>
@@ -49,41 +25,7 @@ function Statistic({title,value,description,icon:Icon}:{title:string;value:strin
 function StatusTag({ok,children}:{ok:boolean;children:React.ReactNode}) {
   return <span className={`inline-block rounded-[5px] border px-2 py-1 text-xs font-bold ${ok?"border-emerald-200 bg-emerald-50 text-emerald-700":"border-amber-200 bg-amber-50 text-amber-700"}`}>{children}</span>;
 }
-type Parsed = {employee:LeaveEmployee;newBalance:number;newDate:string|null};
-function getWorkbookChanges(rows:Record<string,unknown>[], employees:LeaveEmployee[]) {
-  if(rows.length>250) throw new Error("Bir şablonda en fazla 250 personel olabilir.");
-  const byId=new Map(employees.map(e=>[e.id,e]));
-  const seen=new Set<string>();
-  const changes:Parsed[]=[];
-  const issues:string[]=[];
-  rows.forEach((row,index)=>{
-    const line=index+2;
-    const rawId=row["PERSONEL ID"];
-    const id=typeof rawId==="number" && Number.isInteger(rawId)
-      ? String(rawId).padStart(5,"0") : clean(rawId);
-    if(!id && !clean(row["PERSONEL ADI SOYADI"])) return;
-    if(!/^\d{5}$/.test(id)) {issues.push(`Satır ${line}: PERSONEL ID tam 5 haneli olmalı.`);return;}
-    if(seen.has(id)){issues.push(`Satır ${line}: ${id} birden fazla kez kullanılmış.`);return;}
-    seen.add(id);
-    const employee=byId.get(id);
-    if(!employee){issues.push(`Satır ${line}: ${id} kayıtlı değil veya şubenizde bulunmuyor.`);return;}
-    if(!employee.is_active){issues.push(`Satır ${line}: ${id} pasif personel.`);return;}
-    if(clean(row["PERSONEL ADI SOYADI"]).toLocaleLowerCase("tr-TR") !== employee.full_name.toLocaleLowerCase("tr-TR")){
-      issues.push(`Satır ${line}: ${id} isim eşleşmiyor.`);return;
-    }
-    const amount=parseAmount(row["KALAN İZİN (DÜZENLE)"]);
-    if(!Number.isFinite(amount) || amount < -14 || amount > 999 || Math.round(amount*100)!==amount*100){
-      issues.push(`Satır ${line}: KALAN İZİN değeri -14 ile 999 arasında sayısal bir değer olmalı.`);return;
-    }
-    const rawDate=row["İŞE GİRİŞ TARİHİ"];
-    const date=parseHireDate(rawDate);
-    if(clean(rawDate) && !date){issues.push(`Satır ${line}: İşe giriş tarihi geçersiz.`);return;}
-    if(employee.leave_balance!==amount || (date && date!==employee.employment_date)){
-      changes.push({employee,newBalance:amount,newDate:date});
-    }
-  });
-  return {changes,issues};
-}
+type Parsed = LeaveSheetChange<LeaveEmployee>;
 
 export default function LeaveManagementPanel({data}:{data:LeaveDashboardData}){
   const router=useRouter();
@@ -168,7 +110,7 @@ export default function LeaveManagementPanel({data}:{data:LeaveDashboardData}){
         !("PERSONEL ADI SOYADI" in rows[0]) || !("KALAN İZİN (DÜZENLE)" in rows[0])){
         throw Error("Eski şablon algılandı. Önce yeni ID'li izin şablonunu indirip onu düzenleyin.");
       }
-      const {changes,issues}=getWorkbookChanges(rows,data.employees);
+      const {changes,issues}=previewLeaveImport(rows,data.employees);
       setPreview(changes);setWarnings(issues);
       if(!changes.length && !issues.length)setSuccess("Şablonda mevcut bakiyelerden farklı bir değişiklik bulunmadı.");
     }catch(e){setError(e instanceof Error?e.message:"Excel dosyası işlenemedi.");}
@@ -195,7 +137,7 @@ export default function LeaveManagementPanel({data}:{data:LeaveDashboardData}){
     if(!employee)return;
     setManualBusy(true);setError("");setSuccess("");
     try{
-      const amount=parseAmount(manual);
+      const amount=parseLeaveAmount(manual);
       const date=manualDate||null;
       const result=await applyLeaveBalanceChanges({branchId:employee.branch_id,
         reason:manualReason,updates:[{
