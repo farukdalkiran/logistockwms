@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { istanbulDate } from "@/lib/attendance/day-coverage";
 import {
   calculateMultinet,
@@ -31,6 +32,12 @@ export async function getMultinetCalculations(
     .from("profiles").select("branch_id,role").eq("id",user.id).single();
   if (profileError || !profile) throw new Error("Kullanıcı profili doğrulanamadı.");
 
+  // A trusted server-only client avoids Admin-role RLS silently hiding other
+  // depots; every subsequent read still uses the independently checked depot ID.
+  const dataClient = createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  );
   const isGlobal = profile.role === "Developer" || profile.role === "Admin";
   const scopedBranch = isGlobal ? branchId : profile.branch_id;
   if (!scopedBranch || !/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(scopedBranch))
@@ -38,7 +45,7 @@ export async function getMultinetCalculations(
   if (!isGlobal && branchId !== scopedBranch)
     throw new Error("Başka bir deponun Multinet kayıtlarına erişemezsiniz.");
 
-  const { data: warehouse, error: branchError } = await supabase
+  const { data: warehouse, error: branchError } = await dataClient
     .from("branches").select("id,type").eq("id",scopedBranch).single();
   if (branchError || warehouse?.type?.toLocaleLowerCase("tr-TR") !== "depo")
     throw new Error("Multinet hesaplaması yalnızca bağlı depo için yapılabilir.");
@@ -54,7 +61,7 @@ export async function getMultinetCalculations(
   const endDate = String(nextYear).padStart(4,"0")+"-"+String(nextMonth).padStart(2,"0")+"-01";
   const lastDate = new Date(Date.UTC(year,month,0)).toISOString().slice(0,10);
 
-  const { data: employees, error: employeeError } = await supabase.from("employees")
+  const { data: employees, error: employeeError } = await dataClient.from("employees")
     .select("id,full_name,employment_date")
     .eq("is_active",true).eq("branch_id",scopedBranch).order("full_name");
   if (employeeError) throw new Error("Depo personeli okunamadı: "+employeeError.message);
@@ -65,7 +72,7 @@ export async function getMultinetCalculations(
   // Supabase's usual default 1000-row response limit.
   const attendance: MultinetAttendance[] = [];
   for(let from=0;from<100000;from+=500) {
-    const {data,error} = await supabase.from("attendance")
+    const {data,error} = await dataClient.from("attendance")
       .select("employee_id,check_in_time,check_out_time,status,working_hours,break_hours")
       .eq("branch_id",scopedBranch).in("employee_id",employeeIds)
       .gte("check_in_time",startDate+"T00:00:00+03:00")
@@ -78,13 +85,13 @@ export async function getMultinetCalculations(
     if(from===99500)throw new Error("Puantaj kaydı sayısı güvenli sınırı aşıyor.");
   }
 
-  const {data:leaves,error:leaveError}=await supabase.from("leave_requests")
+  const {data:leaves,error:leaveError}=await dataClient.from("leave_requests")
     .select("employee_id,leave_type,custom_leave_type,status,start_date,end_date,selected_dates,is_half_day,half_day_period")
     .eq("branch_id",scopedBranch).in("employee_id",employeeIds)
     .eq("status","APPROVED").lte("start_date",lastDate).gte("end_date",startDate);
   if(leaveError)throw new Error("Onaylı izinler okunamadı: "+leaveError.message);
 
-  const {data:holidays,error:holidayError}=await supabase.from("wms_public_holidays")
+  const {data:holidays,error:holidayError}=await dataClient.from("wms_public_holidays")
     .select("holiday_date,title,period")
     .gte("holiday_date",startDate).lte("holiday_date",lastDate);
   if(holidayError)throw new Error("Resmî tatiller okunamadı: "+holidayError.message);
