@@ -552,21 +552,27 @@ export default function ArasTrackingPanel({
           ),
         );
       } else {
-        downloadCsv(
-          `ORIJINAL_SABLON_${target}_${stamp}.csv`,
-          ORIGINAL_COLUMNS.map(([title]) => title),
-          data.map((row) =>
-            Array.isArray(row)
-              ? row
-              : ORIGINAL_COLUMNS.map(
-                  ([title, key]) => row[key] ?? row[title] ?? "",
-                ),
-          ),
+        // XLSX kitaplığını yalnızca kullanıcı toplu çıktı aldığında yükle.
+        const XLSX = await import("xlsx");
+        const headers = ORIGINAL_COLUMNS.map(([title]) => title);
+        const rows = data.map((row) =>
+          Array.isArray(row)
+            ? row
+            : ORIGINAL_COLUMNS.map(([title, key]) => row[key] ?? row[title] ?? ""),
         );
+        const sheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+        sheet["!cols"] = headers.map((header) => ({
+          wch: Math.min(32, Math.max(13, header.length + 3)),
+        }));
+        const workbook = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(workbook, sheet, "Kargo Gönderileri");
+        XLSX.writeFile(workbook, `TOPLU_ARAS_EXCEL_${target}_${stamp}.xlsx`, {
+          compression: true,
+        });
       }
       toast(`${data.length} kayıt dışa aktarıldı.`, "success");
     } catch (e) {
-      toast(e instanceof Error ? e.message : "CSV oluşturulamadı.", "error");
+      toast(e instanceof Error ? e.message : "Çıktı oluşturulamadı.", "error");
     } finally {
       setExporting(null);
     }
@@ -604,41 +610,100 @@ export default function ArasTrackingPanel({
 
   return (
     <main className="mx-auto w-full min-w-0 max-w-[1600px] space-y-4 overflow-x-hidden bg-slate-50 px-3 py-3 text-slate-900 sm:px-5 sm:py-5 lg:px-7">
-      <header className="flex flex-wrap items-center justify-between gap-3 rounded-[5px] border border-slate-200 bg-white px-4 py-3 shadow-sm">
-        <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-700">WMS / Eksik Parça</p>
-          <h1 className="mt-0.5 text-lg font-bold text-slate-900 sm:text-xl">Kargo İşleme Formu</h1>
-          <p className="mt-1 text-xs text-slate-500">Delivery Number ara, alıcıyı doğrula, sonucu kaydet.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-[4px] bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-600">Personel: {employeeId}</span>
-          <button type="button" onClick={() => { void loadFiles(); void loadStats(selectedFileId); }} className={BTN_OUTLINE}>
-            <RefreshCcw className="h-4 w-4" /> Yenile
-          </button>
+
+      {/* Operasyon özeti ve işlem akışı. Excel araçları sayfanın altında ayrı paneldedir. */}
+      <header className="relative overflow-hidden rounded-[8px] border border-slate-800 bg-slate-950 text-white shadow-lg">
+        <div className="pointer-events-none absolute -right-28 -top-32 h-72 w-72 rounded-full bg-rose-500/10 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-40 left-1/3 h-72 w-72 rounded-full bg-sky-600/10 blur-3xl" />
+        <div className="relative space-y-6 p-5 sm:p-7">
+          <div className="flex flex-col items-start justify-between gap-5 lg:flex-row lg:gap-8">
+            <div className="flex min-w-0 flex-1 items-start gap-4">
+              <span className="shrink-0 rounded-[7px] border border-rose-400/25 bg-rose-500/15 p-3 text-rose-300">
+                <Truck className="h-7 w-7" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-[.12em] text-rose-300">LogiStock WMS / Eksik Parça Operasyonu</p>
+                <h1 className="mt-2 text-2xl font-extrabold leading-tight tracking-tight text-white sm:text-3xl">
+                  Aras Kargo Gönderi İşleme Merkezi
+                </h1>
+                <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 sm:text-base sm:leading-7">
+                  Gönderiyi Delivery Number ile sorgulayın, alıcı bilgilerini doğrulayın ve takip numarası,
+                  eksik bilgi veya iade gerekçesiyle kaydedin. Excel yükleme, profil ve toplu çıktı işlemleri
+                  sayfanın altındaki yeşil Excel Merkezi'nde bulunur.
+                </p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <span className="inline-flex max-w-full items-center gap-2 rounded-[4px] border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100">
+                    <FolderCog className="h-4 w-4 shrink-0 text-emerald-300" />
+                    <span className="min-w-0 break-words">Aktif profil: {selectedFileName}</span>
+                  </span>
+                  <span className="inline-flex items-center gap-2 rounded-[4px] border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100">
+                    <ShieldCheck className="h-4 w-4 text-sky-300" />
+                    Personel: {employeeId}
+                  </span>
+                  <span className="inline-flex items-center gap-2 rounded-[4px] border border-slate-600 bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-100">
+                    <FileSpreadsheet className="h-4 w-4 text-emerald-300" />
+                    {files.length} yüklü profil
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="flex w-full shrink-0 flex-wrap gap-2 lg:w-auto lg:flex-col">
+              <button
+                type="button"
+                onClick={() => { void loadFiles(); void loadStats(selectedFileId); }}
+                className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-[5px] border border-slate-500 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/20 sm:flex-none"
+              >
+                <RefreshCcw className="h-4 w-4" /> Verileri Yenile
+              </button>
+              <a
+                href="#aras-excel-tools"
+                className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-[5px] border border-emerald-500/70 bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-500 sm:flex-none"
+              >
+                <FileSpreadsheet className="h-4 w-4" /> Excel Merkezine Git
+              </a>
+            </div>
+          </div>
+
+          <div className="grid gap-2 border-t border-white/10 pt-5 sm:grid-cols-3">
+            {[
+              { step: "01", title: "Gönderiyi sorgula", note: "Delivery Number veya barkodla eşleştir." },
+              { step: "02", title: "Alıcıyı doğrula", note: "Telefon, adres ve SD bilgilerini kontrol et." },
+              { step: "03", title: "İşlemi kaydet", note: "Takip numarası veya gerekçeyi gir." },
+            ].map((step) => (
+              <div key={step.step} className="flex items-start gap-3 rounded-[5px] border border-white/10 bg-white/[.045] p-3.5">
+                <span className="rounded-[4px] bg-rose-500/15 px-2.5 py-1.5 text-sm font-bold text-rose-200">{step.step}</span>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-white">{step.title}</div>
+                  <p className="mt-1 text-xs leading-5 text-slate-300">{step.note}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="rounded-[6px] border border-white/10 bg-slate-900/85 p-4">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-4">
+              {[
+                { label: "Toplam gönderi", value: stats.total, text: "text-white" },
+                { label: "İşlenen", value: stats.processed, text: "text-emerald-300" },
+                { label: "İşlem bekleyen", value: remaining, text: "text-amber-300" },
+                { label: "Bugün işlenen", value: stats.today, text: "text-sky-300" },
+              ].map((stat) => (
+                <div key={stat.label} className="min-w-0">
+                  <p className="text-xs font-medium text-slate-300">{stat.label}</p>
+                  <p className={`mt-1 text-2xl font-bold tabular-nums sm:text-3xl ${stat.text}`}>{stat.value.toLocaleString("tr-TR")}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 flex items-center gap-3 border-t border-white/10 pt-4">
+              <span className="shrink-0 text-xs font-semibold text-slate-300">İşlem ilerlemesi</span>
+              <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-700" role="progressbar" aria-valuenow={percentage} aria-valuemin={0} aria-valuemax={100} aria-label="İşlenen gönderi yüzdesi">
+                <div className="h-full rounded-full bg-emerald-400 transition-[width] duration-300" style={{ width: `${percentage}%` }} />
+              </div>
+              <span className="shrink-0 text-sm font-bold tabular-nums text-emerald-300">%{percentage}</span>
+            </div>
+          </div>
         </div>
       </header>
-
-      <section className={`${CARD} p-3 sm:px-4`}>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-          {[
-            ["Toplam gönderi", stats.total],
-            ["İşlenen", stats.processed],
-            ["Kalan", remaining],
-            ["Bugün işlenen", stats.today],
-          ].map(([label, value]) => (
-            <div key={label} className="min-w-0">
-              <p className="text-[11px] font-medium text-slate-500">{label}</p>
-              <p className="mt-0.5 text-lg font-bold tabular-nums text-slate-900">{Number(value).toLocaleString("tr-TR")}</p>
-            </div>
-          ))}
-        </div>
-        <div className="mt-3 flex items-center gap-3 border-t border-slate-100 pt-3">
-          <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-slate-100">
-            <div className="h-full bg-emerald-500" style={{ width: `${percentage}%` }} />
-          </div>
-          <span className="shrink-0 text-xs font-semibold tabular-nums text-slate-600">%{percentage} tamamlandı</span>
-        </div>
-      </section>
 
       {/* Masaüstünde sorgu/alıcı solda, işlem formu sağda. */}
       <section className="grid min-w-0 grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(370px,.85fr)]">
@@ -1041,106 +1106,88 @@ export default function ArasTrackingPanel({
         </div>
       </section>
 
-      {/* DISA AKTARMA */}
-      <section className={`${CARD} p-4`}>
-        <div className="flex flex-col items-start justify-between gap-4 lg:flex-row lg:items-center">
-          <div>
-            <h2 className="flex items-center gap-2 text-sm font-bold">
-              <Download className="h-4 w-4 text-rose-600" /> Veri Dışa Aktarma
-            </h2>
-            <p className="mt-1 text-xs leading-5 text-slate-500">
-              Aktif profil:{" "}
-              <span className="font-semibold text-slate-800">
-                {selectedFileName}
-              </span>
-              . İkinci sütunda takip numarası; eksik bilgi veya iade varsa kayıtlı gerekçe bulunur.
-            </p>
-          </div>
-          <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:w-auto">
-            <button
-              type="button"
-              disabled={Boolean(exporting)}
-              onClick={() => void exportCsv("short")}
-              className={BTN_OUTLINE}
-            >
-              {exporting === "short" ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="h-4 w-4" />
-              )}{" "}
-              2 Sütun: Takip / Sebep
-            </button>
-            <button
-              type="button"
-              disabled={Boolean(exporting)}
-              onClick={() => void exportCsv("original")}
-              className={BTN_OUTLINE}
-            >
-              {exporting === "original" ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <FileSpreadsheet className="h-4 w-4" />
-              )}{" "}
-              Orijinal Şablon CSV
-            </button>
-          </div>
-        </div>
-      </section>
 
-      {/* PROFIL ISLEMLERI ANA OPERASYONDAN AYRI */}
-      <section className="space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-base font-bold">Dosya ve Profil Yönetimi</h2>
-            <p className="mt-0.5 text-xs text-slate-500">
-              Yeni dosya ekleme ve mevcut profilleri yönetme işlemleri ayrı
-              tutulur.
-            </p>
-          </div>
-          <span className="text-xs font-medium text-slate-500">
-            {files.length} profil
-          </span>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className={`${CARD} border-t-[3px] border-t-emerald-500 p-4`}>
-            <div className="flex items-start gap-3">
-              <div className="rounded-[4px] bg-emerald-50 p-2.5 text-emerald-700">
-                <FileUp className="h-5 w-5" />
+      {/* Ayrı Excel merkezi: profil, yükleme ve iki tür çıktı aynı panelin içindedir. */}
+      <section id="aras-excel-tools" aria-labelledby="aras-excel-title" className="scroll-mt-6">
+        <style>{`
+          @keyframes arasExcelBorderFlow {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+          }
+          .aras-excel-border-animated {
+            background: linear-gradient(110deg, #065f46, #16a34a, #86efac, #047857, #22c55e, #065f46);
+            background-size: 300% 300%;
+            animation: arasExcelBorderFlow 8s ease-in-out infinite;
+          }
+          @media (prefers-reduced-motion: reduce) {
+            .aras-excel-border-animated { animation: none; }
+          }
+        `}</style>
+        <div className="aras-excel-border-animated rounded-[9px] p-[2px] shadow-[0_10px_38px_rgba(21,128,61,.13)]">
+          <div className="overflow-hidden rounded-[7px] bg-white">
+            <div className="flex flex-col justify-between gap-4 border-b border-emerald-800 bg-gradient-to-r from-emerald-950 via-emerald-900 to-green-800 px-5 py-5 text-white sm:px-6 lg:flex-row lg:items-center">
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="shrink-0 rounded-[6px] border border-emerald-300/30 bg-white/10 p-3">
+                  <FileSpreadsheet className="h-7 w-7 text-emerald-200" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-[.12em] text-emerald-200">Excel / Toplu Dosya İşlemleri</p>
+                  <h2 id="aras-excel-title" className="mt-1 text-xl font-bold tracking-tight text-white sm:text-2xl">Excel ve Profil Yönetim Merkezi</h2>
+                  <p className="mt-2 max-w-3xl text-sm leading-6 text-emerald-50/90">
+                    Dosya yükleme, profil yönetimi, toplu Excel ve iki sütunlu kargo çıktıları tek yerde.
+                    Bu araçlar günlük kargo işleme formundan bağımsız çalışır.
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="text-sm font-bold">Yeni Profil Yükle</h3>
-                <p className="mt-1 text-xs leading-5 text-slate-500">
-                  Excel/CSV gönderi dosyanı mevcut yükleme modülüyle içe aktar.
-                </p>
-                <button
-                  type="button"
-                  className={`${BTN_OUTLINE} mt-3`}
-                  onClick={() => setShowUploader(true)}
-                >
+              <div className="rounded-[5px] border border-white/20 bg-white/10 px-3 py-2.5 text-sm">
+                <p className="text-xs font-medium text-emerald-100">Çıktı kapsamı</p>
+                <p className="mt-1 max-w-[320px] break-words font-semibold text-white">{selectedFileName}</p>
+                <p className="mt-1 text-xs text-emerald-100">{files.length} profil kayıtlı</p>
+              </div>
+            </div>
+
+            <div className="grid gap-3 bg-emerald-50/30 p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-4">
+              <div className="flex min-w-0 flex-col rounded-[6px] border border-emerald-200 bg-white p-4 shadow-sm">
+                <span className="mb-3 flex h-10 w-10 items-center justify-center rounded-[5px] bg-emerald-100 text-emerald-700"><FileUp className="h-5 w-5" /></span>
+                <h3 className="text-base font-bold text-slate-900">Profil Yükle</h3>
+                <p className="mt-1 flex-1 text-sm leading-6 text-slate-600">Yeni Excel veya CSV dosyasını sisteme alıp gönderi profili oluşturun.</p>
+                <button type="button" onClick={() => setShowUploader(true)} disabled={profileBusy} className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-[5px] bg-emerald-700 px-3 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-800 disabled:opacity-50">
                   <FileUp className="h-4 w-4" /> Dosya Yükle
                 </button>
               </div>
-            </div>
-          </div>
-          <div className={`${CARD} border-t-[3px] border-t-rose-500 p-4`}>
-            <div className="flex items-start gap-3">
-              <div className="rounded-[4px] bg-rose-50 p-2.5 text-rose-700">
-                <FolderCog className="h-5 w-5" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="text-sm font-bold">Profilleri Yönet</h3>
-                <p className="mt-1 text-xs leading-5 text-slate-500">
-                  Yüklenmiş dosyaları incele, tek profil sil veya tüm
-                  veritabanını sıfırla.
-                </p>
-                <button
-                  type="button"
-                  className={`${BTN_OUTLINE} mt-3`}
-                  onClick={() => setShowProfiles(true)}
-                >
-                  <FolderCog className="h-4 w-4" /> Profil Yönetimi
+
+              <div className="flex min-w-0 flex-col rounded-[6px] border border-emerald-200 bg-white p-4 shadow-sm">
+                <span className="mb-3 flex h-10 w-10 items-center justify-center rounded-[5px] bg-emerald-100 text-emerald-700"><FolderCog className="h-5 w-5" /></span>
+                <h3 className="text-base font-bold text-slate-900">Profil Yönetimi</h3>
+                <p className="mt-1 flex-1 text-sm leading-6 text-slate-600">Yüklenen profilleri inceleyin, dosyaları yönetin ve gerektiğinde silin.</p>
+                <button type="button" onClick={() => setShowProfiles(true)} disabled={profileBusy} className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-[5px] border border-emerald-300 bg-emerald-50 px-3 py-2.5 text-sm font-bold text-emerald-900 transition hover:bg-emerald-100 disabled:opacity-50">
+                  <FolderCog className="h-4 w-4" /> Profilleri Yönet
                 </button>
               </div>
+
+              <div className="flex min-w-0 flex-col rounded-[6px] border border-emerald-200 bg-white p-4 shadow-sm">
+                <span className="mb-3 flex h-10 w-10 items-center justify-center rounded-[5px] bg-emerald-100 text-emerald-700"><FileSpreadsheet className="h-5 w-5" /></span>
+                <h3 className="text-base font-bold text-slate-900">Toplu Excel Çıktısı</h3>
+                <p className="mt-1 flex-1 text-sm leading-6 text-slate-600">Seçili profilin tüm orijinal ERP sütunlarını XLSX dosyası olarak indirin.</p>
+                <button type="button" disabled={Boolean(exporting)} onClick={() => void exportCsv("original")} className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-[5px] bg-emerald-700 px-3 py-2.5 text-sm font-bold text-white transition hover:bg-emerald-800 disabled:opacity-50">
+                  {exporting === "original" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} XLSX İndir
+                </button>
+              </div>
+
+              <div className="flex min-w-0 flex-col rounded-[6px] border border-emerald-200 bg-white p-4 shadow-sm">
+                <span className="mb-3 flex h-10 w-10 items-center justify-center rounded-[5px] bg-emerald-100 text-emerald-700"><Download className="h-5 w-5" /></span>
+                <h3 className="text-base font-bold text-slate-900">İki Sütunlu Çıktı</h3>
+                <p className="mt-1 flex-1 text-sm leading-6 text-slate-600">Delivery Number ve takip numarasını; eksik veya iadede kayıtlı sebebi CSV olarak indirin.</p>
+                <button type="button" disabled={Boolean(exporting)} onClick={() => void exportCsv("short")} className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-[5px] border border-emerald-300 bg-emerald-50 px-3 py-2.5 text-sm font-bold text-emerald-900 transition hover:bg-emerald-100 disabled:opacity-50">
+                  {exporting === "short" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} 2 Sütun CSV İndir
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-start justify-between gap-2 border-t border-emerald-100 bg-white px-5 py-3 text-xs leading-5 text-slate-600">
+              <span>Çıktılar yukarıdaki aktif dosya profiline göre hazırlanır. Tüm profiller için profil seçimini boş bırakın.</span>
+              <span className="font-semibold text-emerald-800">Excel araçları · 4 işlem</span>
             </div>
           </div>
         </div>
