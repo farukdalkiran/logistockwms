@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { assertHRBranch, getHRActor } from "@/lib/hr/access";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const EMPLOYEE_ID = /^[1-9][0-9]{4}$/;
+const EMPLOYEE_ID = /^[0-9]{5}$/;
 
 function requiredText(value: string, label: string, max = 120) {
   const clean = String(value || "").trim().replace(/\s+/g, " ");
