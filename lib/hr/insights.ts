@@ -74,14 +74,15 @@ function parseMonth(value?: string) {
 // API varsayılan 1000 satır sınırına takılmamak için sayfalama; üst sınır aşıldığında kullanıcı bilgilendirilir.
 async function pages<T>(
   label: string,
-  factory: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  factory: (from: number, to: number) => PromiseLike<any>,
   truncated: string[],
 ): Promise<T[]> {
   const results: T[] = [];
   for (let page = 0; page < 5; page++) {
     const { data, error } = await factory(page * 1000, page * 1000 + 999);
     if (error) throw new Error(label + " verisi alınamadı: " + error.message);
-    results.push(...(data || []));
+    if (!Array.isArray(data)) throw new Error(label + " sorgusu geçersiz veri döndürdü.");
+    results.push(...(data as T[]));
     if (!data || data.length < 1000) return results;
   }
   truncated.push(label);
