@@ -421,8 +421,14 @@ function AnnouncementView({onChanged}:{onChanged:()=>void}) {
         <div className="h-3 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-emerald-500" style={{width:insight.data.percent+"%"}}/></div>
         <div className="flex flex-wrap justify-between gap-3">
           <h5 className="text-sm font-bold text-slate-900">Şubelere göre okuma dağılımı</h5>
-          <button className={BTN} onClick={()=>downloadReport(`DUYURU_OKUNMA_${selected.id.slice(0,8)}.csv`,
-            [["Kullanıcı","Şube","Durum","Okuma Tarihi"],...insight.data.readers.map(p=>[p.name,p.branch,"Okudu",fmt(p.read_at)]),...insight.data.unread.map(p=>[p.name,p.branch,"Okumadı",""]]])}>
+          <button className={BTN} onClick={() => downloadReport(
+            `DUYURU_OKUNMA_${selected.id.slice(0, 8)}.csv`,
+            [
+              ["Kullanıcı", "Şube", "Durum", "Okuma Tarihi"],
+              ...insight.data.readers.map(p => [p.name, p.branch, "Okudu", fmt(p.read_at)]),
+              ...insight.data.unread.map(p => [p.name, p.branch, "Okumadı", ""]),
+            ],
+          )}>
             <Download size={15}/>CSV Raporu</button>
         </div>
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
