@@ -122,7 +122,13 @@ export default async function PersonnelPage() {
       {/* 3. İstemci bileşenine güvenli verileri ve DEV yetkisini besle */}
       <CreateEmployeeClient 
         branches={branches || []} 
-        initialEmployees={employees || []} 
+        initialEmployees={(employees || []).map(emp => ({
+          ...emp,
+          branch_id: emp.branch_id || "",
+          position_title: emp.position_title || "",
+          is_active: Boolean(emp.is_active),
+          branches: Array.isArray(emp.branches) ? emp.branches[0] : emp.branches,
+        }))} 
         isDeveloper={isDeveloper}
       />
     </div>
