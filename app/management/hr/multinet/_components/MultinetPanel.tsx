@@ -1,268 +1,237 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { getMultinetCalculations, MultinetRecord } from "@/app/actions/multinet";
+import { useEffect, useMemo, useState } from "react";
+import {
+  AlertCircle, CalendarDays, ChevronDown, ChevronUp, Download,
+  FileText, RefreshCw, ShieldCheck, Users, Wallet,
+} from "lucide-react";
+import { getMultinetCalculations, type MultinetRecord } from "@/app/actions/multinet";
 
-interface MultinetPanelProps {
-  branchId: string | null;
-  isGlobal: boolean;
+type Depot = {id:string;name:string};
+type Props = {initialBranchId:string;branches:Depot[];canChooseBranch:boolean};
+const MONTHS=["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
+const ISTANBUL_MONTH=()=>new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Istanbul",year:"numeric",month:"2-digit"})
+  .formatToParts(new Date()).reduce((acc,p)=>{
+    if(p.type==="year")acc.year=p.value;
+    if(p.type==="month")acc.month=p.value;
+    return acc;
+  },{year:"",month:""}).year+"-"+new Intl.DateTimeFormat("en-CA",{timeZone:"Europe/Istanbul",month:"2-digit"}).format(new Date());
+const money=(n:number)=>n.toLocaleString("tr-TR",{style:"currency",currency:"TRY"});
+const count=(n:number)=>n.toLocaleString("tr-TR",{maximumFractionDigits:1});
+const dateLabel=(date:string)=>date.slice(8,10)+"."+date.slice(5,7)+"."+date.slice(0,4);
+function csvCell(value:unknown):string {
+  const raw=String(value??"");
+  const safe=/^[=+\-@\t\r]/.test(raw)?"'"+raw:raw;
+  return '"'+safe.replace(/"/g,'""')+'"';
 }
 
-const MONTH_NAMES = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+export default function MultinetPanel({initialBranchId,branches,canChooseBranch}:Props) {
+  const [branchId,setBranchId]=useState(initialBranchId);
+  const [period,setPeriod]=useState(ISTANBUL_MONTH);
+  const [dailyFee,setDailyFee]=useState(600);
+  const [records,setRecords]=useState<MultinetRecord[]>([]);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState("");
+  const [expanded,setExpanded]=useState<string[]>([]);
+  const [refreshKey,setRefreshKey]=useState(0);
+  const [query,setQuery]=useState("");
 
-export default function MultinetPanel({ branchId, isGlobal }: MultinetPanelProps) {
-  const [selectedMonth, setSelectedMonth] = useState<string>(new Date().toISOString().slice(0, 7));
-  const [dailyFee, setDailyFee] = useState<number>(600);
-  const [records, setRecords] = useState<MultinetRecord[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  useEffect(()=>{
+    let active=true;
+    const [year,month]=period.split("-").map(Number);
+    setLoading(true);
+    setError("");
+    getMultinetCalculations(branchId,year,month,dailyFee)
+      .then(data=>{if(active){setRecords(data);setExpanded([]);}})
+      .catch(e=>{if(active){setRecords([]);setError(e instanceof Error?e.message:"Hesaplama başarısız.");}})
+      .finally(()=>{if(active)setLoading(false);});
+    return ()=>{active=false;};
+  },[period,dailyFee,branchId,refreshKey]);
 
-  const fetchCalculations = async () => {
-    if (!branchId && !isGlobal) return;
-    setIsLoading(true);
-    
-    const [year, month] = selectedMonth.split("-").map(Number);
-    const targetBranch = isGlobal && !branchId ? "GLOBAL" : branchId;
-    
-    const data = await getMultinetCalculations(targetBranch, year, month, dailyFee);
-    
-    setRecords(data);
-    setIsLoading(false);
-  };
+  const [year,month]=period.split("-").map(Number);
+  const nextMonth=month===12?1:month+1;
+  const nextYear=month===12?year+1:year;
+  const selectedName=MONTHS[month-1]||"";
+  const targetName=MONTHS[nextMonth-1]||"";
+  const branchName=branches.find(b=>b.id===branchId)?.name||"Depo";
+  const totals=useMemo(()=>records.reduce((acc,r)=>({
+    total:acc.total+r.totalAmount,net:acc.net+r.netDays,
+    deduction:acc.deduction+r.deductedDays,extra:acc.extra+r.extraDays,
+    missing:acc.missing+r.missingDays,leave:acc.leave+r.leaveDays,
+    report:acc.report+r.reportDays,holiday:acc.holiday+r.holidayProtectedDays,
+  }),{total:0,net:0,deduction:0,extra:0,missing:0,leave:0,report:0,holiday:0}),[records]);
+  const filtered=records.filter(r=>r.fullName.toLocaleLowerCase("tr-TR").includes(query.toLocaleLowerCase("tr-TR")));
+  const toggle=(id:string)=>setExpanded(old=>old.includes(id)?old.filter(x=>x!==id):[...old,id]);
 
-  useEffect(() => {
-    fetchCalculations();
-  }, [selectedMonth, dailyFee, branchId]);
-
-const handleExportExcel = () => {
-    if (records.length === 0) return;
-    const [year, month] = selectedMonth.split("-");
-    
-    const headers = [
-       "Ad Soyad", "Hedef Gün", "Fazla Mesai/Gün", "Kesinti (İzin/Rapor/Eksik)", "Net Gün", 
-      "Toplam Tutar (TL)", "Ayın 1'i (TL)", "Ayın 15'i (TL)", "Açıklamalar"
+  function exportCsv() {
+    if(!records.length || loading || error)return;
+    const header=["Personel","Depo","Kaynak Ay","Ödeme Ayı","Hedef Gün","Çalışılan Gün",
+      "Ek Mesai","İzin Kesintisi","Rapor Kesintisi","Eksik Gün Kesintisi","Toplam Kesinti",
+      "Resmî Tatil Korunan","Net Gün","1. Ödeme (TL)","15. Ödeme (TL)","Toplam (TL)","Kesinti Detayları"];
+    const lines=[
+      header.map(csvCell).join(";"),
+      ...records.map(r=>[
+        r.fullName,branchName,period,String(nextYear)+"-"+String(nextMonth).padStart(2,"0"),
+        r.baseDays,r.workedDays,r.extraDays,r.leaveDays,r.reportDays,r.missingDays,
+        r.deductedDays,r.holidayProtectedDays,r.netDays,r.part1,r.part2,r.totalAmount,
+        r.deductions.map(d=>dateLabel(d.date)+" "+d.reason+" ("+count(d.days)+" gün)").join("\n")
+      ].map(csvCell).join(";"))
     ];
-    
-    const csvContent = [
-      headers.join(";"),
-      ...records.map(r => {
-        // Açıklamaları pipe yerine excel hücresinde alt alta (CHAR(10) ile) yazdırıyoruz
-        const formattedDetails = r.details.length > 0 ? r.details.join("\n") : "Standart Mesai";
-        
-        return [
-          r.fullName,
-          r.baseDays,
-          r.extraDays,
-          r.deductedDays,
-          r.netDays,
-          r.totalAmount,
-          r.part1,
-          r.part2,
-          `"${formattedDetails}"` // Excel'in satır atlamasını tanıması için çift tırnak içine alıyoruz
-        ].join(";");
-      })
-    ].join("\r\n");
-
-    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `Multinet_Hakedis_${year}_${month}.csv`;
+    const blob=new Blob(["\uFEFF"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"});
+    const url=URL.createObjectURL(blob);
+    const link=document.createElement("a");
+    link.href=url;
+    link.download="Multinet_"+period+"_"+branchName.replace(/[^a-zA-Z0-9ğüşöçıİĞÜŞÖÇ-]+/g,"_")+".csv";
+    document.body.appendChild(link);
     link.click();
-  };
-
-  const totalAmount = records.reduce((acc, curr) => acc + curr.totalAmount, 0);
-  const isCurrentMonth = selectedMonth === new Date().toISOString().slice(0, 7);
-  
-  const currentMonthIndex = parseInt(selectedMonth.split('-')[1], 10) - 1;
-  const currentMonthName = MONTH_NAMES[currentMonthIndex];
-  const nextMonthName = MONTH_NAMES[(currentMonthIndex + 1) % 12];
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
 
   return (
-    <div className="flex flex-col flex-1 p-6 ">
-      <div className="bg-zinc-900 border-l-4 border-[#53CF78] p-5 lg:p-6 shadow-md flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6 rounded-none w-full">
-        
-        {/* Sol Kısım: Logo ve Bilgiler */}
-        <div className="flex items-start gap-4 w-full xl:w-auto flex-1 min-w-0">
-          <div className="flex flex-col flex-1 min-w-0">
-            <h1 className="text-xl lg:text-2xl font-bold text-white tracking-tight uppercase truncate">
-              Multinet Ödeme & Hakediş Motoru
-            </h1>
-            <p className="text-zinc-400 text-xs lg:text-sm mt-1 truncate">
-              Sonraki aya devreden mesai ve izin kesintilerinin otomatik hesaplandığı terminal.
+    <div className="p-4 md:p-6 space-y-5 text-slate-900">
+      <header className="bg-slate-900 text-white border-l-4 border-[#dc3545] rounded-[5px] p-5 md:p-6">
+        <div className="flex flex-col xl:flex-row xl:items-end justify-between gap-5">
+          <div className="max-w-2xl">
+            <p className="uppercase text-[11px] tracking-widest font-bold text-red-300">İnsan Kaynakları · Yemek Bakiyesi</p>
+            <h1 className="font-bold text-xl md:text-2xl mt-2">Multinet Hakediş & Kesinti Raporu</h1>
+            <p className="text-slate-300 text-sm mt-2 leading-6">
+              {selectedName} {year} devamsızlık ve izinleri, {targetName} {nextYear} ayının hafta içi günlerinden düşülür.
+              Resmî tatillerde kesinti yapılmaz. Açık ay için yalnızca tamamlanan günler değerlendirilir.
             </p>
-            
-            <div className="mt-3 flex items-start gap-2 bg-[#53CF78]/10 border border-[#53CF78]/30 px-3 py-2 rounded-none">
-              <svg className="w-4 h-4 text-[#53CF78] shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <span className="text-[#53CF78] text-[11px] lg:text-xs font-semibold tracking-wide uppercase leading-relaxed">
-                <span className="text-white font-bold mr-1">Devreden Bakiye:</span> 
-                {currentMonthName} ayına ait eksik ve fazla çalışmalar, {nextMonthName} ayının 1'i ve 15'i ödemelerine yansıtılacaktır[cite: 1].
-              </span>
+            <div className="flex items-center gap-2 text-xs text-emerald-300 mt-3">
+              <ShieldCheck size={16}/><span>Veriler yalnızca seçili deponun personeliyle sınırlandırılır.</span>
             </div>
-
-            {isCurrentMonth && (
-              <div className="mt-2 flex items-start gap-2 bg-amber-500/10 border border-amber-500/20 px-3 py-2 rounded-none">
-                <svg className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-                <span className="text-amber-500 text-[11px] lg:text-xs font-semibold tracking-wide leading-relaxed">
-                  <strong className="text-white font-bold mr-1">DİKKAT:</strong> Ay henüz bitmediği için haksız kesinti yapılmamış, hesaplamalar bugüne kadarki verilere göre optimize edilmiştir[cite: 1].
-                </span>
-              </div>
+          </div>
+          <div className="flex flex-wrap gap-3 items-end">
+            {canChooseBranch&&(
+              <label className="block text-xs text-slate-300">Depo
+                <select value={branchId} onChange={e=>setBranchId(e.target.value)}
+                  className="block mt-1 bg-slate-800 text-white border border-slate-600 p-2.5 min-w-[160px] h-10 rounded-[5px] text-sm">
+                  {branches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </label>
             )}
+            <label className="block text-xs text-slate-300">Kaynak dönem
+              <input type="month" value={period} onChange={e=>setPeriod(e.target.value)}
+                className="block mt-1 bg-slate-800 border border-slate-600 text-white rounded-[5px] h-10 p-2 text-sm"/>
+            </label>
+            <label className="block text-xs text-slate-300">Günlük bedel (TL)
+              <input type="number" min="0" max="100000" step="0.01" value={dailyFee}
+                onChange={e=>setDailyFee(Number(e.target.value))}
+                className="block mt-1 w-32 bg-slate-800 border border-slate-600 text-white rounded-[5px] h-10 p-2 text-sm"/>
+            </label>
+            <button type="button" onClick={()=>setRefreshKey(n=>n+1)} disabled={loading}
+              className="h-10 p-2.5 rounded-[5px] border border-slate-600 text-white hover:bg-slate-800 disabled:opacity-50"
+              aria-label="Hesaplamayı yenile" title="Yenile"><RefreshCw size={17}/></button>
+            <button type="button" onClick={exportCsv} disabled={!records.length||loading||!!error}
+              className="h-10 inline-flex items-center gap-2 px-4 rounded-[5px] bg-[#dc3545] text-white text-xs font-bold hover:bg-red-700 disabled:opacity-50">
+              <Download size={16}/> CSV / Excel
+            </button>
           </div>
         </div>
-        
-        {/* Sağ Kısım: Kontroller */}
-        <div className="flex flex-wrap items-end gap-3 w-full xl:w-auto shrink-0 bg-zinc-950/30 p-3 xl:p-0 xl:bg-transparent border border-zinc-800 xl:border-none">
-          <div className="flex flex-col flex-1 sm:flex-initial min-w-[130px]">
-            <label className="text-[10px] text-zinc-400 uppercase mb-1.5 font-semibold tracking-wider">Dönem Seçimi</label>
-            <input 
-              type="month" 
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-              className="bg-zinc-800 text-white border border-zinc-700 px-3 py-0 outline-none focus:border-[#53CF78] transition-colors rounded-none w-full h-10 text-sm"
-            />
+      </header>
+
+      <div className="flex flex-wrap justify-between items-center gap-2 text-sm">
+        <p className="text-slate-600"><strong className="text-slate-900">{branchName}</strong> · Ödeme dönemi: <strong>{targetName} {nextYear}</strong></p>
+        <p className="text-xs text-slate-500">Hesap: sonraki ayın hafta içi günleri + ek mesai − rapor / izin / devamsızlık</p>
+      </div>
+
+      {error&&<div role="alert" className="flex items-start gap-2 p-4 rounded-[5px] bg-red-50 border border-red-200 text-sm text-red-800">
+        <AlertCircle size={18}/><span>{error}</span>
+      </div>}
+
+      <section className="grid grid-cols-2 lg:grid-cols-4 gap-3" aria-label="Multinet özeti">
+        {[
+          {label:"Toplam ödeme",value:money(totals.total),icon:<Wallet size={18}/>,accent:"border-l-[#dc3545]"},
+          {label:"Personel",value:count(records.length),icon:<Users size={18}/>,accent:"border-l-blue-500"},
+          {label:"Toplam kesinti",value:count(totals.deduction)+" gün",icon:<FileText size={18}/>,accent:"border-l-amber-500"},
+          {label:"Korunan resmî tatil",value:count(totals.holiday)+" gün",icon:<CalendarDays size={18}/>,accent:"border-l-emerald-500"},
+        ].map(item=>(
+          <article key={item.label} className={"bg-white border border-slate-200 border-l-4 rounded-[5px] p-4 "+item.accent}>
+            <div className="flex justify-between text-slate-500 text-xs font-semibold gap-2"><span>{item.label}</span>{item.icon}</div>
+            <strong className="block mt-3 text-xl md:text-2xl break-words">{loading?"…":item.value}</strong>
+          </article>
+        ))}
+      </section>
+
+      <section className="bg-white border border-slate-200 rounded-[5px] overflow-hidden">
+        <div className="flex flex-wrap justify-between items-center gap-3 p-4 border-b border-slate-200">
+          <div>
+            <h2 className="text-sm font-bold">Personel bazlı hakediş</h2>
+            <p className="mt-1 text-xs text-slate-500">Kesinti sebeplerini görmek için personel satırını açın.</p>
           </div>
-          
-          <div className="flex flex-col flex-1 sm:flex-initial min-w-[130px]">
-            <label className="text-[10px] text-zinc-400 uppercase mb-1.5 font-semibold tracking-wider">Günlük Çarpan (TL)</label>
-            <input 
-              type="number" 
-              value={dailyFee}
-              onChange={(e) => setDailyFee(Number(e.target.value))}
-              className="bg-zinc-800 text-[#53CF78] font-bold border border-zinc-700 px-3 py-0 outline-none focus:border-[#53CF78] transition-colors rounded-none w-full h-10 text-sm"
-            />
-          </div>
-          
-          <button 
-            onClick={handleExportExcel}
-            className="flex-1 sm:flex-initial h-10 bg-[#53CF78] hover:bg-[#45b064] text-zinc-900 font-bold px-6 transition-all uppercase text-xs rounded-none shadow-[0_0_10px_rgba(83,207,120,0.15)] hover:shadow-[0_0_15px_rgba(83,207,120,0.3)] flex items-center justify-center gap-2 whitespace-nowrap"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            Excel İndir
-          </button>
+          <input type="search" value={query} onChange={e=>setQuery(e.target.value)}
+            placeholder="Personel ara…" aria-label="Personel ara"
+            className="border border-slate-300 px-3 py-2 rounded-[5px] text-sm min-w-[200px]"/>
         </div>
-      </div>
-<div className="bg-zinc-900 border-l-4 border-[#53CF78] p-5 lg:p-6 shadow-md flex flex-col md:flex-row justify-between items-start md:items-center gap-6 rounded-none w-full mb-6">
-  
-  {/* Sol Kısım: Logo ve Dinamik Bilgilendirme Alanı */}
-  <div className="flex items-center gap-5 w-full md:w-auto flex-1 min-w-0 bg-[#53CF78]/5 border border-[#53CF78]/20 p-4 rounded-none relative overflow-hidden">
-    
-    {/* Arka Planda Şık Işıma Efekti */}
-    <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-[#53CF78]/10 rounded-full blur-2xl pointer-events-none" />
-
-    {/* Yuvarlak, Büyük, Animasyonlu Border'a Sahip Logo Konteynerı */}
-    <div className="relative w-16 h-16 lg:w-30 lg:h-30 shrink-0 flex items-center justify-center">
-      <div className="absolute inset-0 rounded-full border-2 border-dashed border-[#53CF78] animate-[spin_12s_linear_infinite]" />
-      <div className="absolute inset-0 rounded-full border-2 border-[#53CF78]/40 shadow-[0_0_15px_rgba(83,207,120,0.4)]" />
-      
-      <div className="relative w-12 h-12 lg:w-28 lg:h-28 bg-white rounded-full p-2 overflow-hidden flex items-center justify-center shadow-inner">
-        <img 
-          src="https://multinet.com.tr/sites/default/files/styles/just_webp/public/2024-02/icon1.png.webp?itok=cSsWdUpf" 
-          alt="Multinet" 
-          className="object-contain w-full h-full rounded-full"
-        />
-      </div>
-    </div>
-
-    {/* Dinamik Metinler */}
-    <div className="flex flex-col flex-1 min-w-0 z-10 gap-1.5">
-      <div className="flex items-center gap-2 text-xs lg:text-sm font-semibold text-zinc-200">
-        <span className="w-2 h-2 rounded-full bg-[#53CF78] animate-pulse shrink-0" />
-        <span>Veriler <strong className="text-[#53CF78] uppercase tracking-wide">{currentMonthName}</strong> ayından çekilmiştir.</span>
-      </div>
-      <div className="flex items-center gap-2 text-xs lg:text-sm font-semibold text-zinc-200">
-        <span className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
-        <span><strong className="text-blue-400 uppercase tracking-wide">{nextMonthName}</strong> ayı ki ödemeler aşağıda hesaplanmıştır[cite: 1].</span>
-      </div>
-    </div>
-  </div>
-
-  {/* Sağ Kısım: Varsa Ekstra Kontroller veya Durum Rozeti */}
-  <div className="flex items-center gap-3 w-full md:w-auto shrink-0 bg-zinc-950/40 border border-zinc-800 px-4 py-3 rounded-none">
-    <svg className="w-5 h-5 text-[#53CF78] shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-    </svg>
-    <div className="flex flex-col">
-      <span className="text-[10px] text-zinc-400 uppercase font-semibold tracking-wider">Durum Özeti</span>
-      <span className="text-xs font-bold text-white uppercase tracking-tight">Aktif Dönem Hesaplaması</span>
-    </div>
-  </div>
-
-</div>
-      {/* KPI Barları */}
-      <div className="grid grid-cols-4 gap-4">
-        <div className="bg-white border border-zinc-200 p-4 rounded-none shadow-sm">
-          <p className="text-xs text-zinc-500 uppercase font-semibold">{nextMonthName} Ayı Toplam Ödeme</p>
-          <p className="text-2xl font-black text-zinc-900 mt-1">₺{totalAmount.toLocaleString('tr-TR')}</p>
-        </div>
-        <div className="bg-white border border-zinc-200 p-4 rounded-none shadow-sm border-b-4 border-b-blue-500">
-          <p className="text-xs text-zinc-500 uppercase font-semibold">Aktif Personel</p>
-          <p className="text-2xl font-black text-zinc-900 mt-1">{records.length}</p>
-        </div>
-        <div className="bg-white border border-zinc-200 p-4 rounded-none shadow-sm border-b-4 border-b-[#53CF78]">
-          <p className="text-xs text-zinc-500 uppercase font-semibold">Eklenen Mesai Günü</p>
-          <p className="text-2xl font-black text-zinc-900 mt-1">+{records.reduce((acc, curr) => acc + curr.extraDays, 0)}</p>
-        </div>
-        <div className="bg-white border border-zinc-200 p-4 rounded-none shadow-sm border-b-4 border-b-red-500">
-          <p className="text-xs text-zinc-500 uppercase font-semibold">Toplam Kesinti Günü</p>
-          <p className="text-2xl font-black text-zinc-900 mt-1">-{records.reduce((acc, curr) => acc + curr.deductedDays, 0)}</p>
-        </div>
-      </div>
-
-      {/* Data Table */}
-      <div className="bg-white border border-zinc-200 shadow-sm flex-1 rounded-none overflow-hidden flex flex-col">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-zinc-100 text-zinc-600 text-xs uppercase tracking-wider border-b border-zinc-300">
-                <th className="p-4 font-bold">Personel</th>
-                <th className="p-4 font-bold text-center">Hedef Gün</th>
-                <th className="p-4 font-bold text-center text-[#53CF78]">Eklenen</th>
-                <th className="p-4 font-bold text-center text-red-500">Kesilen</th>
-                <th className="p-4 font-bold text-center border-r border-zinc-300">Net Gün</th>
-                <th className="p-4 font-bold text-right bg-zinc-50">1 {nextMonthName}</th>
-                <th className="p-4 font-bold text-right bg-zinc-50">15 {nextMonthName}</th>
-                <th className="p-4 font-bold text-right bg-zinc-100 border-l border-zinc-300 text-zinc-900">Toplam (TL)</th>
-                <th className="p-4 font-bold">Log & Kesinti Detayı</th>
+          <table className="w-full min-w-[920px] text-sm text-left">
+            <thead className="bg-slate-100 text-slate-600 text-xs">
+              <tr>
+                <th className="p-3">Personel</th><th className="p-3 text-center">Hedef</th>
+                <th className="p-3 text-center">Ek</th><th className="p-3 text-center">İzin</th>
+                <th className="p-3 text-center">Rapor</th><th className="p-3 text-center">Eksik gün</th>
+                <th className="p-3 text-center">Net gün</th><th className="p-3 text-right">1 {targetName}</th>
+                <th className="p-3 text-right">15 {targetName}</th><th className="p-3 text-right">Toplam</th>
+                <th className="p-3 text-center">Açıklama</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-200 text-sm text-zinc-800">
-              {isLoading ? (
-                <tr>
-                  <td colSpan={9} className="p-8 text-center text-zinc-500 font-medium">Hesaplamalar yapılıyor...</td>
-                </tr>
-              ) : records.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="p-8 text-center text-zinc-500 font-medium">Bu aya ait veri bulunamadı.</td>
-                </tr>
-              ) : (
-                records.map((row) => (
-                  <tr key={row.employeeId} className="hover:bg-zinc-50 transition-colors">
-                    <td className="p-4 font-semibold">{row.fullName}</td>
-                    <td className="p-4 text-center font-bold text-zinc-800">{row.baseDays}</td>
-                    <td className="p-4 text-center font-bold text-[#53CF78]">{row.extraDays > 0 ? `+${row.extraDays}` : "-"}</td>
-                    <td className="p-4 text-center font-bold text-red-500">{row.deductedDays > 0 ? `-${row.deductedDays}` : "-"}</td>
-                    <td className="p-4 text-center font-black border-r border-zinc-100">{row.netDays}</td>
-                    
-                    <td className="p-4 text-right bg-zinc-50 text-zinc-600">₺{row.part1.toLocaleString('tr-TR')}</td>
-                    <td className="p-4 text-right bg-zinc-50 text-zinc-600">₺{row.part2.toLocaleString('tr-TR')}</td>
-                    
-                    <td className="p-4 text-right bg-zinc-100/50 border-l border-zinc-100 font-black text-[#45b064]">₺{row.totalAmount.toLocaleString('tr-TR')}</td>
-                    
-                    <td className="p-4 text-xs text-zinc-500 max-w-xs truncate" title={row.details.join(" | ")}>
-                      {row.details.length > 0 ? row.details.join(" | ") : "Standart Mesai"}
-                    </td>
-                  </tr>
-                ))
-              )}
+            <tbody className="divide-y divide-slate-100">
+              {loading?<tr><td colSpan={11} className="text-center p-8 text-slate-500">Depo verileri hesaplanıyor…</td></tr>:
+                filtered.length===0?<tr><td colSpan={11} className="text-center p-8 text-slate-500">Gösterilecek personel bulunamadı.</td></tr>:
+                filtered.map(r=>{
+                  const open=expanded.includes(r.employeeId);
+                  return (
+                    <tr key={r.employeeId} className="align-top">
+                      <td className="p-3 font-semibold whitespace-nowrap">{r.fullName}</td>
+                      <td className="p-3 text-center">{count(r.baseDays)}</td>
+                      <td className="p-3 text-center text-emerald-700">+{count(r.extraDays)}</td>
+                      <td className="p-3 text-center text-amber-700">{count(r.leaveDays)}</td>
+                      <td className="p-3 text-center text-amber-700">{count(r.reportDays)}</td>
+                      <td className="p-3 text-center text-red-700">{count(r.missingDays)}</td>
+                      <td className="p-3 text-center font-bold">{count(r.netDays)}</td>
+                      <td className="p-3 text-right whitespace-nowrap">{money(r.part1)}</td>
+                      <td className="p-3 text-right whitespace-nowrap">{money(r.part2)}</td>
+                      <td className="p-3 text-right font-bold whitespace-nowrap">{money(r.totalAmount)}</td>
+                      <td className="p-3 text-center">
+                        <button type="button" aria-expanded={open} aria-controls={"detail-"+r.employeeId}
+                          onClick={()=>toggle(r.employeeId)} className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 rounded-[5px] hover:bg-slate-200 text-xs font-semibold">
+                          {open?<ChevronUp size={14}/>:<ChevronDown size={14}/>} Detay
+                        </button>
+                        {open&&(
+                          <div id={"detail-"+r.employeeId} className="text-left mt-3 w-[260px] md:w-[340px] max-w-[70vw] bg-slate-50 border border-slate-200 rounded-[5px] p-3 space-y-3 text-xs font-normal">
+                            <p className="font-bold text-slate-900">Kesinti nedenleri ({count(r.deductedDays)} gün)</p>
+                            {r.deductions.length===0?<p className="text-emerald-700">Kesinti bulunmuyor.</p>:
+                              <ul className="space-y-2">{r.deductions.map((d,i)=>(
+                                <li key={d.date+"-"+d.kind+"-"+i} className="border-b border-slate-200 pb-2 last:border-0 last:pb-0">
+                                  <div className="flex justify-between gap-3">
+                                    <span className="font-semibold">{dateLabel(d.date)} · {d.kind==="REPORT"?"Rapor":d.kind==="LEAVE"?"İzin":"Eksik gün"}</span>
+                                    <span className="text-red-700 whitespace-nowrap">−{count(d.days)} gün</span>
+                                  </div>
+                                  <p className="text-slate-600 mt-1 whitespace-normal break-words">{d.reason}</p>
+                                </li>
+                              ))}</ul>}
+                            {r.holidayNotes.length>0&&<div className="border-t border-slate-200 pt-2">
+                              <p className="font-bold text-emerald-700 mb-1">Kesilmeyen resmî tatiller</p>
+                              {r.holidayNotes.map((note,i)=><p key={i} className="mt-1 text-slate-600 whitespace-normal">{note}</p>)}
+                            </div>}
+                            {r.details.length>0&&<div className="border-t border-slate-200 pt-2">
+                              <p className="font-bold text-blue-700 mb-1">Ek mesai</p>
+                              {r.details.map((note,i)=><p key={i} className="mt-1 whitespace-normal text-slate-600">{note}</p>)}
+                            </div>}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              }
             </tbody>
           </table>
         </div>
-      </div>
+      </section>
+      <p className="text-xs text-slate-500">Hesaplama bilgilendirme amaçlıdır. Onaylanmış izin, puantaj ve tatil kayıtlarının son durumuna göre yenilenir. Günlük bedel burada değiştirilebilir; veri tabanındaki kayıtlar güncellenmez.</p>
     </div>
   );
 }

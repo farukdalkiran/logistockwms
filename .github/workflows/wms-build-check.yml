@@ -27,6 +27,8 @@ jobs:
           cache: 'npm'
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
+      - name: Multinet calculations
+        run: node --experimental-strip-types --test tests/multinet.test.mjs
       - name: TypeScript
         run: npx tsc --noEmit
       - name: Next.js build
