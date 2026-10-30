@@ -60,13 +60,17 @@ export function getUpcomingEmployeeEvents(
   const events: EmployeeCelebration[] = [];
   for (const employee of employees) {
     const birthday = employee.birthday && validDate(employee.birthday);
-    const monthDay = birthday
-      ? { month: birthday.month, day: birthday.day }
-      : employee.birthday_month_day && /^(\d{2})-(\d{2})$/.exec(employee.birthday_month_day);
-    if (monthDay) {
-      const month = birthday ? birthday.month : Number(monthDay[1]);
-      const day = birthday ? birthday.day : Number(monthDay[2]);
-      const next = nextOccurrence(month, day, current.utc, current.year);
+    let birthMonth: number | null = birthday ? birthday.month : null;
+    let birthDay: number | null = birthday ? birthday.day : null;
+    if (!birthday && employee.birthday_month_day) {
+      const parts = /^(\d{2})-(\d{2})$/.exec(employee.birthday_month_day);
+      if (parts) {
+        birthMonth = Number(parts[1]);
+        birthDay = Number(parts[2]);
+      }
+    }
+    if (birthMonth !== null && birthDay !== null) {
+      const next = nextOccurrence(birthMonth, birthDay, current.utc, current.year);
       if (next && next.daysUntil <= daysAhead) {
         events.push({ employeeId: employee.id, fullName: employee.full_name, kind: "birthday", date: next.date, daysUntil: next.daysUntil });
       }
