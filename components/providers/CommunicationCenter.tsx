@@ -62,6 +62,7 @@ function SupportView({onChanged}:{onChanged:()=>void}) {
   const [subject,setSubject]=useState("");
   const [description,setDescription]=useState("");
   const [reply,setReply]=useState("");
+  const [resolutionNote,setResolutionNote]=useState("");
   const [internal,setInternal]=useState(false);
   const [busy,setBusy]=useState(false);
   const [loading,setLoading]=useState(true);
@@ -95,6 +96,7 @@ function SupportView({onChanged}:{onChanged:()=>void}) {
     setThreadLoading(false);
     if(!r.ok){setError(r.error);return;}
     setMessages(r.data.messages);
+    setResolutionNote(r.data.ticket.developer_note || "");
     setUnread(current=>current.filter(v=>v!==id));
     requestAnimationFrame(()=>bottom.current?.scrollIntoView({block:"end",behavior:"smooth"}));
   };
@@ -115,7 +117,7 @@ function SupportView({onChanged}:{onChanged:()=>void}) {
     await Promise.all([openThread(chosen.id),refresh(showArchive)]);
     onChanged();
   };
-  const mutate=async(input:{status?:TicketStatus;priority?:TicketPriority;assigned_to?:string|null;archive?:boolean})=>{
+  const mutate=async(input:{status?:TicketStatus;priority?:TicketPriority;assigned_to?:string|null;archive?:boolean;developer_note?:string})=>{
     if(!chosen||busy)return;setBusy(true);setError("");setSuccess("");
     const r=await manageAdvancedTicket(chosen.id,input);
     setBusy(false);if(!r.ok){setError(r.error);return;}
@@ -197,6 +199,18 @@ function SupportView({onChanged}:{onChanged:()=>void}) {
                 <select className={`${INPUT} mt-1`} disabled={busy} value={chosen.assigned_to||""} onChange={e=>void mutate({assigned_to:e.target.value||null})}>
                   <option value="">Atanmamış</option>{contacts.filter(c=>c.role.toUpperCase()==="DEVELOPER").map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
                 </select></label>
+            </div>}
+            {developer&&<div className="rounded-[5px] border border-slate-200 bg-white p-3">
+              <label className="block text-xs font-semibold text-slate-700">Çözüm / Kapanış Notu
+                <textarea maxLength={3000} value={resolutionNote} onChange={e=>setResolutionNote(e.target.value)}
+                  className={`${INPUT} mt-2 min-h-20`} placeholder="Talebin nasıl çözüldüğünü veya sonraki işlem adımlarını yazın..."/>
+              </label>
+              <button type="button" className={`${BTN} mt-2`} disabled={busy} onClick={()=>void mutate({developer_note:resolutionNote})}>
+                <ShieldCheck size={15}/>Çözüm Notunu Kaydet
+              </button>
+            </div>}
+            {!developer&&chosen.developer_note&&<div className="rounded-[5px] border border-emerald-200 bg-emerald-50 p-3 text-sm leading-6 text-emerald-900">
+              <strong>Destek çözüm notu:</strong> {chosen.developer_note}
             </div>}
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs text-slate-500">İlk yanıt: {fmt(chosen.first_response_at)} · Çözüm: {fmt(chosen.resolved_at)}</p>
