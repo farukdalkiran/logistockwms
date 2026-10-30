@@ -2,6 +2,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import { cargoExportValue, isValidCargoTracking, selectCargoExportRecord, type CargoExportRecord } from "@/lib/cargo-export";
 
 // Service Role ile RLS kalkanlarını delen, tam yetkili Supabase Admin istemcisi
 const supabaseAdmin = createClient(
@@ -272,28 +273,64 @@ export async function getKargoStats(fileId?: string) {
 
 export async function getProcessedExportData(fileId?: string) {
   try {
+    // ERP satırları yalnızca işlenen teslimatları belirler. Gerekçeler cargo_records.note alanındadır.
     let query = supabaseAdmin
       .from("erp_raw_shipments")
-      .select("delivery_number, aras_tracking_number")
+      .select("delivery_number,sd_document,file_id,aras_tracking_number")
       .eq("is_processed_aras", true)
       .order("processed_at", { ascending: false });
 
-    if (fileId && fileId.trim() !== "") {
-      query = query.eq("file_id", fileId);
+    if (fileId?.trim()) query = query.eq("file_id", fileId.trim());
+    type ShipmentExport = { delivery_number: string; sd_document: string | null; file_id: string | null; aras_tracking_number: string | null };
+    const shipments = await fetchAllRows(query) as ShipmentExport[];
+
+    const deliveries = new Map<string, ShipmentExport[]>();
+    for (const shipment of shipments) {
+      const delivery = shipment.delivery_number?.trim();
+      if (!delivery) continue;
+      if (!deliveries.has(delivery)) deliveries.set(delivery, []);
+      deliveries.get(delivery)!.push(shipment);
+    }
+    if (deliveries.size === 0) return { success: true, data: [] };
+
+    // Gönderi + SD belgesi aynı değilse, farklı bir kargoya ait notu yazdırma.
+    const cargoByDelivery = new Map<string, CargoExportRecord[]>();
+    const deliveryNumbers = [...deliveries.keys()];
+    for (let i = 0; i < deliveryNumbers.length; i += 150) {
+      const batch = deliveryNumbers.slice(i, i + 150);
+      const matched = await fetchAllRows(
+        supabaseAdmin.from("cargo_records")
+          .select("delivery_number,sd_document,aras_tracking_number,missing_address,is_returned,note,file_name,created_at")
+          .in("delivery_number", batch)
+          .order("created_at", { ascending: false }),
+      ) as CargoExportRecord[];
+      for (const row of matched) {
+        const list = cargoByDelivery.get(row.delivery_number) || [];
+        list.push(row);
+        cargoByDelivery.set(row.delivery_number, list);
+      }
     }
 
-    const data = await fetchAllRows(query);
-    
-    const uniqueMap = new Map();
-    data.forEach(item => {
-       if (!uniqueMap.has(item.delivery_number)) {
-           uniqueMap.set(item.delivery_number, item);
-       }
+    const { data: fileRows, error: fileError } = await supabaseAdmin.from("aras_files").select("id,filename");
+    if (fileError) throw fileError;
+    const fileNames = new Map((fileRows || []).map((row) => [row.id, row.filename]));
+
+    const data = [...deliveries].map(([delivery_number, rows]) => {
+      const currentFile = fileNames.get(rows[0].file_id || "") || null;
+      const record = selectCargoExportRecord(
+        cargoByDelivery.get(delivery_number) || [],
+        rows.map((row) => row.sd_document || ""),
+        currentFile,
+      );
+      const erpTracking = rows.find((row) => isValidCargoTracking(row.aras_tracking_number))?.aras_tracking_number
+        || rows[0].aras_tracking_number;
+      return { delivery_number, aras_tracking_number: cargoExportValue(record, erpTracking) };
     });
 
-    return { success: true, data: Array.from(uniqueMap.values()) };
-  } catch (err: any) {
-    return { success: false, error: "Veri çekilemedi." };
+    return { success: true, data };
+  } catch (err) {
+    console.error("Kargo çıktı hatası:", err);
+    return { success: false, error: "İşlenen kargo verileri alınamadı." };
   }
 }
 
