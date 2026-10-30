@@ -120,6 +120,25 @@ export async function getNoticeCenterSnapshot(): Promise<Result<{
     ]);
     if (readResult.error || ticketsResult.error) throw new Error("Bildirim sayacı yüklenemedi.");
     const versions = new Map((readResult.data ?? []).map(r => [r.announcement_id, r.revision]));
+    // Personel için yalnızca okunmamış destek yanıtlarının sayısı. Genel yenileme sıklığı değişmez.
+    let supportIndicator = ticketsResult.count ?? 0;
+    if (!ctx.isDeveloper) {
+      const ownTickets = await ctx.db.from("wms_support_tickets")
+        .select("id,last_message_at").eq("created_by", ctx.id).is("archived_at", null)
+        .not("last_message_at", "is", null).limit(100);
+      if (ownTickets.error) throw ownTickets.error;
+      const ids = (ownTickets.data || []).map(t => t.id);
+      if (ids.length) {
+        const views = await ctx.db.from("wms_support_ticket_views")
+          .select("ticket_id,last_read_at").eq("user_id", ctx.id).in("ticket_id", ids);
+        if (views.error) throw views.error;
+        const lastRead = new Map((views.data || []).map(v => [v.ticket_id, v.last_read_at]));
+        supportIndicator = (ownTickets.data || []).filter(t =>
+          t.last_message_at && (!lastRead.get(t.id) ||
+          Date.parse(t.last_message_at) > Date.parse(lastRead.get(t.id)!))
+        ).length;
+      }
+    }
     return {
       ok: true,
       data: {
@@ -127,7 +146,7 @@ export async function getNoticeCenterSnapshot(): Promise<Result<{
         announcements: visible,
         branches: (branchesResult.data ?? []) as { id: string; name: string }[],
         unreadIds: current.filter(a => versions.get(a.id) !== (a.revision ?? 1)).map(a => a.id),
-        openTicketCount: ticketsResult.count ?? 0,
+        openTicketCount: supportIndicator,
       },
     };
   } catch (error) {
