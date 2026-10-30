@@ -38,6 +38,12 @@ const TERMINAL_ID = /^[1-9][0-9]{4}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MANAGEMENT_ROLES = new Set(["Developer","Admin","ADMNWH","StoreMng","HR"]);
 const PROTECTED_ROLES = new Set(["Developer","Admin"]);
+const LOCAL_ASSIGNABLE_ROLES: Record<string, Set<string>> = {
+  Admin: new Set(["ADMNWH","StoreMng","HR","WAREHOUSE","Store","Limited"]),
+  ADMNWH: new Set(["WAREHOUSE","Limited"]),
+  StoreMng: new Set(["Store","Limited"]),
+  HR: new Set(["Limited"]),
+};
 
 function adminDb() {
   if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY)
@@ -92,8 +98,8 @@ function checkBranch(ctx:Actor,branchId:string|null){
 }
 function checkRole(ctx:Actor,roleCode:string){
   if(!roleCode||roleCode.length>40)throw new Error("Yetki sınıfı geçersiz.");
-  if(!ctx.developer&&PROTECTED_ROLES.has(roleCode))
-    throw new Error("Developer ve Admin yetkileri şube kullanıcıları tarafından atanamaz.");
+  if(!ctx.developer&&!LOCAL_ASSIGNABLE_ROLES[ctx.role]?.has(roleCode))
+    throw new Error("Bu yetki sınıfını atama izniniz bulunmuyor.");
 }
 async function ensureRole(ctx:Actor,roleCode:string) {
   checkRole(ctx,roleCode);
@@ -129,7 +135,7 @@ async function ensureLinkAvailable(ctx:Actor,id:string,branchId:string,excluding
   if(error)throw error;
   if(data?.length)throw new Error("Bu personel ID başka bir web hesabına bağlı.");
 }
-async function generateEmployee(ctx:Actor,branchId:string,fullName:string,positionTitle:string) {
+async function generateEmployee(ctx:Actor,branchId:string|null,fullName:string,positionTitle:string) {
   for(let attempt=0;attempt<25;attempt++){
     const id=String(randomInt(10000,100000));
     const {error}=await ctx.db.from("employees").insert({
@@ -172,7 +178,7 @@ export async function fetchAdminAccounts():Promise<Result<PasswordDashboard>>{
       ownBranchName:branchList.find(b=>b.id===ctx.branchId)?.name||(ctx.developer?"Tüm şubeler":"Şubem"),
       currentUserId:ctx.id,webAccounts,terminalAccounts:(b.data||[]) as TerminalAccount[],
       branches:branchList,
-      roles:((roles.data||[]) as AccountRole[]).filter(r=>ctx.developer||!PROTECTED_ROLES.has(r.role_code)),
+      roles:((roles.data||[]) as AccountRole[]).filter(r=>ctx.developer||LOCAL_ASSIGNABLE_ROLES[ctx.role]?.has(r.role_code)),
     };
   }catch(e){return fail(e);}
 }
@@ -238,7 +244,8 @@ export async function assignWebEmployeeIdentity(userId:string):Promise<Result<{e
     const ctx=await actor();
     const profile=await getProfile(ctx,userId);
     if(profile.employee_id)throw new Error("Bu hesaba zaten bir personel ID bağlı.");
-    const branchId=checkBranch(ctx,profile.branch_id);
+    // Global Developer profillerinin branch_id alanı mevcut şemada null olabilir.
+    const branchId=profile.branch_id===null&&ctx.developer ? null : checkBranch(ctx,profile.branch_id);
     createdId=await generateEmployee(ctx,branchId,cleanName(profile.full_name||"Web Kullanıcısı"),"Web Hesabı");
     const {data,error}=await ctx.db.from("profiles")
       .update({employee_id:createdId}).eq("id",userId).is("employee_id",null)
