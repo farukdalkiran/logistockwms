@@ -20,7 +20,7 @@
 
     "lint": "eslint",
 
-    "test:missing-part-email": "node --experimental-strip-types --test tests/missing-part-email.test.mjs"
+    "test:missing-part-email": "node --experimental-strip-types --test tests/missing-part-email.test.mjs tests/cargo-contact.test.mjs"
 
   },
 
