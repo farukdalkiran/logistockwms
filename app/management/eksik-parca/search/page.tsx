@@ -401,6 +401,13 @@ export default function TrackingTable() {
                 <Trash2 className="w-4 h-4" /> SİL ({selectedIds.length})
               </button>
             )}
+            <button
+              onClick={exportOutlookBulk}
+              className="bg-blue-600 hover:bg-blue-700 text-white h-10 px-4 rounded-md text-xs font-black transition-colors flex items-center gap-2 uppercase tracking-wider"
+              title="Bu sayfadaki seçili eksik bilgi kayıtları; seçim yoksa görünen sayfadaki tüm eksik bilgi kayıtları. Gönderim yapılmaz."
+            >
+              <Download className="w-4 h-4" /> OUTLOOK TOPLU LİSTE
+            </button>
             <button 
               onClick={exportToExcel}
               className="bg-[#03DF95] hover:bg-[#02c784] text-slate-900 h-10 px-4 rounded-md text-xs font-black transition-colors flex items-center gap-2 uppercase tracking-wider"
@@ -501,9 +508,15 @@ export default function TrackingTable() {
         </div>
       </div>
 
+      <div className="border-b border-blue-100 bg-blue-50 px-5 py-3 text-xs text-blue-900">
+        <span className="font-bold">Eksik parça bilgilendirme:</span> Ana ERP dosyasından e-posta ve adres eşleştirilir.
+        Eksik bilgi kayıtlarında Outlook butonu kişiye özel taslak açar.
+        Toplu liste yalnızca görünen sayfayı (ve varsa seçili satırları) dışarı aktarır; hiçbir e-posta kendiliğinden gönderilmez.
+      </div>
+
       {/* VERİ TABLOSU */}
       <div className="overflow-x-auto w-full flex-1 bg-white">
-        <table className="w-full text-left border-collapse min-w-[1250px]">
+        <table className="w-full text-left border-collapse min-w-[1620px]">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200">
               <th className="px-4 py-3 w-10 text-center border-r border-slate-100">
@@ -511,6 +524,7 @@ export default function TrackingTable() {
               </th>
               <SortHeader label="Yüklenme" sortKey="created_at" />
               <SortHeader label="Müşteri Bilgisi" sortKey="customer_name" />
+              <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">E-posta &amp; Adres (ERP)</th>
               <SortHeader label="Evrak & Sipariş" sortKey="sd_document" />
               <SortHeader label="Kargo Numaraları" sortKey="aras_tracking_number" />
               <SortHeader label="Adet" sortKey="item_count" align="center" />
@@ -521,7 +535,7 @@ export default function TrackingTable() {
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={8} className="px-4 py-24 text-center bg-white">
+                <td colSpan={9} className="px-4 py-24 text-center bg-white">
                   <div className="flex flex-col items-center justify-center gap-4">
                     <svg className="animate-spin w-8 h-8 text-[#03DF95]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                     <span className="text-sm font-medium text-slate-500">Sunucudan Veriler Çekiliyor...</span>
@@ -530,7 +544,7 @@ export default function TrackingTable() {
               </tr>
             ) : records.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-20 text-center text-sm font-medium text-slate-500 bg-slate-50/50">
+                <td colSpan={9} className="px-4 py-20 text-center text-sm font-medium text-slate-500 bg-slate-50/50">
                   Belirtilen kriterlere uygun kayıt bulunamadı.
                 </td>
               </tr>
@@ -563,6 +577,15 @@ export default function TrackingTable() {
                       <span className="text-xs font-medium text-slate-500 block mt-0.5">{rec.mobile_number || "Telefon Yok"}</span>
                     </td>
                     
+                    <td className="px-4 py-3 min-w-[260px] max-w-[320px]">
+                      <span className="block truncate text-xs font-bold text-slate-800" title={rec.email || "Ana dosyada e-posta yok"}>
+                        {rec.email || "E-posta bulunamadı"}
+                      </span>
+                      <span className="mt-1 block max-w-[300px] truncate text-[11px] leading-5 text-slate-500" title={rec.address || "Ana dosyada adres yok"}>
+                        {rec.address || "Adres bilgisi bulunamadı"}
+                      </span>
+                    </td>
+
                     <td className="px-4 py-3 whitespace-nowrap">
                       <div className="flex flex-col gap-0.5">
                         <span className="text-xs font-bold text-slate-700"><span className="text-[10px] text-slate-400 font-normal mr-1">SD:</span>{rec.sd_document}</span>
@@ -599,6 +622,13 @@ export default function TrackingTable() {
                     <td className="px-4 py-3 text-center">
                       {rec.is_returned ? (
                         <span className="bg-red-100 text-red-700 px-3 py-1 text-[10px] font-bold uppercase rounded border border-red-200">İade</span>
+                      ) : addressErr ? (
+                        <div className="max-w-[210px]">
+                          <span className="bg-amber-100 text-amber-800 px-2 py-1 text-[10px] font-bold uppercase rounded border border-amber-200">Eksik bilgi</span>
+                          <span className="mt-2 block text-[11px] font-medium text-amber-900 whitespace-normal" title={rec.note || ""}>
+                            {missingPartReason(rec.note)}
+                          </span>
+                        </div>
                       ) : (
                         <span className="text-slate-400 text-xs font-medium">-</span>
                       )}
@@ -606,6 +636,17 @@ export default function TrackingTable() {
 
                     <td className="px-4 py-3 text-right pr-6 whitespace-nowrap">
                       <div className="flex items-center justify-end gap-2">
+                        {addressErr && !rec.is_returned && (
+                          <button
+                            type="button"
+                            onClick={() => openOutlookDraft(rec)}
+                            disabled={!hasValidRecipientEmail(rec.email) || !hasValidMissingPartOrderNumber(rec.sd_document)}
+                            title={!hasValidRecipientEmail(rec.email) ? "ERP e-posta adresi eksik veya hatalı" : !hasValidMissingPartOrderNumber(rec.sd_document) ? "T ile başlayan sipariş numarası bulunamadı" : "Outlook'ta e-posta taslağı aç, gönderme"}
+                            className="px-3 py-2 rounded text-[11px] font-bold flex items-center gap-1.5 border bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <Mail className="w-4 h-4" /> OUTLOOK
+                          </button>
+                        )}
                         {/* NOT BUTONU */}
                         <button 
                           onClick={() => setNoteModal({ isOpen: true, id: rec.id, note: rec.note || "" })}
