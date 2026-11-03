@@ -2,6 +2,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
+import { buildCargoContactSnapshot } from "@/lib/cargo-contact";
 import { cargoExportValue, isValidCargoTracking, selectCargoExportRecord, type CargoExportRecord } from "@/lib/cargo-export";
 
 // Service Role ile RLS kalkanlarını delen, tam yetkili Supabase Admin istemcisi
@@ -189,6 +190,7 @@ export async function saveArasTracking(deliveryNumber: string, trackingNumber: s
 
     // 3. ADIM: İKİNCİ TABLOYA (cargo_records) AKTARILACAK VERİ PAKETİNİ HAZIRLA
     const secondTablePayload = {
+      ...buildCargoContactSnapshot(updatedRecord),
       customer_name: updatedRecord.customer_name || "",
       mobile_number: updatedRecord.mobile_number || "",
       sd_document: updatedRecord.sd_document || "",
