@@ -198,8 +198,13 @@ export async function saveCargoPanelRecord(
         .order("created_at", { ascending: false })
         .limit(20);
       if (existingError) throw existingError;
-      existingId = existing?.[0]?.id ?? null;
-      previousRecord = existing?.[0] ?? null;
+      // Aynı Delivery/SD başka bir müşteriye aitse iletişim verisini karıştırma.
+      const matchedExisting = existing?.find((record) =>
+        clean(record.customer_name).toLocaleUpperCase("tr-TR") ===
+        clean(primary.customer_name).toLocaleUpperCase("tr-TR")
+      );
+      existingId = matchedExisting?.id ?? null;
+      previousRecord = matchedExisting ?? null;
     }
 
     // Save the COMPLETE contact/address snapshot with the cargo record now.
