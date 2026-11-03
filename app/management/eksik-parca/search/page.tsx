@@ -4,7 +4,9 @@ import { useEffect, useState, FormEvent } from "react";
 import { supabase } from "@/lib/supabase"; 
 import * as XLSX from "xlsx"; 
 import toast, { Toaster } from "react-hot-toast";
-import { Undo2, Search, AlertTriangle, RefreshCw, Trash2, FileText } from 'lucide-react';
+import { Undo2, Search, AlertTriangle, RefreshCw, Trash2, FileText, Mail, Download } from 'lucide-react';
+import { getCargoRecordContacts } from "@/app/actions/aras-panel-v2";
+import { buildMissingPartEmail, hasValidMissingPartOrderNumber, hasValidRecipientEmail, missingPartReason, outlookComposeUrl } from "@/lib/missing-part-email";
 
 interface ShipmentRecord {
   id: string;
@@ -18,7 +20,9 @@ interface ShipmentRecord {
   item_count: number;
   created_at: string;
   missing_address: boolean;
-  note?: string; 
+  note?: string;
+  email?: string | null;
+  address?: string | null;
 }
 
 type SortKey = keyof ShipmentRecord;
@@ -100,7 +104,25 @@ export default function TrackingTable() {
       const { data, count, error } = await query;
       if (error) throw error;
 
-      setRecords(data as ShipmentRecord[]);
+      // Yalnızca bu sayfanın kayıtlarını kaynak ERP dosyasındaki iletişim bilgileriyle eşleştir.
+      // İkinci tabloya kişisel veri kopyalanmaz, sunucu tarafında yetki kontrolü yapılır.
+      const pageRecords = (data || []) as ShipmentRecord[];
+      if (pageRecords.length) {
+        const contactResult = await getCargoRecordContacts(pageRecords.map((record) => record.id));
+        if (contactResult.success) {
+          setRecords(pageRecords.map((record) => ({
+            ...record,
+            ...(contactResult.data[record.id] || {}),
+          })));
+        } else {
+          setRecords(pageRecords);
+          toast.error("Adres ve e-posta bilgileri getirilemedi.");
+        }
+      } else {
+        setRecords([]);
+      }
+      // Filtre veya sayfa değiştiğinde önceki sayfanın seçimleri yeni sayfaya taşınmaz.
+      setSelectedIds([]);
       if (count !== null) setTotalRecordsCount(count);
 
     } catch (err: any) {
@@ -242,6 +264,8 @@ export default function TrackingTable() {
       "SD Document": r.sd_document,
       "Delivery No": r.delivery_number,
       "Telefon": r.mobile_number,
+      "E-posta (ERP)": r.email || "",
+      "Adres (ERP)": r.address || "",
       "Aras Shipment No": r.aras_shipment_number,
       "Takip No": r.aras_tracking_number,
       "Kalem": r.item_count || 1,
@@ -253,6 +277,63 @@ export default function TrackingTable() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Rapor");
     XLSX.writeFile(workbook, `WMS_Rapor_${new Date().getTime()}.xlsx`);
+  };
+
+  // Toplu Outlook / Excel çıktısı yalnızca bu sayfadaki seçili eksik bilgi kayıtlarını kapsar.
+  // E-posta otomatik gönderilmez. Kullanıcı Outlook'ta kontrol ederek gönderir.
+  const exportOutlookBulk = () => {
+    const scope = selectedIds.length
+      ? records.filter((record) => selectedIds.includes(record.id))
+      : records;
+    const missingRecords = scope.filter((record) =>
+      record.missing_address && !record.is_returned &&
+      !(record.aras_tracking_number || "").toUpperCase().startsWith("CPR")
+    );
+    if (!missingRecords.length) {
+      toast.error("Bu sayfada çıktı alınacak eksik bilgi kaydı bulunamadı.");
+      return;
+    }
+
+    const exportRows = missingRecords.map((record) => {
+      const message = buildMissingPartEmail(record);
+      const emailOk = hasValidRecipientEmail(record.email);
+      const orderOk = hasValidMissingPartOrderNumber(record.sd_document);
+      return {
+        "Durum": !emailOk ? "E-POSTA KONTROLÜ" : !orderOk ? "T NUMARASI KONTROLÜ" : "GÖNDERİME HAZIR TASLAK",
+        "Alıcı E-posta": record.email || "",
+        "Ad Soyad": record.customer_name || "",
+        "Eksik Parça Sipariş No": record.sd_document || "",
+        "Delivery No": record.delivery_number || "",
+        "Telefon": record.mobile_number || "",
+        "Kayıtlı Adres": record.address || "",
+        "Gönderilememe Nedeni": missingPartReason(record.note),
+        "Konu": message.subject,
+        "E-posta Metni": message.body,
+      };
+    });
+    const sheet = XLSX.utils.json_to_sheet(exportRows);
+    sheet["!cols"] = [
+      { wch: 24 }, { wch: 32 }, { wch: 26 }, { wch: 25 }, { wch: 20 },
+      { wch: 20 }, { wch: 50 }, { wch: 40 }, { wch: 45 }, { wch: 85 },
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, "Outlook Taslakları");
+    XLSX.writeFile(workbook, "LEGO_Eksik_Parca_Outlook_" + Date.now() + ".xlsx");
+    toast.success(missingRecords.length + " eksik bilgi kaydı Excel'e aktarıldı. E-posta gönderilmedi.");
+  };
+
+  const openOutlookDraft = (record: ShipmentRecord) => {
+    if (!record.missing_address || record.is_returned) return;
+    if (!hasValidRecipientEmail(record.email)) {
+      toast.error("Bu kaydın geçerli bir alıcı e-posta adresi yok.");
+      return;
+    }
+    if (!hasValidMissingPartOrderNumber(record.sd_document)) {
+      toast.error("T ile başlayan eksik parça sipariş numarası kontrol edilmeli.");
+      return;
+    }
+    const message = buildMissingPartEmail(record);
+    window.open(outlookComposeUrl(record.email!, message.subject, message.body), "_blank", "noopener,noreferrer");
   };
 
   // KARGO TAKİP BUTONU İÇİN DİNAMİK YÖNLENDİRİCİ (Hepsijet ve Aras Ayrımı)
