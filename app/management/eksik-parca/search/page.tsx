@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase";
 import * as XLSX from "xlsx"; 
 import toast, { Toaster } from "react-hot-toast";
 import { Undo2, Search, AlertTriangle, RefreshCw, Trash2, FileText, Mail, Download } from 'lucide-react';
-import { getCargoRecordContacts } from "@/app/actions/aras-panel-v2";
+import { formatCargoRecordAddress } from "@/lib/cargo-contact";
 import { buildMissingPartEmail, hasValidMissingPartOrderNumber, hasValidRecipientEmail, missingPartReason, outlookComposeUrl } from "@/lib/missing-part-email";
 
 interface ShipmentRecord {
@@ -22,7 +22,13 @@ interface ShipmentRecord {
   missing_address: boolean;
   note?: string;
   email?: string | null;
-  address?: string | null;
+  street?: string | null;
+  street_2?: string | null;
+  city?: string | null;
+  region?: string | null;
+  postal_code?: string | null;
+  country?: string | null;
+  address?: string;
 }
 
 type SortKey = keyof ShipmentRecord;
@@ -78,7 +84,7 @@ export default function TrackingTable() {
         else if (specificField === "TRACKING") {
           query = query.or(`aras_tracking_number.ilike.%${searchQuery}%,aras_shipment_number.ilike.%${searchQuery}%`);
         } else {
-          query = query.or(`customer_name.ilike.%${searchQuery}%,sd_document.ilike.%${searchQuery}%,delivery_number.ilike.%${searchQuery}%,mobile_number.ilike.%${searchQuery}%,aras_tracking_number.ilike.%${searchQuery}%,aras_shipment_number.ilike.%${searchQuery}%`);
+          query = query.or(`customer_name.ilike.%${searchQuery}%,sd_document.ilike.%${searchQuery}%,delivery_number.ilike.%${searchQuery}%,mobile_number.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%,street.ilike.%${searchQuery}%,city.ilike.%${searchQuery}%,aras_tracking_number.ilike.%${searchQuery}%,aras_shipment_number.ilike.%${searchQuery}%`);
         }
       }
 
@@ -104,23 +110,12 @@ export default function TrackingTable() {
       const { data, count, error } = await query;
       if (error) throw error;
 
-      // Yalnızca bu sayfanın kayıtlarını kaynak ERP dosyasındaki iletişim bilgileriyle eşleştir.
-      // İkinci tabloya kişisel veri kopyalanmaz, sunucu tarafında yetki kontrolü yapılır.
-      const pageRecords = (data || []) as ShipmentRecord[];
-      if (pageRecords.length) {
-        const contactResult = await getCargoRecordContacts(pageRecords.map((record) => record.id));
-        if (contactResult.success) {
-          setRecords(pageRecords.map((record) => ({
-            ...record,
-            ...(contactResult.data[record.id] || {}),
-          })));
-        } else {
-          setRecords(pageRecords);
-          toast.error("Adres ve e-posta bilgileri getirilemedi.");
-        }
-      } else {
-        setRecords([]);
-      }
+      // Müşteri iletişim verileri bu tablodaki kalıcı kopyadan gelir.
+      // Ana ERP dosyasının silinmesi artık görünümü veya e-posta taslaklarını etkilemez.
+      setRecords(((data || []) as ShipmentRecord[]).map((record) => ({
+        ...record,
+        address: formatCargoRecordAddress(record),
+      })));
       // Filtre veya sayfa değiştiğinde önceki sayfanın seçimleri yeni sayfaya taşınmaz.
       setSelectedIds([]);
       if (count !== null) setTotalRecordsCount(count);
@@ -264,8 +259,14 @@ export default function TrackingTable() {
       "SD Document": r.sd_document,
       "Delivery No": r.delivery_number,
       "Telefon": r.mobile_number,
-      "E-posta (ERP)": r.email || "",
-      "Adres (ERP)": r.address || "",
+      "E-posta (Kayıt)": r.email || "",
+      "Tam Adres (Kayıt)": r.address || "",
+      "Adres Satırı": r.street || "",
+      "İkinci Adres Satırı": r.street_2 || "",
+      "İl": r.city || "",
+      "Bölge": r.region || "",
+      "Posta Kodu": r.postal_code || "",
+      "Ülke": r.country || "",
       "Aras Shipment No": r.aras_shipment_number,
       "Takip No": r.aras_tracking_number,
       "Kalem": r.item_count || 1,
@@ -306,6 +307,12 @@ export default function TrackingTable() {
         "Delivery No": record.delivery_number || "",
         "Telefon": record.mobile_number || "",
         "Kayıtlı Adres": record.address || "",
+        "Adres Satırı": record.street || "",
+        "İkinci Adres Satırı": record.street_2 || "",
+        "İl": record.city || "",
+        "Bölge": record.region || "",
+        "Posta Kodu": record.postal_code || "",
+        "Ülke": record.country || "",
         "Gönderilememe Nedeni": missingPartReason(record.note),
         "Konu": message.subject,
         "E-posta Metni": message.body,
@@ -314,7 +321,8 @@ export default function TrackingTable() {
     const sheet = XLSX.utils.json_to_sheet(exportRows);
     sheet["!cols"] = [
       { wch: 24 }, { wch: 32 }, { wch: 26 }, { wch: 25 }, { wch: 20 },
-      { wch: 20 }, { wch: 50 }, { wch: 40 }, { wch: 45 }, { wch: 85 },
+      { wch: 20 }, { wch: 50 }, { wch: 44 }, { wch: 44 }, { wch: 18 },
+      { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 40 }, { wch: 45 }, { wch: 85 },
     ];
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, sheet, "Outlook Taslakları");
@@ -434,7 +442,7 @@ export default function TrackingTable() {
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               className="w-full h-12 pl-12 pr-4 bg-slate-800 border border-slate-700 rounded-md text-white text-sm focus:outline-none focus:border-[#03DF95] uppercase placeholder:text-slate-500 transition-colors"
-              placeholder="İSİM, TAKİP NO, SD DOCUMENT VEYA TELEFON YAZIN..."
+              placeholder="İSİM, E-POSTA, ADRES, TAKİP NO VEYA TELEFON..."
             />
           </div>
           <button 
@@ -509,7 +517,7 @@ export default function TrackingTable() {
       </div>
 
       <div className="border-b border-blue-100 bg-blue-50 px-5 py-3 text-xs text-blue-900">
-        <span className="font-bold">Eksik parça bilgilendirme:</span> Ana ERP dosyasından e-posta ve adres eşleştirilir.
+        <span className="font-bold">Eksik parça bilgilendirme:</span> E-posta ve tüm adres alanları cargo_records kaydında kalıcı olarak saklanır.
         Eksik bilgi kayıtlarında Outlook butonu kişiye özel taslak açar.
         Toplu liste yalnızca görünen sayfayı (ve varsa seçili satırları) dışarı aktarır; hiçbir e-posta kendiliğinden gönderilmez.
       </div>
@@ -524,7 +532,7 @@ export default function TrackingTable() {
               </th>
               <SortHeader label="Yüklenme" sortKey="created_at" />
               <SortHeader label="Müşteri Bilgisi" sortKey="customer_name" />
-              <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">E-posta &amp; Adres (ERP)</th>
+              <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">E-posta &amp; Adres (Kayıt)</th>
               <SortHeader label="Evrak & Sipariş" sortKey="sd_document" />
               <SortHeader label="Kargo Numaraları" sortKey="aras_tracking_number" />
               <SortHeader label="Adet" sortKey="item_count" align="center" />
@@ -578,10 +586,10 @@ export default function TrackingTable() {
                     </td>
                     
                     <td className="px-4 py-3 min-w-[260px] max-w-[320px]">
-                      <span className="block truncate text-xs font-bold text-slate-800" title={rec.email || "Ana dosyada e-posta yok"}>
+                      <span className="block truncate text-xs font-bold text-slate-800" title={rec.email || "Kayıtta e-posta yok"}>
                         {rec.email || "E-posta bulunamadı"}
                       </span>
-                      <span className="mt-1 block max-w-[300px] truncate text-[11px] leading-5 text-slate-500" title={rec.address || "Ana dosyada adres yok"}>
+                      <span className="mt-1 block max-w-[300px] truncate text-[11px] leading-5 text-slate-500" title={rec.address || "Kayıtta adres yok"}>
                         {rec.address || "Adres bilgisi bulunamadı"}
                       </span>
                     </td>
@@ -641,7 +649,7 @@ export default function TrackingTable() {
                             type="button"
                             onClick={() => openOutlookDraft(rec)}
                             disabled={!hasValidRecipientEmail(rec.email) || !hasValidMissingPartOrderNumber(rec.sd_document)}
-                            title={!hasValidRecipientEmail(rec.email) ? "ERP e-posta adresi eksik veya hatalı" : !hasValidMissingPartOrderNumber(rec.sd_document) ? "T ile başlayan sipariş numarası bulunamadı" : "Outlook'ta e-posta taslağı aç, gönderme"}
+                            title={!hasValidRecipientEmail(rec.email) ? "Kayıt e-posta adresi eksik veya hatalı" : !hasValidMissingPartOrderNumber(rec.sd_document) ? "T ile başlayan sipariş numarası bulunamadı" : "Outlook'ta e-posta taslağı aç, gönderme"}
                             className="px-3 py-2 rounded text-[11px] font-bold flex items-center gap-1.5 border bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <Mail className="w-4 h-4" /> OUTLOOK
