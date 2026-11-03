@@ -18,7 +18,9 @@
 
     "start": "next start",
 
-    "lint": "eslint"
+    "lint": "eslint",
+
+    "test:missing-part-email": "node --experimental-strip-types --test tests/missing-part-email.test.mjs"
 
   },
 
