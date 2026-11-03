@@ -312,3 +312,80 @@ export async function getCargoPanelExistingRecord(
     };
   }
 }
+
+
+/**
+ * Search sayfasındaki görünen kargo kayıtları için orijinal ERP dosyasından
+ * iletişim bilgilerini okur. Verileri ikinci bir tabloda çoğaltmaz.
+ * İstemcinin yolladığı sipariş bilgilerine güvenmez: eşleşmeyi kayıt ID'sinden yapar.
+ */
+export async function getCargoRecordContacts(recordIds: string[]) {
+  try {
+    if (!Array.isArray(recordIds) || recordIds.length > 100 ||
+        recordIds.some((id) => typeof id !== "string" || !UUID.test(id))) {
+      throw new Error("Geçersiz kayıt listesi.");
+    }
+    const supabase = await assertAuthorized();
+    if (!recordIds.length) {
+      return { success: true as const, data: {} as Record<string, { email: string | null; address: string | null }> };
+    }
+
+    const { data: cargo, error: cargoError } = await supabase
+      .from("cargo_records")
+      .select("id,delivery_number,sd_document,customer_name")
+      .in("id", recordIds);
+    if (cargoError) throw cargoError;
+    const deliveries = Array.from(new Set(
+      (cargo || []).map((record) => clean(record.delivery_number)).filter(Boolean)
+    ));
+
+    type Contact = { email: string | null; address: string | null };
+    const contacts: Record<string, Contact> = {};
+    const originals = new Map<string, {
+      email: string | null; address: string | null; customer_name: string | null
+    }>();
+    const pair = (delivery: unknown, sd: unknown) =>
+      clean(delivery) + "\u0000" + clean(sd);
+
+    // İstek başına en fazla 100 kayıt, dosya satırları 50 teslimatlık gruplar halinde.
+    for (let i = 0; i < deliveries.length; i += 50) {
+      const { data: rows, error } = await supabase
+        .from("erp_raw_shipments")
+        .select("delivery_number,sd_document,customer_name,email,street,street_2,region,city,postal_code,country")
+        .in("delivery_number", deliveries.slice(i, i + 50))
+        .order("created_at", { ascending: false })
+        .limit(1000);
+      if (error) throw error;
+      for (const row of rows || []) {
+        const address = [
+          row.street, row.street_2, row.region, row.city, row.postal_code, row.country
+        ].map(clean).filter(Boolean).join(", ");
+        const key = pair(row.delivery_number, row.sd_document);
+        const existing = originals.get(key);
+        if (!existing || (!existing.email && row.email)) {
+          originals.set(key, {
+            email: clean(row.email) || null,
+            address: address || null,
+            customer_name: clean(row.customer_name) || null,
+          });
+        }
+      }
+    }
+
+    for (const record of cargo || []) {
+      const original = originals.get(pair(record.delivery_number, record.sd_document));
+      if (!original) continue;
+      // Bir dosyada kopyalanmış bir numara varsa başka müşterinin iletişim
+      // bilgilerini göstermemek için isim uyumsuzluğunda eşleştirmeyi reddet.
+      if (clean(original.customer_name).toLocaleUpperCase("tr-TR") !==
+          clean(record.customer_name).toLocaleUpperCase("tr-TR")) continue;
+      contacts[record.id] = { email: original.email, address: original.address };
+    }
+    return { success: true as const, data: contacts };
+  } catch (error) {
+    return {
+      success: false as const,
+      error: error instanceof Error ? error.message : "İletişim bilgileri alınamadı.",
+    };
+  }
+}
