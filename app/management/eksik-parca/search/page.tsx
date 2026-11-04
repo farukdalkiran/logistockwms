@@ -657,8 +657,8 @@ export default function TrackingTable() {
                           {rec.is_returned ? "İadeyi Kaldır" : "İade"}
                         </button>
 
-                        {!addressErr && (
                         {/* FİRMAYA GÖRE DEĞİŞEN DİNAMİK TAKİP BUTONU */}
+                        {!addressErr && (
                         <button 
                           onClick={() => openTrack(rec.aras_tracking_number, isHepsijet)}
                           disabled={!rec.aras_tracking_number || addressErr}
