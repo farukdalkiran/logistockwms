@@ -6,7 +6,7 @@ import * as XLSX from "xlsx";
 import toast, { Toaster } from "react-hot-toast";
 import { Undo2, Search, AlertTriangle, RefreshCw, Trash2, FileText, Mail } from 'lucide-react';
 import { formatCargoRecordAddress } from "@/lib/cargo-contact";
-import { buildMissingPartEmail, hasValidMissingPartOrderNumber, hasValidRecipientEmail, getMissingPartIssue, outlookComposeUrl } from "@/lib/missing-part-email";
+import { buildMissingPartEmail, hasValidMissingPartOrderNumber, hasValidRecipientEmail, getMissingPartIssue, onePostaComposeUrl } from "@/lib/missing-part-email";
 
 interface ShipmentRecord {
   id: string;
@@ -58,6 +58,7 @@ export default function TrackingTable() {
   // MODALLAR
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [expandedContact, setExpandedContact] = useState<{ id: string; field: "email" | "address" | "note" } | null>(null);
+  const [onePostaDraft, setOnePostaDraft] = useState<{ to: string; subject: string; body: string } | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -282,7 +283,7 @@ export default function TrackingTable() {
     XLSX.writeFile(workbook, `WMS_Rapor_${new Date().getTime()}.xlsx`);
   };
 
-  const openOutlookDraft = (record: ShipmentRecord) => {
+  const openOnePostaDraft = (record: ShipmentRecord) => {
     if (!record.missing_address || record.is_returned) return;
     if (!hasValidRecipientEmail(record.email)) {
       toast.error("Bu kaydın geçerli bir alıcı e-posta adresi yok.");
@@ -293,7 +294,19 @@ export default function TrackingTable() {
       return;
     }
     const message = buildMissingPartEmail(record);
-    window.open(outlookComposeUrl(record.email!, message.subject, message.body), "_blank", "noopener,noreferrer");
+    const draft = { to: record.email!.trim(), subject: message.subject, body: message.body };
+    setOnePostaDraft(draft);
+    // 1Posta açılır; giriş sonrası URL alanları kaybolursa kopyalama ekranı kullanılır.
+    window.open(onePostaComposeUrl(draft.to, draft.subject, draft.body), "_blank", "noopener,noreferrer");
+  };
+
+  const copyOnePostaField = async (value: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(label + " kopyalandı.");
+    } catch {
+      toast.error("Otomatik kopyalanamadı. Metni seçip manuel kopyalayabilirsiniz.");
+    }
   };
 
   // KARGO TAKİP BUTONU İÇİN DİNAMİK YÖNLENDİRİCİ (Hepsijet ve Aras Ayrımı)
@@ -463,7 +476,7 @@ export default function TrackingTable() {
 
       <div className="border-b border-blue-100 bg-blue-50 px-5 py-3 text-xs text-blue-900">
         <span className="font-bold">Eksik parça bilgilendirme:</span> E-posta ve tüm adres alanları cargo_records kaydında kalıcı olarak saklanır.
-        E-posta, adres ve notları satırdaki detay düğmelerinden açabilirsiniz. Eksik bilgi kayıtları turuncu renkle işaretlenir; Outlook yalnızca gönderilmemiş bir taslak oluşturur.
+        E-posta, adres ve notları satırdaki detay düğmelerinden açabilirsiniz. Eksik bilgi kayıtları turuncu renkle işaretlenir; 1Posta üzerinden yalnızca gönderilmemiş bir taslak açılır.
       </div>
 
       {/* VERİ TABLOSU */}
@@ -604,12 +617,12 @@ export default function TrackingTable() {
                         {addressErr && !rec.is_returned && (
                           <button
                             type="button"
-                            onClick={() => openOutlookDraft(rec)}
+                            onClick={() => openOnePostaDraft(rec)}
                             disabled={!hasValidRecipientEmail(rec.email) || !hasValidMissingPartOrderNumber(rec.sd_document)}
-                            title={!hasValidRecipientEmail(rec.email) ? "Kayıt e-posta adresi eksik veya hatalı" : !hasValidMissingPartOrderNumber(rec.sd_document) ? "T ile başlayan sipariş numarası bulunamadı" : "Outlook'ta e-posta taslağı aç, gönderme"}
+                            title={!hasValidRecipientEmail(rec.email) ? "Kayıt e-posta adresi eksik veya hatalı" : !hasValidMissingPartOrderNumber(rec.sd_document) ? "T ile başlayan sipariş numarası bulunamadı" : "1Posta'da e-posta taslağı aç; otomatik gönderilmez"}
                             className="inline-flex items-center gap-1 rounded border border-blue-200 bg-blue-50 px-2 py-1.5 text-[10px] font-bold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
                           >
-                            <Mail className="h-3.5 w-3.5 shrink-0" /> Outlook
+                            <Mail className="h-3.5 w-3.5 shrink-0" /> 1Posta
                           </button>
                         )}
                         <button 
@@ -735,6 +748,50 @@ export default function TrackingTable() {
             <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-4 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-xs font-bold rounded hover:bg-slate-100 transition-colors uppercase tracking-widest">Önceki</button>
             <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="px-4 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-xs font-bold rounded hover:bg-slate-100 transition-colors uppercase tracking-widest">Sonraki</button>
             <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} className="px-3 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-xs font-bold rounded hover:bg-slate-100 transition-colors">»</button>
+          </div>
+        </div>
+      )}
+
+      {/* 1Posta taslağı: giriş sonrası alanlar dolmazsa kopyalama yedeği */}
+      {onePostaDraft && (
+        <div role="dialog" aria-modal="true" aria-label="1Posta e-posta taslağı" className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/60 p-3 backdrop-blur-sm">
+          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-md bg-white shadow-xl">
+            <div className="flex items-center justify-between bg-slate-800 px-4 py-3">
+              <h2 className="flex items-center gap-2 text-sm font-bold text-white"><Mail className="h-4 w-4 text-[#03DF95]" /> 1Posta E-posta Taslağı</h2>
+              <button type="button" onClick={() => setOnePostaDraft(null)} aria-label="Taslağı kapat" className="text-slate-300 hover:text-white">✕</button>
+            </div>
+            <div className="overflow-y-auto p-4 sm:p-5">
+              <p className="mb-4 rounded border border-blue-200 bg-blue-50 p-3 text-xs leading-relaxed text-blue-900">
+                1Posta yeni sekmede açıldı. Alıcı, konu veya metin otomatik dolmadıysa aşağıdaki alanları ayrı ayrı kopyalayıp 1Posta'daki yeni mesaja yapıştırın. E-posta otomatik gönderilmez.
+              </p>
+              <div className="space-y-3">
+                <div>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <label htmlFor="oneposta-to" className="text-xs font-bold text-slate-700">Alıcı</label>
+                    <button type="button" onClick={() => void copyOnePostaField(onePostaDraft.to, "Alıcı")} className="text-xs font-bold text-blue-700 hover:underline">Kopyala</button>
+                  </div>
+                  <input id="oneposta-to" readOnly value={onePostaDraft.to} className="w-full rounded border border-slate-200 bg-slate-50 p-2 text-sm text-slate-900" />
+                </div>
+                <div>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <label htmlFor="oneposta-subject" className="text-xs font-bold text-slate-700">Konu</label>
+                    <button type="button" onClick={() => void copyOnePostaField(onePostaDraft.subject, "Konu")} className="text-xs font-bold text-blue-700 hover:underline">Kopyala</button>
+                  </div>
+                  <input id="oneposta-subject" readOnly value={onePostaDraft.subject} className="w-full rounded border border-slate-200 bg-slate-50 p-2 text-sm text-slate-900" />
+                </div>
+                <div>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <label htmlFor="oneposta-body" className="text-xs font-bold text-slate-700">E-posta Metni</label>
+                    <button type="button" onClick={() => void copyOnePostaField(onePostaDraft.body, "E-posta metni")} className="text-xs font-bold text-blue-700 hover:underline">Kopyala</button>
+                  </div>
+                  <textarea id="oneposta-body" readOnly value={onePostaDraft.body} rows={10} className="w-full resize-y rounded border border-slate-200 bg-slate-50 p-3 text-sm leading-relaxed text-slate-900" />
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 p-3">
+              <button type="button" onClick={() => setOnePostaDraft(null)} className="rounded border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100">Kapat</button>
+              <button type="button" onClick={() => window.open(onePostaComposeUrl(onePostaDraft.to, onePostaDraft.subject, onePostaDraft.body), "_blank", "noopener,noreferrer")} className="rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700">1Posta'da Yeniden Aç</button>
+            </div>
           </div>
         </div>
       )}
