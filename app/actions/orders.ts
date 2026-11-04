@@ -18,8 +18,9 @@ export async function getCatalogByClass(itemClass: string = 'B2B') {
     while (fetchMore) {
       const { data, error } = await supabase
         .from("products")
-        .select("id, created_at, sku, barcode, name, category, image_url, max_order_limit")
-        .eq("item_class", itemClass) // Dinamik Ürün Sınıfı Filtresi
+        .select("id, created_at, sku, barcode, name, category, image_url, max_order_limit, is_consumable, item_class, order_unit, units_per_unit")
+        .eq("item_class", itemClass)
+        .eq("is_active", true) // Dinamik Ürün Sınıfı Filtresi
         .order("name", { ascending: true })
         .range(start, start + step - 1);
 
