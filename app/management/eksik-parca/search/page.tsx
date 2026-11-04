@@ -20,6 +20,7 @@ interface ShipmentRecord {
   item_count: number;
   created_at: string;
   missing_address: boolean;
+  oneposta_opened_at?: string | null;
   note?: string;
   email?: string | null;
   street?: string | null;
@@ -58,7 +59,7 @@ export default function TrackingTable() {
   // MODALLAR
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [expandedContact, setExpandedContact] = useState<{ id: string; field: "email" | "address" | "note" } | null>(null);
-  const [onePostaDraft, setOnePostaDraft] = useState<{ to: string; subject: string; body: string } | null>(null);
+  const [openingOnePostaId, setOpeningOnePostaId] = useState<string | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -283,8 +284,8 @@ export default function TrackingTable() {
     XLSX.writeFile(workbook, `WMS_Rapor_${new Date().getTime()}.xlsx`);
   };
 
-  const openOnePostaDraft = (record: ShipmentRecord) => {
-    if (!record.missing_address || record.is_returned) return;
+  const openOnePostaDraft = async (record: ShipmentRecord) => {
+    if (!record.missing_address || record.is_returned || openingOnePostaId === record.id) return;
     if (!hasValidRecipientEmail(record.email)) {
       toast.error("Bu kaydın geçerli bir alıcı e-posta adresi yok.");
       return;
@@ -293,19 +294,31 @@ export default function TrackingTable() {
       toast.error("T ile başlayan eksik parça sipariş numarası kontrol edilmeli.");
       return;
     }
-    const message = buildMissingPartEmail(record);
-    const draft = { to: record.email!.trim(), subject: message.subject, body: message.body };
-    setOnePostaDraft(draft);
-    // 1Posta açılır; giriş sonrası URL alanları kaybolursa kopyalama ekranı kullanılır.
-    window.open(onePostaComposeUrl(draft.to, draft.subject, draft.body), "_blank", "noopener,noreferrer");
-  };
 
-  const copyOnePostaField = async (value: string, label: string) => {
+    const message = buildMissingPartEmail(record);
+    // Sekmeyi kullanıcı tıklaması sırasında aç: veritabanı yanıtını beklemek
+    // tarayıcının açılır pencere engeline takılabilir.
+    window.open(onePostaComposeUrl(record.email!, message.subject, message.body), "_blank", "noopener,noreferrer");
+
+    setOpeningOnePostaId(record.id);
     try {
-      await navigator.clipboard.writeText(value);
-      toast.success(label + " kopyalandı.");
-    } catch {
-      toast.error("Otomatik kopyalanamadı. Metni seçip manuel kopyalayabilirsiniz.");
+      const { data, error } = await supabase
+        .from("cargo_records")
+        .update({ oneposta_opened_at: new Date().toISOString() })
+        .eq("id", record.id)
+        .select("oneposta_opened_at")
+        .single();
+      if (error) throw error;
+
+      setRecords((previous) => previous.map((row) =>
+        row.id === record.id ? { ...row, oneposta_opened_at: data.oneposta_opened_at } : row
+      ));
+      toast.success("1Posta açılışı kaydedildi.");
+    } catch (error) {
+      console.error("1Posta açılışı kaydedilemedi:", error);
+      toast.error("1Posta açıldı ancak işlem kaydedilemedi. Lütfen tekrar deneyin.");
+    } finally {
+      setOpeningOnePostaId(null);
     }
   };
 
@@ -476,7 +489,7 @@ export default function TrackingTable() {
 
       <div className="border-b border-blue-100 bg-blue-50 px-5 py-3 text-xs text-blue-900">
         <span className="font-bold">Eksik parça bilgilendirme:</span> E-posta ve tüm adres alanları cargo_records kaydında kalıcı olarak saklanır.
-        E-posta, adres ve notları satırdaki detay düğmelerinden açabilirsiniz. Eksik bilgi kayıtları turuncu renkle işaretlenir; 1Posta üzerinden yalnızca gönderilmemiş bir taslak açılır.
+        E-posta, adres ve notları satırdaki detay düğmelerinden açabilirsiniz. Eksik bilgi kayıtları turuncu; 1Posta butonuna basılmış kayıtlar yeşil işaretlenir. Bu kayıt açılma bilgisidir, gerçek gönderim onayı değildir.
       </div>
 
       {/* VERİ TABLOSU */}
@@ -533,7 +546,8 @@ export default function TrackingTable() {
                 const isHepsijet = trackingStr.toUpperCase().startsWith("CPR") || shipmentStr.toUpperCase().startsWith("CPR");
                 
                 // Veritabanında true olsa bile, Hepsijet ise "Eksik Adres" hatasını kaldır
-                const addressErr = rec.missing_address && !isHepsijet; 
+                const addressErr = rec.missing_address && !isHepsijet;
+                const onePostaOpened = Boolean(rec.oneposta_opened_at); 
 
                 const isSelected = selectedIds.includes(rec.id);
                 const isEmailOpen = expandedContact?.id === rec.id && expandedContact.field === "email";
@@ -543,8 +557,8 @@ export default function TrackingTable() {
                 
                 return (
                   <Fragment key={rec.id}>
-                  <tr className={`transition-colors ${addressErr && !rec.is_returned ? "bg-orange-50 hover:bg-orange-100/70" : isSelected ? "bg-emerald-50/40 hover:bg-emerald-50" : "bg-white hover:bg-slate-50"}`}>
-                    <td className={`border-l-[3px] border-r border-slate-100 px-2 py-3 text-center ${addressErr && !rec.is_returned ? "border-l-orange-400" : "border-l-transparent"}`}>
+                  <tr className={`transition-colors ${addressErr && !rec.is_returned ? (onePostaOpened ? "bg-emerald-50 hover:bg-emerald-100/70" : "bg-orange-50 hover:bg-orange-100/70") : isSelected ? "bg-emerald-50/40 hover:bg-emerald-50" : "bg-white hover:bg-slate-50"}`}>
+                    <td className={`border-l-[3px] border-r border-slate-100 px-2 py-3 text-center ${addressErr && !rec.is_returned ? (onePostaOpened ? "border-l-emerald-500" : "border-l-orange-400") : "border-l-transparent"}`}>
                       <input type="checkbox" checked={isSelected} onChange={() => handleSelect(rec.id)} className="w-4 h-4 cursor-pointer accent-[#03DF95] rounded-sm" />
                     </td>
                     
@@ -599,6 +613,11 @@ export default function TrackingTable() {
                           <span className="inline-flex items-center gap-1 rounded border border-orange-200 bg-orange-100 px-2 py-1 text-[10px] font-bold text-orange-900">
                             <AlertTriangle className="h-3 w-3 shrink-0" /> Eksik bilgi
                           </span>
+                          {onePostaOpened && (
+                            <span className="mt-1.5 block rounded border border-emerald-300 bg-emerald-100 px-2 py-1 text-[10px] font-bold leading-tight text-emerald-900" title="1Posta taslağı açıldı; gönderim doğrulanmadı">
+                              1Posta açıldı · {new Date(rec.oneposta_opened_at!).toLocaleString("tr-TR", { dateStyle: "short", timeStyle: "short" })}
+                            </span>
+                          )}
                           <span className="mt-1.5 block break-words text-[11px] font-semibold leading-tight text-orange-900">{issue.title}</span>
                         </div>
                       ) : (
@@ -617,12 +636,12 @@ export default function TrackingTable() {
                         {addressErr && !rec.is_returned && (
                           <button
                             type="button"
-                            onClick={() => openOnePostaDraft(rec)}
-                            disabled={!hasValidRecipientEmail(rec.email) || !hasValidMissingPartOrderNumber(rec.sd_document)}
-                            title={!hasValidRecipientEmail(rec.email) ? "Kayıt e-posta adresi eksik veya hatalı" : !hasValidMissingPartOrderNumber(rec.sd_document) ? "T ile başlayan sipariş numarası bulunamadı" : "1Posta'da e-posta taslağı aç; otomatik gönderilmez"}
-                            className="inline-flex items-center gap-1 rounded border border-blue-200 bg-blue-50 px-2 py-1.5 text-[10px] font-bold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            onClick={() => void openOnePostaDraft(rec)}
+                            disabled={!hasValidRecipientEmail(rec.email) || !hasValidMissingPartOrderNumber(rec.sd_document) || openingOnePostaId === rec.id}
+                            title={!hasValidRecipientEmail(rec.email) ? "Kayıt e-posta adresi eksik veya hatalı" : !hasValidMissingPartOrderNumber(rec.sd_document) ? "T ile başlayan sipariş numarası bulunamadı" : onePostaOpened ? "1Posta taslağını tekrar aç; önceki açılış kaydedildi" : "1Posta taslağı aç; açılma zamanı kaydedilir, otomatik gönderilmez"}
+                            className={`inline-flex items-center gap-1 rounded border px-2 py-1.5 text-[10px] font-bold disabled:cursor-not-allowed disabled:opacity-40 ${onePostaOpened ? "border-emerald-300 bg-emerald-100 text-emerald-800 hover:bg-emerald-200" : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"}`}
                           >
-                            <Mail className="h-3.5 w-3.5 shrink-0" /> 1Posta
+                            <Mail className="h-3.5 w-3.5 shrink-0" /> {openingOnePostaId === rec.id ? "Kaydediliyor" : onePostaOpened ? "Tekrar Aç" : "1Posta"}
                           </button>
                         )}
                         <button 
@@ -638,6 +657,7 @@ export default function TrackingTable() {
                           {rec.is_returned ? "İadeyi Kaldır" : "İade"}
                         </button>
 
+                        {!addressErr && (
                         {/* FİRMAYA GÖRE DEĞİŞEN DİNAMİK TAKİP BUTONU */}
                         <button 
                           onClick={() => openTrack(rec.aras_tracking_number, isHepsijet)}
@@ -656,6 +676,7 @@ export default function TrackingTable() {
                           )}
                           Takip
                         </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -748,50 +769,6 @@ export default function TrackingTable() {
             <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-4 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-xs font-bold rounded hover:bg-slate-100 transition-colors uppercase tracking-widest">Önceki</button>
             <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="px-4 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-xs font-bold rounded hover:bg-slate-100 transition-colors uppercase tracking-widest">Sonraki</button>
             <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages} className="px-3 py-1.5 bg-white border border-slate-200 disabled:opacity-50 text-slate-600 text-xs font-bold rounded hover:bg-slate-100 transition-colors">»</button>
-          </div>
-        </div>
-      )}
-
-      {/* 1Posta taslağı: giriş sonrası alanlar dolmazsa kopyalama yedeği */}
-      {onePostaDraft && (
-        <div role="dialog" aria-modal="true" aria-label="1Posta e-posta taslağı" className="fixed inset-0 z-[999] flex items-center justify-center bg-slate-900/60 p-3 backdrop-blur-sm">
-          <div className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-md bg-white shadow-xl">
-            <div className="flex items-center justify-between bg-slate-800 px-4 py-3">
-              <h2 className="flex items-center gap-2 text-sm font-bold text-white"><Mail className="h-4 w-4 text-[#03DF95]" /> 1Posta E-posta Taslağı</h2>
-              <button type="button" onClick={() => setOnePostaDraft(null)} aria-label="Taslağı kapat" className="text-slate-300 hover:text-white">✕</button>
-            </div>
-            <div className="overflow-y-auto p-4 sm:p-5">
-              <p className="mb-4 rounded border border-blue-200 bg-blue-50 p-3 text-xs leading-relaxed text-blue-900">
-                1Posta yeni sekmede açıldı. Alıcı, konu veya metin otomatik dolmadıysa aşağıdaki alanları ayrı ayrı kopyalayıp 1Posta'daki yeni mesaja yapıştırın. E-posta otomatik gönderilmez.
-              </p>
-              <div className="space-y-3">
-                <div>
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <label htmlFor="oneposta-to" className="text-xs font-bold text-slate-700">Alıcı</label>
-                    <button type="button" onClick={() => void copyOnePostaField(onePostaDraft.to, "Alıcı")} className="text-xs font-bold text-blue-700 hover:underline">Kopyala</button>
-                  </div>
-                  <input id="oneposta-to" readOnly value={onePostaDraft.to} className="w-full rounded border border-slate-200 bg-slate-50 p-2 text-sm text-slate-900" />
-                </div>
-                <div>
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <label htmlFor="oneposta-subject" className="text-xs font-bold text-slate-700">Konu</label>
-                    <button type="button" onClick={() => void copyOnePostaField(onePostaDraft.subject, "Konu")} className="text-xs font-bold text-blue-700 hover:underline">Kopyala</button>
-                  </div>
-                  <input id="oneposta-subject" readOnly value={onePostaDraft.subject} className="w-full rounded border border-slate-200 bg-slate-50 p-2 text-sm text-slate-900" />
-                </div>
-                <div>
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <label htmlFor="oneposta-body" className="text-xs font-bold text-slate-700">E-posta Metni</label>
-                    <button type="button" onClick={() => void copyOnePostaField(onePostaDraft.body, "E-posta metni")} className="text-xs font-bold text-blue-700 hover:underline">Kopyala</button>
-                  </div>
-                  <textarea id="oneposta-body" readOnly value={onePostaDraft.body} rows={10} className="w-full resize-y rounded border border-slate-200 bg-slate-50 p-3 text-sm leading-relaxed text-slate-900" />
-                </div>
-              </div>
-            </div>
-            <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 p-3">
-              <button type="button" onClick={() => setOnePostaDraft(null)} className="rounded border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100">Kapat</button>
-              <button type="button" onClick={() => window.open(onePostaComposeUrl(onePostaDraft.to, onePostaDraft.subject, onePostaDraft.body), "_blank", "noopener,noreferrer")} className="rounded bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700">1Posta'da Yeniden Aç</button>
-            </div>
           </div>
         </div>
       )}
