@@ -34,13 +34,28 @@ export default function OrderClientWrapper({ initialProducts, pageTitle, pageSub
     try {
       const savedCart = localStorage.getItem(storageKey);
       if (savedCart) {
-        setCartItems(JSON.parse(savedCart));
+        const stored = JSON.parse(savedCart) as CartItem[];
+        if (Array.isArray(stored)) {
+          if (storageKey === "wms_apparel_cart") {
+            // Pasifleştirilen eski sarflar yeni taleplerde kalmamalı.
+            // Yalnızca yerel taslak sepet temizlenir; eski siparişler korunur.
+            const activeIds = new Set(initialProducts.map((product) => product.id));
+            const current = stored.filter((item) => activeIds.has(item.product_id));
+            setCartItems(current);
+            if (current.length !== stored.length) {
+              if (current.length > 0) localStorage.setItem(storageKey, JSON.stringify(current));
+              else localStorage.removeItem(storageKey);
+            }
+          } else {
+            setCartItems(stored);
+          }
+        }
       }
     } catch (e) {
       console.error(`[WMS_CART_ERROR] ${storageKey} okunamadı:`, e);
     }
     setIsLoaded(true);
-  }, [storageKey]);
+  }, [storageKey, initialProducts]);
 
   // 2. KAYDETME: Sepet her değiştiğinde tarayıcı hafızasını dinamik anahtar ile güncelle
   useEffect(() => {
