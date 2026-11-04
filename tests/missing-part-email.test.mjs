@@ -5,6 +5,7 @@ import {
   hasValidMissingPartOrderNumber,
   hasValidRecipientEmail,
   missingPartReason,
+  getMissingPartIssue,
   outlookComposeUrl,
 } from "../lib/missing-part-email.ts";
 
@@ -20,13 +21,16 @@ test("taslakta T sipariş numarası, müşteri, gerekçe ve destek kanalları va
     customer_name: "Örnek Müşteri",
     sd_document: "T123456",
     note: "EKSİK ADRES",
+    address: "Atatürk Caddesi 12, Daire 3, İstanbul, 34000, TR",
   });
   assert.equal(message.subject, "Lego setinize ait eksik parça talebiniz hakkında");
   assert.match(message.body, /T123456/);
   assert.match(message.body, /\r\n\r\n/);
+  assert.doesNotMatch(message.body, /(?:\r\n){3,}/, "Paragraflarda gereksiz boşluk olmamalı");
   assert.match(message.body, /Örnek Müşteri/);
   assert.match(message.body, /yurt dışından ülkemize ulaşmıştır/);
-  assert.match(message.body, /adres bilgilerinizin eksik olması/);
+  assert.match(message.body, /Eksik Bilgi Nedeni: Adres bilgileri eksik/);
+  assert.match(message.body, /Sistemde Kayıtlı Adres: Atatürk Caddesi 12, Daire 3, İstanbul, 34000, TR/);
   assert.match(message.body, /destek@LEGO\.tr/);
   assert.match(message.body, /\+90 530 958 04 76/);
   assert.match(message.body, /LEGO Müşteri Hizmetleri/);
@@ -59,4 +63,32 @@ test("isimsiz müşteri için doğal hitap kullanılır", () => {
   const draft = buildMissingPartEmail({ customer_name: null, sd_document: "T123", note: null });
   assert.match(draft.body, /^Değerli Müşterimiz,/);
   assert.doesNotMatch(draft.body, /Sayın Değerli/);
+});
+
+test("Kargo panelindeki eksik bilgi nedeni ve ek açıklama müşteriye görünür", () => {
+  const issue = getMissingPartIssue("EKSİK MAHALLE — mahalle adı bulunamadı");
+  assert.deepEqual(issue, { title: "Mahalle bilgisi eksik", detail: "Mahalle adı bulunamadı" });
+
+  const draft = buildMissingPartEmail({
+    customer_name: "Ayşe Örnek",
+    sd_document: "T76543",
+    note: "EKSİK MAHALLE — mahalle adı bulunamadı",
+    address: "Papatya Sokak No: 3, Kadıköy, İstanbul",
+  });
+  assert.match(draft.body, /Eksik Bilgi Nedeni: Mahalle bilgisi eksik/);
+  assert.match(draft.body, /Ek Açıklama: Mahalle adı bulunamadı/);
+  assert.match(draft.body, /Sistemde Kayıtlı Adres: Papatya Sokak No: 3, Kadıköy, İstanbul/);
+});
+
+test("Gerekçe kayıtta yoksa neden uydurulmaz", () => {
+  const draft = buildMissingPartEmail({
+    customer_name: "Örnek",
+    sd_document: "T9000",
+    note: null,
+    address: null,
+  });
+  assert.match(draft.body, /Eksik bilgi gerekçesi kayıtta belirtilmemiş/);
+  assert.match(draft.body, /Adres bilgisi kayıtta bulunmuyor/);
+  assert.equal(getMissingPartIssue("POSTA KODU HATALI").title, "Posta kodu hatalı");
+  assert.equal(getMissingPartIssue("DİĞER EKSİK BİLGİ — kapı kodu eksik").detail, "Kapı kodu eksik");
 });
