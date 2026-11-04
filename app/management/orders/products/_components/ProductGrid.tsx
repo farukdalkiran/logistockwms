@@ -34,6 +34,9 @@ interface Product {
   comsunables?: boolean;
   is_consumable?: boolean;
   item_class?: string;
+  order_unit?: string;
+  units_per_unit?: number | null;
+  max_order_limit?: number | null;
 }
 
 interface ProductGridProps {
@@ -239,10 +242,13 @@ export default function ProductGrid({
     (product: Product) => {
       const rawQty = quantities[product.id];
 
-      const qty =
+      const requestedQty =
         typeof rawQty === "number" && rawQty > 0
           ? rawQty
           : 1;
+      const qty = product.max_order_limit && product.max_order_limit > 0
+        ? Math.min(requestedQty, product.max_order_limit)
+        : requestedQty;
 
       onAddToCart({
         product_id: product.id,
@@ -630,17 +636,14 @@ export default function ProductGrid({
           const isAdded = Boolean(addedStates[product.id]);
 
           // SARF MALZEMESİ TESPİTİ
-          const isConsumable =
+          // Personel kıyafeti ile mağaza sarfını aynı APPAREL kataloğunda
+          // tutuyoruz; sınıf tek başına kıyafet tespiti için yeterli değil.
+          const isApparel = product.category === "Personel Kıyafeti";
+          const isConsumable = !isApparel && (
             checkTrue(product.is_consumable) ||
             checkTrue(product.consumables) ||
-            checkTrue(product.comsunables);
-
-          // APPAREL TESPİTİ
-          const isApparel =
-            String(product.item_class).toUpperCase() ===
-              "APPAREL" ||
-            String(product.category).toUpperCase() ===
-              "APPAREL";
+            checkTrue(product.comsunables)
+          );
 
           // ORİJİNAL LEGO.TR GÖSTERİM KURALI
           const showLegoLink =
@@ -733,6 +736,22 @@ export default function ProductGrid({
                 >
                   {product.name}
                 </h3>
+
+                {(isConsumable || isApparel) && (
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] font-bold">
+                    <span className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-amber-900">
+                      1 birim = {product.order_unit || "ADET"}
+                    </span>
+                    {product.units_per_unit && product.units_per_unit > 0 && (
+                      <span className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-slate-700">
+                        {product.units_per_unit} adet / {product.order_unit?.toLocaleLowerCase("tr-TR") || "birim"}
+                      </span>
+                    )}
+                    {product.max_order_limit && product.max_order_limit > 0 && (
+                      <span className="text-slate-500">En fazla {product.max_order_limit} {product.order_unit?.toLocaleLowerCase("tr-TR") || "adet"}</span>
+                    )}
+                  </div>
+                )}
 
                 {/* BARKOD */}
                 <div className="mt-2 h-[18px] min-w-0 flex items-center">
@@ -847,9 +866,10 @@ export default function ProductGrid({
                       <input
                         type="number"
                         min="1"
+                        max={product.max_order_limit && product.max_order_limit > 0 ? product.max_order_limit : undefined}
                         step="1"
                         inputMode="numeric"
-                        aria-label={`${product.name} talep adedi`}
+                        aria-label={`${product.name} talep miktarı, birim ${product.order_unit || "ADET"}`}
                         value={qty}
                         onChange={(e) =>
                           handleManualQuantityChange(
