@@ -103,3 +103,20 @@ export function outlookComposeUrl(to: string, subject: string, body: string): st
   ].join("&");
   return "https://outlook.office.com/mail/deeplink/compose?" + query;
 }
+
+/**
+ * 1Posta (T-Soft Webmail) için Roundcube uyumlu yeni ileti bağlantısı.
+ * Bağlantı yalnızca taslak açar; hiçbir e-posta otomatik gönderilmez.
+ * Oturum / sunucu özelleştirmeleri parametreleri yok sayabilir; arayüzde
+ * alıcı, konu ve metni ayrı ayrı kopyalamak için yedek alanlar bulunur.
+ */
+export function onePostaComposeUrl(to: string, subject: string, body: string): string {
+  const query = [
+    "_task=mail",
+    "_action=compose",
+    "_to=" + encodeURIComponent(to.trim()),
+    "_subject=" + encodeURIComponent(subject),
+    "_body=" + encodeURIComponent(body.replace(/\r?\n/g, "\r\n")),
+  ].join("&");
+  return "https://1posta.com/?" + query;
+}
