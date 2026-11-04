@@ -4,9 +4,9 @@ import { Fragment, useEffect, useState, FormEvent } from "react";
 import { supabase } from "@/lib/supabase"; 
 import * as XLSX from "xlsx"; 
 import toast, { Toaster } from "react-hot-toast";
-import { Undo2, Search, AlertTriangle, RefreshCw, Trash2, FileText, Mail, ChevronDown } from 'lucide-react';
+import { Undo2, Search, AlertTriangle, RefreshCw, Trash2, FileText, Mail } from 'lucide-react';
 import { formatCargoRecordAddress } from "@/lib/cargo-contact";
-import { buildMissingPartEmail, hasValidMissingPartOrderNumber, hasValidRecipientEmail, missingPartReason, outlookComposeUrl } from "@/lib/missing-part-email";
+import { buildMissingPartEmail, hasValidMissingPartOrderNumber, hasValidRecipientEmail, getMissingPartIssue, outlookComposeUrl } from "@/lib/missing-part-email";
 
 interface ShipmentRecord {
   id: string;
@@ -57,7 +57,7 @@ export default function TrackingTable() {
 
   // MODALLAR
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [expandedContact, setExpandedContact] = useState<{ id: string; field: "email" | "address" } | null>(null);
+  const [expandedContact, setExpandedContact] = useState<{ id: string; field: "email" | "address" | "note" } | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -315,7 +315,7 @@ export default function TrackingTable() {
     const isActive = sortConfig.key === sortKey;
     return (
       <th 
-        className={`px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap cursor-pointer hover:text-slate-900 transition-colors select-none text-${align}`}
+        className={`px-2 py-3 text-[11px] font-bold uppercase tracking-wide text-slate-500 cursor-pointer transition-colors hover:text-slate-900 select-none ${align === "center" ? "text-center" : align === "right" ? "text-right" : "text-left"}`}
         onClick={() => handleSort(sortKey)}
       >
         <div className={`flex items-center gap-1.5 ${align === "center" ? "justify-center" : align === "right" ? "justify-end" : ""}`}>
@@ -463,12 +463,23 @@ export default function TrackingTable() {
 
       <div className="border-b border-blue-100 bg-blue-50 px-5 py-3 text-xs text-blue-900">
         <span className="font-bold">Eksik parça bilgilendirme:</span> E-posta ve tüm adres alanları cargo_records kaydında kalıcı olarak saklanır.
-        E-posta ve adres düğmeleriyle kayıtlı bilgileri açabilirsiniz. Eksik bilgi kayıtlarında Outlook butonu kişiye özel taslak açar; e-posta kendiliğinden gönderilmez.
+        E-posta, adres ve notları satırdaki detay düğmelerinden açabilirsiniz. Eksik bilgi kayıtları turuncu renkle işaretlenir; Outlook yalnızca gönderilmemiş bir taslak oluşturur.
       </div>
 
       {/* VERİ TABLOSU */}
-      <div className="overflow-x-auto w-full flex-1 bg-white">
-        <table className="w-full text-left border-collapse min-w-[1480px]">
+      <div className="w-full min-w-0 max-w-full flex-1 overflow-x-auto overscroll-x-contain bg-white">
+        <table className="w-full min-w-[980px] table-fixed border-collapse text-left">
+          <colgroup>
+            <col className="w-[4%]" />
+            <col className="w-[9%]" />
+            <col className="w-[15%]" />
+            <col className="w-[14%]" />
+            <col className="w-[13%]" />
+            <col className="w-[5%]" />
+            <col className="w-[11%]" />
+            <col className="w-[15%]" />
+            <col className="w-[14%]" />
+          </colgroup>
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200">
               <th className="px-4 py-3 w-10 text-center border-r border-slate-100">
@@ -476,19 +487,18 @@ export default function TrackingTable() {
               </th>
               <SortHeader label="Yüklenme" sortKey="created_at" />
               <SortHeader label="Müşteri Bilgisi" sortKey="customer_name" />
-              <th className="px-3 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">E-posta</th>
-              <th className="px-3 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Adres</th>
               <SortHeader label="Evrak & Sipariş" sortKey="sd_document" />
               <SortHeader label="Kargo Numaraları" sortKey="aras_tracking_number" />
               <SortHeader label="Adet" sortKey="item_count" align="center" />
-              <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Durum</th>
-              <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider text-right pr-6">İşlemler</th>
+              <th className="px-2 py-3 text-[11px] font-bold uppercase tracking-wide text-slate-500">Durum</th>
+              <th className="px-2 py-3 text-[11px] font-bold uppercase tracking-wide text-slate-500">Kayıt Detayları</th>
+              <th className="px-2 py-3 text-right text-[11px] font-bold uppercase tracking-wide text-slate-500">İşlemler</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={10} className="px-4 py-24 text-center bg-white">
+                <td colSpan={9} className="px-4 py-24 text-center bg-white">
                   <div className="flex flex-col items-center justify-center gap-4">
                     <svg className="animate-spin w-8 h-8 text-[#03DF95]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                     <span className="text-sm font-medium text-slate-500">Sunucudan Veriler Çekiliyor...</span>
@@ -497,7 +507,7 @@ export default function TrackingTable() {
               </tr>
             ) : records.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-4 py-20 text-center text-sm font-medium text-slate-500 bg-slate-50/50">
+                <td colSpan={9} className="px-4 py-20 text-center text-sm font-medium text-slate-500 bg-slate-50/50">
                   Belirtilen kriterlere uygun kayıt bulunamadı.
                 </td>
               </tr>
@@ -515,11 +525,13 @@ export default function TrackingTable() {
                 const isSelected = selectedIds.includes(rec.id);
                 const isEmailOpen = expandedContact?.id === rec.id && expandedContact.field === "email";
                 const isAddressOpen = expandedContact?.id === rec.id && expandedContact.field === "address";
+                const isNoteOpen = expandedContact?.id === rec.id && expandedContact.field === "note";
+                const issue = getMissingPartIssue(rec.note);
                 
                 return (
                   <Fragment key={rec.id}>
-                  <tr className={`transition-colors hover:bg-slate-50 ${isSelected ? "bg-emerald-50/30" : "bg-white"}`}>
-                    <td className="px-4 py-3 text-center border-r border-slate-100">
+                  <tr className={`transition-colors ${addressErr && !rec.is_returned ? "bg-orange-50 hover:bg-orange-100/70" : isSelected ? "bg-emerald-50/40 hover:bg-emerald-50" : "bg-white hover:bg-slate-50"}`}>
+                    <td className={`border-l-[3px] border-r border-slate-100 px-2 py-3 text-center ${addressErr && !rec.is_returned ? "border-l-orange-400" : "border-l-transparent"}`}>
                       <input type="checkbox" checked={isSelected} onChange={() => handleSelect(rec.id)} className="w-4 h-4 cursor-pointer accent-[#03DF95] rounded-sm" />
                     </td>
                     
@@ -528,61 +540,37 @@ export default function TrackingTable() {
                       <span className="text-[11px] text-slate-500 font-medium block mt-0.5">{new Date(rec.created_at).toLocaleTimeString('tr-TR', {hour: '2-digit', minute:'2-digit'})}</span>
                     </td>
                     
-                    <td className="px-4 py-3">
-                      <span className="text-sm font-bold text-slate-900 block truncate max-w-[200px]">{rec.customer_name || "-"}</span>
+                    <td className="min-w-0 px-2 py-3">
+                      <span className="block truncate text-xs font-bold text-slate-900" title={rec.customer_name || ""}>{rec.customer_name || "-"}</span>
                       <span className="text-xs font-medium text-slate-500 block mt-0.5">{rec.mobile_number || "Telefon Yok"}</span>
                     </td>
                     
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <button
-                        type="button"
-                        aria-expanded={isEmailOpen}
-                        onClick={() => setExpandedContact(isEmailOpen ? null : { id: rec.id, field: "email" })}
-                        className={`inline-flex items-center gap-2 rounded border px-3 py-2 text-[11px] font-bold transition-colors ${isEmailOpen ? "border-blue-300 bg-blue-50 text-blue-800" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
-                      >
-                        <Mail className="h-3.5 w-3.5" />
-                        E-POSTA
-                        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isEmailOpen ? "rotate-180" : ""}`} />
-                      </button>
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      <button
-                        type="button"
-                        aria-expanded={isAddressOpen}
-                        onClick={() => setExpandedContact(isAddressOpen ? null : { id: rec.id, field: "address" })}
-                        className={`inline-flex items-center gap-2 rounded border px-3 py-2 text-[11px] font-bold transition-colors ${isAddressOpen ? "border-blue-300 bg-blue-50 text-blue-800" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
-                      >
-                        ADRES
-                        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isAddressOpen ? "rotate-180" : ""}`} />
-                      </button>
-                    </td>
-
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <div className="flex flex-col gap-0.5">
-                        <span className="text-xs font-bold text-slate-700"><span className="text-[10px] text-slate-400 font-normal mr-1">SD:</span>{rec.sd_document}</span>
-                        <span className="text-xs font-bold text-slate-700"><span className="text-[10px] text-slate-400 font-normal mr-1">DN:</span>{rec.delivery_number}</span>
+                    <td className="min-w-0 px-2 py-3">
+                      <div className="min-w-0 space-y-1">
+                        <span className="block truncate text-[11px] font-bold text-slate-700" title={rec.sd_document}><span className="mr-1 text-[10px] font-normal text-slate-400">SD:</span>{rec.sd_document || "-"}</span>
+                        <span className="block truncate text-[11px] font-bold text-slate-700" title={rec.delivery_number}><span className="mr-1 text-[10px] font-normal text-slate-400">DN:</span>{rec.delivery_number || "-"}</span>
                       </div>
                     </td>
                     
-                    <td className="px-4 py-3 whitespace-nowrap">
+                    <td className="min-w-0 px-2 py-3">
                       {addressErr ? (
-                        <div className="flex flex-col items-start gap-1 p-1.5 bg-orange-50 border border-orange-200 rounded-md w-fit">
-                          <span className="text-orange-700 text-[10px] font-bold uppercase flex items-center gap-1">
+                        <div className="min-w-0 rounded-md border border-orange-200 bg-orange-100/60 p-1.5">
+                          <span className="flex items-center gap-1 text-[10px] font-bold leading-tight text-orange-800">
                             <AlertTriangle className="w-3.5 h-3.5" /> EKSİK/HATALI ADRES
                           </span>
-                          <span className="text-slate-700 text-[11px] font-semibold truncate max-w-[180px]" title={/[a-zA-Z]/.test(rec.aras_shipment_number) ? rec.aras_shipment_number : rec.aras_tracking_number}>
+                          <span className="block max-w-full truncate text-[11px] font-semibold text-slate-700" title={/[a-zA-Z]/.test(rec.aras_shipment_number) ? rec.aras_shipment_number : rec.aras_tracking_number}>
                             {/[a-zA-Z]/.test(rec.aras_shipment_number) ? rec.aras_shipment_number : rec.aras_tracking_number || "Numara Yok"}
                           </span>
                         </div>
                       ) : (
-                        <div className={`flex flex-col gap-0.5 ${rec.is_returned ? 'text-slate-400 line-through opacity-70' : 'text-slate-900'}`}>
-                          <span className="text-xs font-semibold"><span className="text-[10px] text-slate-400 font-normal mr-1">S:</span>{rec.aras_shipment_number || "-"}</span>
-                          <span className="text-xs font-bold text-[#03DF95]"><span className="text-[10px] text-slate-400 font-normal mr-1">T:</span>{rec.aras_tracking_number || "-"}</span>
+                        <div className={`min-w-0 space-y-1 ${rec.is_returned ? 'text-slate-400 line-through opacity-70' : 'text-slate-900'}`}>
+                          <span className="block truncate text-[11px] font-semibold" title={rec.aras_shipment_number}><span className="mr-1 text-[10px] font-normal text-slate-400">S:</span>{rec.aras_shipment_number || "-"}</span>
+                          <span className="block truncate text-[11px] font-bold text-emerald-700" title={rec.aras_tracking_number}><span className="mr-1 text-[10px] font-normal text-slate-400">T:</span>{rec.aras_tracking_number || "-"}</span>
                         </div>
                       )}
                     </td>
 
-                    <td className="px-4 py-3 text-center">
+                    <td className="px-1 py-3 text-center">
                       <span className={`inline-flex items-center justify-center w-7 h-7 rounded text-xs font-bold border ${
                         rec.item_count > 1 ? "bg-slate-900 text-[#03DF95] border-slate-800" : "bg-slate-50 text-slate-600 border-slate-200"
                       }`}>
@@ -590,66 +578,58 @@ export default function TrackingTable() {
                       </span>
                     </td>
 
-                    <td className="px-4 py-3 text-center">
+                    <td className="min-w-0 px-2 py-3">
                       {rec.is_returned ? (
-                        <span className="bg-red-100 text-red-700 px-3 py-1 text-[10px] font-bold uppercase rounded border border-red-200">İade</span>
+                        <span className="inline-flex rounded border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-bold text-red-700">İade</span>
                       ) : addressErr ? (
-                        <div className="max-w-[210px]">
-                          <span className="bg-amber-100 text-amber-800 px-2 py-1 text-[10px] font-bold uppercase rounded border border-amber-200">Eksik bilgi</span>
-                          <span className="mt-2 block text-[11px] font-medium text-amber-900 whitespace-normal" title={rec.note || ""}>
-                            {missingPartReason(rec.note)}
+                        <div className="min-w-0">
+                          <span className="inline-flex items-center gap-1 rounded border border-orange-200 bg-orange-100 px-2 py-1 text-[10px] font-bold text-orange-900">
+                            <AlertTriangle className="h-3 w-3 shrink-0" /> Eksik bilgi
                           </span>
+                          <span className="mt-1.5 block break-words text-[11px] font-semibold leading-tight text-orange-900">{issue.title}</span>
                         </div>
                       ) : (
-                        <span className="text-slate-400 text-xs font-medium">-</span>
+                        <span className="text-xs font-medium text-slate-400">Normal</span>
                       )}
                     </td>
-
-                    <td className="px-4 py-3 text-right pr-6 whitespace-nowrap">
-                      <div className="flex items-center justify-end gap-2">
+                    <td className="min-w-0 px-2 py-3">
+                      <div className="flex flex-wrap items-center gap-1">
+                        <button type="button" aria-expanded={isEmailOpen} onClick={() => setExpandedContact(isEmailOpen ? null : { id: rec.id, field: "email" })} className={`rounded border px-2 py-1.5 text-[10px] font-bold transition-colors ${isEmailOpen ? "border-blue-300 bg-blue-100 text-blue-900" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"}`}>E-posta</button>
+                        <button type="button" aria-expanded={isAddressOpen} onClick={() => setExpandedContact(isAddressOpen ? null : { id: rec.id, field: "address" })} className={`rounded border px-2 py-1.5 text-[10px] font-bold transition-colors ${isAddressOpen ? "border-blue-300 bg-blue-100 text-blue-900" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"}`}>Adres</button>
+                        <button type="button" aria-expanded={isNoteOpen} onClick={() => setExpandedContact(isNoteOpen ? null : { id: rec.id, field: "note" })} className={`inline-flex items-center gap-1 rounded border px-2 py-1.5 text-[10px] font-bold transition-colors ${isNoteOpen ? "border-orange-300 bg-orange-100 text-orange-900" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-100"}`}><FileText className="h-3 w-3" /> Not</button>
+                      </div>
+                    </td>
+                    <td className="min-w-0 px-2 py-3 text-right">
+                      <div className="flex flex-wrap items-center justify-end gap-1">
                         {addressErr && !rec.is_returned && (
                           <button
                             type="button"
                             onClick={() => openOutlookDraft(rec)}
                             disabled={!hasValidRecipientEmail(rec.email) || !hasValidMissingPartOrderNumber(rec.sd_document)}
                             title={!hasValidRecipientEmail(rec.email) ? "Kayıt e-posta adresi eksik veya hatalı" : !hasValidMissingPartOrderNumber(rec.sd_document) ? "T ile başlayan sipariş numarası bulunamadı" : "Outlook'ta e-posta taslağı aç, gönderme"}
-                            className="px-3 py-2 rounded text-[11px] font-bold flex items-center gap-1.5 border bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="inline-flex items-center gap-1 rounded border border-blue-200 bg-blue-50 px-2 py-1.5 text-[10px] font-bold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40
                           >
-                            <Mail className="w-4 h-4" /> OUTLOOK
+                            <Mail className="h-3.5 w-3.5 shrink-0" /> Outlook
                           </button>
                         )}
-                        {/* NOT BUTONU */}
-                        <button 
-                          onClick={() => setNoteModal({ isOpen: true, id: rec.id, note: rec.note || "" })}
-                          className={`px-3 py-2 rounded text-[11px] font-bold flex items-center gap-1.5 transition-colors border ${
-                            rec.note 
-                              ? "bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 hover:text-blue-700" 
-                              : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-700"
-                          }`}
-                          title={rec.note ? "Notu Düzenle" : "Not Ekle"}
-                        >
-                          <FileText className="w-4 h-4" />
-                          {rec.note ? "NOT (1)" : "NOT EKLE"}
-                        </button>
-
                         <button 
                           onClick={() => triggerReturnToggle(rec.id, rec.is_returned)}
-                          className={`px-3 py-2 rounded text-[11px] font-bold flex items-center gap-1.5 transition-colors border ${
+                          className={`inline-flex items-center gap-1 rounded border px-2 py-1.5 text-[10px] font-bold transition-colors ${
                             rec.is_returned 
                               ? "bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200 hover:text-slate-700" 
                               : "bg-orange-50 text-orange-600 border-orange-200 hover:bg-orange-100 hover:text-orange-700"
                           }`}
                           title={rec.is_returned ? "İadeyi İptal Et" : "İadeye Çek"}
                         >
-                          <Undo2 className="w-4 h-4" />
-                          {rec.is_returned ? "İPTAL ET" : "İADEYE ÇEK"}
+                          <Undo2 className="h-3.5 w-3.5 shrink-0" />
+                          {rec.is_returned ? "İadeyi Kaldır" : "İade"}
                         </button>
 
                         {/* FİRMAYA GÖRE DEĞİŞEN DİNAMİK TAKİP BUTONU */}
                         <button 
                           onClick={() => openTrack(rec.aras_tracking_number, isHepsijet)}
                           disabled={!rec.aras_tracking_number || addressErr}
-                          className={`px-4 py-2 rounded text-[11px] font-bold flex items-center gap-1.5 transition-all shadow-sm border border-transparent disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 ${
+                          className={`inline-flex items-center gap-1 rounded border border-transparent px-2 py-1.5 text-[10px] font-bold transition-all disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200 ${
                             isHepsijet 
                               ? "bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white"
                               : "bg-red-600 hover:bg-red-700 text-white"
@@ -661,24 +641,25 @@ export default function TrackingTable() {
                           ) : (
                             <img src="https://inet.araskargo.com.tr/assets/images/INET%20TR%20Logos/aras-logo.png" className="h-3 object-contain brightness-0 invert" alt="Aras" />
                           )}
-                          TAKİP
+                          Takip
                         </button>
                       </div>
                     </td>
                   </tr>
-                  {(isEmailOpen || isAddressOpen) && (
-                    <tr className="border-t border-blue-100 bg-slate-50">
-                      <td colSpan={10} className="px-6 py-4">
+                  {(isEmailOpen || isAddressOpen || isNoteOpen) && (
+                    <tr className="border-t border-orange-100 bg-slate-50">
+                      <td colSpan={9} className="px-4 py-3 sm:px-6">
                         {isEmailOpen ? (
                           <div className="max-w-4xl">
-                            <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">Kayıtlı e-posta adresi</p>
+                            <p className="mb-1 text-xs font-semibold text-slate-600">Kayıtlı E-posta Adresi</p>
                             <p className="select-text break-all text-sm font-semibold text-slate-900">{rec.email?.trim() || "E-posta bilgisi bulunamadı."}</p>
                           </div>
-                        ) : (
+                        ) : isAddressOpen ? (
                           <div className="max-w-5xl">
-                            <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">Kayıtlı tam adres</p>
+                            <p className="mb-1 text-xs font-semibold text-slate-600">Sistemde Kayıtlı Adres</p>
+                            {addressErr && <p className="mb-2 rounded border border-orange-200 bg-orange-50 px-3 py-2 text-xs font-medium text-orange-900"><span className="font-bold">Eksik Bilgi Nedeni:</span> {issue.title}{issue.detail ? " • " + issue.detail : ""}</p>}
                             <p className="select-text whitespace-pre-wrap break-words text-sm font-semibold text-slate-900">{rec.address || "Adres bilgisi bulunamadı."}</p>
-                            <div className="mt-4 grid gap-x-6 gap-y-3 border-t border-slate-200 pt-3 sm:grid-cols-2 lg:grid-cols-3">
+                            <div className="mt-3 grid gap-x-6 gap-y-2 border-t border-slate-200 pt-3 sm:grid-cols-2 lg:grid-cols-3">
                               {([
                                 ["Adres satırı", rec.street],
                                 ["Adres ek satırı", rec.street_2],
@@ -693,6 +674,27 @@ export default function TrackingTable() {
                                 </div>
                               ))}
                             </div>
+                          </div>
+                        ) : (
+                          <div className="max-w-5xl">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="text-xs font-semibold text-slate-600">Kayıt Notu ve Eksik Bilgi Gerekçesi</p>
+                              <button
+                                type="button"
+                                onClick={() => setNoteModal({ isOpen: true, id: rec.id, note: rec.note || "" })}
+                                className="rounded border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                              >
+                                {rec.note ? "Notu Düzenle" : "Not Ekle"}
+                              </button>
+                            </div>
+                            {addressErr ? (
+                              <div className="mt-2 rounded border border-orange-200 bg-orange-50 p-3">
+                                <p className="text-xs font-bold text-orange-900">Eksik Bilgi Nedeni: {issue.title}</p>
+                                {issue.detail && <p className="mt-1 whitespace-pre-wrap break-words text-xs text-slate-700">Ek Açıklama: {issue.detail}</p>}
+                              </div>
+                            ) : (
+                              <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-800">{rec.note?.trim() || "Bu kayda henüz not eklenmemiş."}</p>
+                            )}
                           </div>
                         )}
                       </td>
