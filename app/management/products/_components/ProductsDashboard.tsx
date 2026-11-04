@@ -48,23 +48,28 @@ export default function ProductsDashboard({
     try {
       const { count: total } = await supabase
         .from("products")
-        .select("*", { count: "exact", head: true });
+        .select("*", { count: "exact", head: true })
+        .eq("is_active", true);
       const { count: productsCount } = await supabase
         .from("products")
         .select("*", { count: "exact", head: true })
-        .eq("is_consumable", false);
+        .eq("is_consumable", false)
+        .eq("is_active", true);
       const { count: consumablesCount } = await supabase
         .from("products")
         .select("*", { count: "exact", head: true })
-        .eq("is_consumable", true);
+        .eq("is_consumable", true)
+        .eq("is_active", true);
       const { count: criticalCount } = await supabase
         .from("products")
         .select("*", { count: "exact", head: true })
-        .is("image_url", null);
+        .is("image_url", null)
+        .eq("is_active", true);
 
       const { data: categoryData } = await supabase
         .from("products")
-        .select("category");
+        .select("category")
+        .eq("is_active", true);
 
       let topCats: { name: string; count: number; percentage: number }[] = [];
 
