@@ -7,6 +7,7 @@ export type MissingPartMessageInput = {
   email?: string | null;
   sd_document: string | null;
   note?: string | null;
+  address?: string | null;
 };
 
 const REASONS: Record<string, string> = {
@@ -19,6 +20,35 @@ const REASONS: Record<string, string> = {
   "SOKAK BİLGİSİ EKSİK": "sokak bilginizin eksik olması",
   "POSTA KODU HATALI": "posta kodunuzun hatalı olması",
 };
+
+const REASON_TITLES: Record<string, string> = {
+  "EKSİK ADRES": "Adres bilgileri eksik",
+  "EKSİK MAHALLE": "Mahalle bilgisi eksik",
+  "TELEFON NUMARASI EKSİK": "Telefon numarası eksik",
+  "TELEFON NUMARASI HATALI": "Telefon numarası hatalı",
+  "APARTMAN / KAPI NUMARASI EKSİK": "Apartman veya kapı numarası eksik",
+  "İL / İLÇE UYUŞMAZLIĞI": "İl ve ilçe bilgileri uyuşmuyor",
+  "SOKAK BİLGİSİ EKSİK": "Sokak bilgisi eksik",
+  "POSTA KODU HATALI": "Posta kodu hatalı",
+  "DİĞER EKSİK BİLGİ": "Diğer eksik bilgi",
+};
+
+function initialUppercase(value: string): string {
+  return value ? value[0].toLocaleUpperCase("tr-TR") + value.slice(1) : value;
+}
+
+/** Kargo panelindeki SEBEP — ek açıklama formatından gerekçeyi okur. Eksik veriyi tahmin etmez. */
+export function getMissingPartIssue(note?: string | null): { title: string; detail: string | null } {
+  const raw = (note || "").trim();
+  if (!raw) return { title: "Eksik bilgi gerekçesi kayıtta belirtilmemiş", detail: null };
+  const [reason, ...extra] = raw.split(/\s+—\s+/);
+  const normalized = reason.trim().toLocaleUpperCase("tr-TR");
+  const detail = extra.join(" — ").trim() || null;
+  if (REASON_TITLES[normalized]) {
+    return { title: REASON_TITLES[normalized], detail: detail ? initialUppercase(detail) : null };
+  }
+  return { title: initialUppercase(raw), detail: null };
+}
 
 export function missingPartReason(note?: string | null): string {
   const raw = (note || "").trim();
@@ -41,27 +71,24 @@ export function hasValidRecipientEmail(value?: string | null): boolean {
 export function buildMissingPartEmail(input: MissingPartMessageInput) {
   const customerName = (input.customer_name || "").trim();
   const orderNumber = (input.sd_document || "").trim();
-  const reason = missingPartReason(input.note);
+  const issue = getMissingPartIssue(input.note);
+  const storedAddress = (input.address || "").trim();
   const subject = "Lego setinize ait eksik parça talebiniz hakkında";
   const body = [
     customerName ? "Sayın " + customerName + "," : "Değerli Müşterimiz,",
     "",
-    "LEGO setinize ait " + orderNumber + " numaralı eksik parça talebiniz hakkında sizi bilgilendirmek istiyoruz.",
+    "LEGO setinize ait " + orderNumber + " numaralı eksik parça talebinizle ilgili bilgi vermek istiyoruz.",
+    "Talep ettiğiniz parça yurt dışından ülkemize ulaşmıştır. Ancak adres veya iletişim bilgilerinizdeki eksiklik nedeniyle henüz gönderim sağlanamamıştır.",
     "",
-    "Talep ettiğiniz eksik parça yurt dışından ülkemize ulaşmıştır. Ancak " +
-      reason + " nedeniyle gönderinizin adresinize yönlendirilmesi şu anda mümkün değildir.",
+    "Eksik Bilgi Nedeni: " + issue.title,
+    ...(issue.detail ? ["Ek Açıklama: " + issue.detail] : []),
+    "Sistemde Kayıtlı Adres: " + (storedAddress || "Adres bilgisi kayıtta bulunmuyor."),
     "",
-    "Gönderim sürecine devam edebilmemiz için güncel ve eksiksiz adres/iletişim bilgilerinizi bizimle paylaşmanızı rica ederiz.",
-    "",
-    "Bize aşağıdaki iletişim kanallarından ulaşabilirsiniz:",
+    "Lütfen yukarıdaki bilgileri kontrol ederek eksik veya hatalı alanları içeren güncel ve tam adresinizi bize iletin. Böylece gönderim sürecine devam edebiliriz.",
     "E-posta: destek@LEGO.tr",
     "WhatsApp: +90 530 958 04 76 (Yalnızca WhatsApp üzerinden mesaj kabul edilmektedir.)",
     "",
-    "Bilgilerinizi iletmenizin ardından gerekli kontrolleri yaparak gönderim sürecini sürdüreceğiz.",
-    "",
-    "İlginiz ve anlayışınız için teşekkür ederiz.",
-    "",
-    "Saygılarımızla,",
+    "Teşekkür eder, iyi günler dileriz.",
     "LEGO Müşteri Hizmetleri",
   ].join("\r\n");
   return { subject, body };
