@@ -87,7 +87,8 @@ export default function ProductsTable({
     try {
       const { data: catData } = await supabase
         .from("products")
-        .select("category, is_consumable");
+        .select("category, is_consumable")
+        .eq("is_active", true);
 
       if (catData) {
         const validCats = catData.filter((d) => d.category);
@@ -112,7 +113,7 @@ export default function ProductsTable({
   const fetchProducts = useCallback(async () => {
     setLoading(true);
     try {
-      let query = supabase.from("products").select("*", { count: "exact" });
+      let query = supabase.from("products").select("*", { count: "exact" }).eq("is_active", true);
 
       if (debouncedSearch) {
         // İsim, SKU, Ana Barkod veya Alternatif Barkod Dizisinde (exact match) arama
@@ -197,6 +198,7 @@ export default function ProductsTable({
         let query = supabase
           .from("products")
           .select("*")
+          .eq("is_active", true)
           .range(from, from + step - 1);
         if (debouncedSearch)
           query = query.or(
