@@ -1,0 +1,257 @@
+{
+  "description": "Mağaza sarf talep listesi; kıyafetler ve karton poşetler mevcut ürünlerden korunur. Birim içindeki adet yalnızca doğrulanmış paketlerde belirtilir.",
+  "catalog": [
+    {
+      "sku": "CONS-BAM-BOX",
+      "name": "BAM Kutusu 2856753 (Koli)",
+      "category": "LEGO BAM / PAB",
+      "order_unit": "KOLİ",
+      "units_per_unit": null,
+      "max_order_limit": 5,
+      "image_type": "bam"
+    },
+    {
+      "sku": "CONS-PAB-BOX",
+      "name": "PAB Büyük Kutusu 2856756 (Koli)",
+      "category": "LEGO BAM / PAB",
+      "order_unit": "KOLİ",
+      "units_per_unit": null,
+      "max_order_limit": 5,
+      "image_type": "pab"
+    },
+    {
+      "sku": "CONS-BAM-PAB-STICKER",
+      "name": "BAM / PAB Kutu Stickerı (Koli)",
+      "category": "LEGO BAM / PAB",
+      "order_unit": "KOLİ",
+      "units_per_unit": null,
+      "max_order_limit": 3,
+      "image_type": "sticker"
+    },
+    {
+      "sku": "CONS-PAB-BOX-TAPE",
+      "name": "PAB Kutusu Bandı (Adet)",
+      "category": "LEGO BAM / PAB",
+      "order_unit": "ADET",
+      "units_per_unit": null,
+      "max_order_limit": 10,
+      "image_type": "tape"
+    },
+    {
+      "sku": "CONS-CUP-PAPER",
+      "name": "Karton Bardak (Paket)",
+      "category": "Bardak ve İkram",
+      "order_unit": "PAKET",
+      "units_per_unit": null,
+      "max_order_limit": 20,
+      "image_type": "paper-cup"
+    },
+    {
+      "sku": "CONS-CUP-PLASTIC",
+      "name": "Şeffaf Plastik Bardak (Paket)",
+      "category": "Bardak ve İkram",
+      "order_unit": "PAKET",
+      "units_per_unit": null,
+      "max_order_limit": 20,
+      "image_type": "plastic-cup"
+    },
+    {
+      "sku": "CONS-ZDESIGN-CARD",
+      "name": "Z Designer Etiket Kartonu (1000 Adet/Paket)",
+      "category": "Etiket ve Etiketlik",
+      "order_unit": "PAKET",
+      "units_per_unit": 1000,
+      "max_order_limit": 3,
+      "image_type": "label-card"
+    },
+    {
+      "sku": "CONS-WHITE-LABEL-CARD",
+      "name": "Beyaz Etiket Kartonu (100 Adet/Paket)",
+      "category": "Etiket ve Etiketlik",
+      "order_unit": "PAKET",
+      "units_per_unit": 100,
+      "max_order_limit": 5,
+      "image_type": "white-card"
+    },
+    {
+      "sku": "CONS-PRICE-LABEL-CARD",
+      "name": "Fiyat Etiket Kartonu (1000 Adet/Paket)",
+      "category": "Etiket ve Etiketlik",
+      "order_unit": "PAKET",
+      "units_per_unit": 1000,
+      "max_order_limit": 4,
+      "image_type": "price-card"
+    },
+    {
+      "sku": "CONS-ADHESIVE-LABEL-HOLDER",
+      "name": "Yapışkanlı Etiketlik (Adet)",
+      "category": "Etiket ve Etiketlik",
+      "order_unit": "ADET",
+      "units_per_unit": null,
+      "max_order_limit": 50,
+      "image_type": "adhesive-holder"
+    },
+    {
+      "sku": "CONS-SHELF-LABEL",
+      "name": "Şeffaf Plastik Raf Etiketliği (Adet)",
+      "category": "Etiket ve Etiketlik",
+      "order_unit": "ADET",
+      "units_per_unit": null,
+      "max_order_limit": 100,
+      "image_type": "shelf-holder"
+    },
+    {
+      "sku": "CONS-POLYBAG-HOLDER-S",
+      "name": "Polybag Askısı Küçük Etiketlik (Adet)",
+      "category": "Etiket ve Etiketlik",
+      "order_unit": "ADET",
+      "units_per_unit": null,
+      "max_order_limit": 50,
+      "image_type": "polybag-holder"
+    },
+    {
+      "sku": "CONS-GIFT-EXCHANGE",
+      "name": "Hediye Değişim Kartı (250 Adet/Paket)",
+      "category": "Hediye ve Paketleme",
+      "order_unit": "PAKET",
+      "units_per_unit": 250,
+      "max_order_limit": 6,
+      "image_type": "gift-card"
+    },
+    {
+      "sku": "CONS-GIFT-ROLL",
+      "name": "Hediye Paketi Rulosu (Rulo)",
+      "category": "Hediye ve Paketleme",
+      "order_unit": "RULO",
+      "units_per_unit": null,
+      "max_order_limit": 5,
+      "image_type": "gift-roll"
+    },
+    {
+      "sku": "CONS-GIFT-PACK-SMALL",
+      "name": "Küçük Metalize Hediye Paketi (Paket)",
+      "category": "Hediye ve Paketleme",
+      "order_unit": "PAKET",
+      "units_per_unit": null,
+      "max_order_limit": 20,
+      "image_type": "foil-small"
+    },
+    {
+      "sku": "CONS-GIFT-PACK-METAL",
+      "name": "Metalize Hediye Paketi (Paket)",
+      "category": "Hediye ve Paketleme",
+      "order_unit": "PAKET",
+      "units_per_unit": null,
+      "max_order_limit": 20,
+      "image_type": "foil"
+    },
+    {
+      "sku": "CONS-POS-ROLL",
+      "name": "POS Rulosu (Paket)",
+      "category": "POS ve Kasa",
+      "order_unit": "PAKET",
+      "units_per_unit": null,
+      "max_order_limit": 20,
+      "image_type": "pos-roll"
+    },
+    {
+      "sku": "CONS-TAPE-LARGE",
+      "name": "Para Bandı (Paket)",
+      "category": "Bant ve Ofis",
+      "order_unit": "PAKET",
+      "units_per_unit": null,
+      "max_order_limit": 20,
+      "image_type": "cash-tape"
+    },
+    {
+      "sku": "CONS-TAPE-12X66",
+      "name": "Büro Bandı (Koli)",
+      "category": "Bant ve Ofis",
+      "order_unit": "KOLİ",
+      "units_per_unit": null,
+      "max_order_limit": 3,
+      "image_type": "tape"
+    },
+    {
+      "sku": "CONS-STRETCH-FILM",
+      "name": "Streç Film (Top)",
+      "category": "Bant ve Ofis",
+      "order_unit": "TOP",
+      "units_per_unit": null,
+      "max_order_limit": 5,
+      "image_type": "stretch"
+    },
+    {
+      "sku": "CONS-BUBBLE-WRAP-ROLL",
+      "name": "Patpat Ambalaj Rulosu (Rulo)",
+      "category": "Bant ve Ofis",
+      "order_unit": "RULO",
+      "units_per_unit": null,
+      "max_order_limit": 4,
+      "image_type": "bubble"
+    },
+    {
+      "sku": "CONS-MAGAZINE",
+      "name": "Dergi (Koli)",
+      "category": "Basılı Materyal",
+      "order_unit": "KOLİ",
+      "units_per_unit": null,
+      "max_order_limit": 20,
+      "image_type": "magazine"
+    },
+    {
+      "sku": "CONS-CATALOG",
+      "name": "Katalog (Koli)",
+      "category": "Basılı Materyal",
+      "order_unit": "KOLİ",
+      "units_per_unit": null,
+      "max_order_limit": 20,
+      "image_type": "catalog"
+    },
+    {
+      "sku": "CONS-DISCOUNT-WOBBLER",
+      "name": "İndirim Wobbler (50 Adet/Paket)",
+      "category": "Kampanya Materyali",
+      "order_unit": "PAKET",
+      "units_per_unit": 50,
+      "max_order_limit": 4,
+      "image_type": "wobbler"
+    },
+    {
+      "sku": "CONS-DISCOUNT-BACKBOARD",
+      "name": "İndirim Sırtlığı (100 Adet/Paket)",
+      "category": "Kampanya Materyali",
+      "order_unit": "PAKET",
+      "units_per_unit": 100,
+      "max_order_limit": 4,
+      "image_type": "backboard"
+    },
+    {
+      "sku": "CONS-DISCOUNT-SHELF-STRIP",
+      "name": "İndirim Raf Şeridi (100 Adet/Paket)",
+      "category": "Kampanya Materyali",
+      "order_unit": "PAKET",
+      "units_per_unit": 100,
+      "max_order_limit": 4,
+      "image_type": "strip"
+    },
+    {
+      "sku": "CONS-BADGE",
+      "name": "Personel İsimliği (Adet)",
+      "category": "Mağaza Ekipmanları",
+      "order_unit": "ADET",
+      "units_per_unit": null,
+      "max_order_limit": 20,
+      "image_type": "badge"
+    },
+    {
+      "sku": "CONS-STORE-PASSPORT",
+      "name": "Mağaza Pasaportu (Adet)",
+      "category": "Mağaza Ekipmanları",
+      "order_unit": "ADET",
+      "units_per_unit": null,
+      "max_order_limit": 500,
+      "image_type": "passport"
+    }
+  ]
+}
