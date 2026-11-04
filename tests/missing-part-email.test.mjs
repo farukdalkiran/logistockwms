@@ -7,6 +7,7 @@ import {
   missingPartReason,
   getMissingPartIssue,
   outlookComposeUrl,
+  onePostaComposeUrl,
 } from "../lib/missing-part-email.ts";
 
 test("eksik bilgi gerekçesini anlaşılır müşteri metnine çevirir", () => {
@@ -91,4 +92,23 @@ test("Gerekçe kayıtta yoksa neden uydurulmaz", () => {
   assert.match(draft.body, /Adres bilgisi kayıtta bulunmuyor/);
   assert.equal(getMissingPartIssue("POSTA KODU HATALI").title, "Posta kodu hatalı");
   assert.equal(getMissingPartIssue("DİĞER EKSİK BİLGİ — kapı kodu eksik").detail, "Kapı kodu eksik");
+});
+
+test("1Posta bağlantısı alıcı, konu ve mesajı Roundcube parametreleriyle açar", () => {
+  const draft = buildMissingPartEmail({
+    customer_name: "Çağla Örnek",
+    sd_document: "T12345",
+    note: "EKSİK MAHALLE — Mahalle belirtilmemiş",
+    address: "Mimar Sinan Sokak No: 12, Kadıköy, İstanbul",
+  });
+  const url = new URL(onePostaComposeUrl("musteri+destek@example.com", draft.subject, draft.body));
+  assert.equal(url.origin, "https://1posta.com");
+  assert.equal(url.searchParams.get("_task"), "mail");
+  assert.equal(url.searchParams.get("_action"), "compose");
+  assert.equal(url.searchParams.get("_to"), "musteri+destek@example.com");
+  assert.equal(url.searchParams.get("_subject"), draft.subject);
+  assert.equal(url.searchParams.get("_body"), draft.body);
+  assert.equal(url.search.includes("+"), false, "Boşluklar '+' ile kodlanmamalı");
+  assert.match(url.search, /%20/, "Boşluklar %20 olmalı");
+  assert.match(url.search, /%0D%0A/, "Mesajın satır sonları korunmalı");
 });
