@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState, FormEvent } from "react";
+import { Fragment, useEffect, useState, FormEvent } from "react";
 import { supabase } from "@/lib/supabase"; 
 import * as XLSX from "xlsx"; 
 import toast, { Toaster } from "react-hot-toast";
-import { Undo2, Search, AlertTriangle, RefreshCw, Trash2, FileText, Mail, Download } from 'lucide-react';
+import { Undo2, Search, AlertTriangle, RefreshCw, Trash2, FileText, Mail, ChevronDown } from 'lucide-react';
 import { formatCargoRecordAddress } from "@/lib/cargo-contact";
 import { buildMissingPartEmail, hasValidMissingPartOrderNumber, hasValidRecipientEmail, missingPartReason, outlookComposeUrl } from "@/lib/missing-part-email";
 
@@ -57,6 +57,7 @@ export default function TrackingTable() {
 
   // MODALLAR
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [expandedContact, setExpandedContact] = useState<{ id: string; field: "email" | "address" } | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -118,6 +119,7 @@ export default function TrackingTable() {
       })));
       // Filtre veya sayfa değiştiğinde önceki sayfanın seçimleri yeni sayfaya taşınmaz.
       setSelectedIds([]);
+      setExpandedContact(null);
       if (count !== null) setTotalRecordsCount(count);
 
     } catch (err: any) {
@@ -280,56 +282,6 @@ export default function TrackingTable() {
     XLSX.writeFile(workbook, `WMS_Rapor_${new Date().getTime()}.xlsx`);
   };
 
-  // Toplu Outlook / Excel çıktısı yalnızca bu sayfadaki seçili eksik bilgi kayıtlarını kapsar.
-  // E-posta otomatik gönderilmez. Kullanıcı Outlook'ta kontrol ederek gönderir.
-  const exportOutlookBulk = () => {
-    const scope = selectedIds.length
-      ? records.filter((record) => selectedIds.includes(record.id))
-      : records;
-    const missingRecords = scope.filter((record) =>
-      record.missing_address && !record.is_returned &&
-      !(record.aras_tracking_number || "").toUpperCase().startsWith("CPR")
-    );
-    if (!missingRecords.length) {
-      toast.error("Bu sayfada çıktı alınacak eksik bilgi kaydı bulunamadı.");
-      return;
-    }
-
-    const exportRows = missingRecords.map((record) => {
-      const message = buildMissingPartEmail(record);
-      const emailOk = hasValidRecipientEmail(record.email);
-      const orderOk = hasValidMissingPartOrderNumber(record.sd_document);
-      return {
-        "Durum": !emailOk ? "E-POSTA KONTROLÜ" : !orderOk ? "T NUMARASI KONTROLÜ" : "GÖNDERİME HAZIR TASLAK",
-        "Alıcı E-posta": record.email || "",
-        "Ad Soyad": record.customer_name || "",
-        "Eksik Parça Sipariş No": record.sd_document || "",
-        "Delivery No": record.delivery_number || "",
-        "Telefon": record.mobile_number || "",
-        "Kayıtlı Adres": record.address || "",
-        "Adres Satırı": record.street || "",
-        "İkinci Adres Satırı": record.street_2 || "",
-        "İl": record.city || "",
-        "Bölge": record.region || "",
-        "Posta Kodu": record.postal_code || "",
-        "Ülke": record.country || "",
-        "Gönderilememe Nedeni": missingPartReason(record.note),
-        "Konu": message.subject,
-        "E-posta Metni": message.body,
-      };
-    });
-    const sheet = XLSX.utils.json_to_sheet(exportRows);
-    sheet["!cols"] = [
-      { wch: 24 }, { wch: 32 }, { wch: 26 }, { wch: 25 }, { wch: 20 },
-      { wch: 20 }, { wch: 50 }, { wch: 44 }, { wch: 44 }, { wch: 18 },
-      { wch: 20 }, { wch: 14 }, { wch: 14 }, { wch: 40 }, { wch: 45 }, { wch: 85 },
-    ];
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, sheet, "Outlook Taslakları");
-    XLSX.writeFile(workbook, "LEGO_Eksik_Parca_Outlook_" + Date.now() + ".xlsx");
-    toast.success(missingRecords.length + " eksik bilgi kaydı Excel'e aktarıldı. E-posta gönderilmedi.");
-  };
-
   const openOutlookDraft = (record: ShipmentRecord) => {
     if (!record.missing_address || record.is_returned) return;
     if (!hasValidRecipientEmail(record.email)) {
@@ -409,13 +361,6 @@ export default function TrackingTable() {
                 <Trash2 className="w-4 h-4" /> SİL ({selectedIds.length})
               </button>
             )}
-            <button
-              onClick={exportOutlookBulk}
-              className="bg-blue-600 hover:bg-blue-700 text-white h-10 px-4 rounded-md text-xs font-black transition-colors flex items-center gap-2 uppercase tracking-wider"
-              title="Bu sayfadaki seçili eksik bilgi kayıtları; seçim yoksa görünen sayfadaki tüm eksik bilgi kayıtları. Gönderim yapılmaz."
-            >
-              <Download className="w-4 h-4" /> OUTLOOK TOPLU LİSTE
-            </button>
             <button 
               onClick={exportToExcel}
               className="bg-[#03DF95] hover:bg-[#02c784] text-slate-900 h-10 px-4 rounded-md text-xs font-black transition-colors flex items-center gap-2 uppercase tracking-wider"
@@ -518,13 +463,12 @@ export default function TrackingTable() {
 
       <div className="border-b border-blue-100 bg-blue-50 px-5 py-3 text-xs text-blue-900">
         <span className="font-bold">Eksik parça bilgilendirme:</span> E-posta ve tüm adres alanları cargo_records kaydında kalıcı olarak saklanır.
-        Eksik bilgi kayıtlarında Outlook butonu kişiye özel taslak açar.
-        Toplu liste yalnızca görünen sayfayı (ve varsa seçili satırları) dışarı aktarır; hiçbir e-posta kendiliğinden gönderilmez.
+        E-posta ve adres düğmeleriyle kayıtlı bilgileri açabilirsiniz. Eksik bilgi kayıtlarında Outlook butonu kişiye özel taslak açar; e-posta kendiliğinden gönderilmez.
       </div>
 
       {/* VERİ TABLOSU */}
       <div className="overflow-x-auto w-full flex-1 bg-white">
-        <table className="w-full text-left border-collapse min-w-[1620px]">
+        <table className="w-full text-left border-collapse min-w-[1480px]">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200">
               <th className="px-4 py-3 w-10 text-center border-r border-slate-100">
@@ -532,7 +476,8 @@ export default function TrackingTable() {
               </th>
               <SortHeader label="Yüklenme" sortKey="created_at" />
               <SortHeader label="Müşteri Bilgisi" sortKey="customer_name" />
-              <th className="px-4 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">E-posta &amp; Adres (Kayıt)</th>
+              <th className="px-3 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">E-posta</th>
+              <th className="px-3 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Adres</th>
               <SortHeader label="Evrak & Sipariş" sortKey="sd_document" />
               <SortHeader label="Kargo Numaraları" sortKey="aras_tracking_number" />
               <SortHeader label="Adet" sortKey="item_count" align="center" />
@@ -543,7 +488,7 @@ export default function TrackingTable() {
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={9} className="px-4 py-24 text-center bg-white">
+                <td colSpan={10} className="px-4 py-24 text-center bg-white">
                   <div className="flex flex-col items-center justify-center gap-4">
                     <svg className="animate-spin w-8 h-8 text-[#03DF95]" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                     <span className="text-sm font-medium text-slate-500">Sunucudan Veriler Çekiliyor...</span>
@@ -552,7 +497,7 @@ export default function TrackingTable() {
               </tr>
             ) : records.length === 0 ? (
               <tr>
-                <td colSpan={9} className="px-4 py-20 text-center text-sm font-medium text-slate-500 bg-slate-50/50">
+                <td colSpan={10} className="px-4 py-20 text-center text-sm font-medium text-slate-500 bg-slate-50/50">
                   Belirtilen kriterlere uygun kayıt bulunamadı.
                 </td>
               </tr>
@@ -568,9 +513,12 @@ export default function TrackingTable() {
                 const addressErr = rec.missing_address && !isHepsijet; 
 
                 const isSelected = selectedIds.includes(rec.id);
+                const isEmailOpen = expandedContact?.id === rec.id && expandedContact.field === "email";
+                const isAddressOpen = expandedContact?.id === rec.id && expandedContact.field === "address";
                 
                 return (
-                  <tr key={rec.id} className={`transition-colors hover:bg-slate-50 ${isSelected ? "bg-emerald-50/30" : "bg-white"}`}>
+                  <Fragment key={rec.id}>
+                  <tr className={`transition-colors hover:bg-slate-50 ${isSelected ? "bg-emerald-50/30" : "bg-white"}`}>
                     <td className="px-4 py-3 text-center border-r border-slate-100">
                       <input type="checkbox" checked={isSelected} onChange={() => handleSelect(rec.id)} className="w-4 h-4 cursor-pointer accent-[#03DF95] rounded-sm" />
                     </td>
@@ -585,13 +533,28 @@ export default function TrackingTable() {
                       <span className="text-xs font-medium text-slate-500 block mt-0.5">{rec.mobile_number || "Telefon Yok"}</span>
                     </td>
                     
-                    <td className="px-4 py-3 min-w-[260px] max-w-[320px]">
-                      <span className="block truncate text-xs font-bold text-slate-800" title={rec.email || "Kayıtta e-posta yok"}>
-                        {rec.email || "E-posta bulunamadı"}
-                      </span>
-                      <span className="mt-1 block max-w-[300px] truncate text-[11px] leading-5 text-slate-500" title={rec.address || "Kayıtta adres yok"}>
-                        {rec.address || "Adres bilgisi bulunamadı"}
-                      </span>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      <button
+                        type="button"
+                        aria-expanded={isEmailOpen}
+                        onClick={() => setExpandedContact(isEmailOpen ? null : { id: rec.id, field: "email" })}
+                        className={`inline-flex items-center gap-2 rounded border px-3 py-2 text-[11px] font-bold transition-colors ${isEmailOpen ? "border-blue-300 bg-blue-50 text-blue-800" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
+                      >
+                        <Mail className="h-3.5 w-3.5" />
+                        E-POSTA
+                        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isEmailOpen ? "rotate-180" : ""}`} />
+                      </button>
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      <button
+                        type="button"
+                        aria-expanded={isAddressOpen}
+                        onClick={() => setExpandedContact(isAddressOpen ? null : { id: rec.id, field: "address" })}
+                        className={`inline-flex items-center gap-2 rounded border px-3 py-2 text-[11px] font-bold transition-colors ${isAddressOpen ? "border-blue-300 bg-blue-50 text-blue-800" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
+                      >
+                        ADRES
+                        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isAddressOpen ? "rotate-180" : ""}`} />
+                      </button>
                     </td>
 
                     <td className="px-4 py-3 whitespace-nowrap">
@@ -703,6 +666,39 @@ export default function TrackingTable() {
                       </div>
                     </td>
                   </tr>
+                  {(isEmailOpen || isAddressOpen) && (
+                    <tr className="border-t border-blue-100 bg-slate-50">
+                      <td colSpan={10} className="px-6 py-4">
+                        {isEmailOpen ? (
+                          <div className="max-w-4xl">
+                            <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">Kayıtlı e-posta adresi</p>
+                            <p className="select-text break-all text-sm font-semibold text-slate-900">{rec.email?.trim() || "E-posta bilgisi bulunamadı."}</p>
+                          </div>
+                        ) : (
+                          <div className="max-w-5xl">
+                            <p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">Kayıtlı tam adres</p>
+                            <p className="select-text whitespace-pre-wrap break-words text-sm font-semibold text-slate-900">{rec.address || "Adres bilgisi bulunamadı."}</p>
+                            <div className="mt-4 grid gap-x-6 gap-y-3 border-t border-slate-200 pt-3 sm:grid-cols-2 lg:grid-cols-3">
+                              {([
+                                ["Adres satırı", rec.street],
+                                ["Adres ek satırı", rec.street_2],
+                                ["İl", rec.city],
+                                ["Bölge / İlçe", rec.region],
+                                ["Posta kodu", rec.postal_code],
+                                ["Ülke", rec.country],
+                              ] as const).map(([label, value]) => (
+                                <div key={label} className="min-w-0">
+                                  <p className="text-[10px] font-bold uppercase text-slate-500">{label}</p>
+                                  <p className="select-text break-words text-xs font-medium text-slate-800">{value?.trim() || "Belirtilmemiş"}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })
             )}

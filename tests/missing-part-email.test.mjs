@@ -21,7 +21,9 @@ test("taslakta T sipariş numarası, müşteri, gerekçe ve destek kanalları va
     sd_document: "T123456",
     note: "EKSİK ADRES",
   });
-  assert.match(message.subject, /T123456/);
+  assert.equal(message.subject, "Lego setinize ait eksik parça talebiniz hakkında");
+  assert.match(message.body, /T123456/);
+  assert.match(message.body, /\r\n\r\n/);
   assert.match(message.body, /Örnek Müşteri/);
   assert.match(message.body, /yurt dışından ülkemize ulaşmıştır/);
   assert.match(message.body, /adres bilgilerinizin eksik olması/);
@@ -48,4 +50,13 @@ test("Outlook bağlantısı konu ve gövdeyi doğru kodlar", () => {
   assert.equal(url.searchParams.get("to"), "musteri@example.com");
   assert.equal(url.searchParams.get("subject"), draft.subject);
   assert.equal(url.searchParams.get("body"), draft.body);
+  assert.equal(url.search.includes("+"), false, "Outlook bağlantısında ham + bulunmamalı");
+  assert.match(url.search, /%20/, "Boşluklar %20 olarak kodlanmalı");
+  assert.match(url.search, /%0D%0A/, "Paragraf satır sonları korunmalı");
+});
+
+test("isimsiz müşteri için doğal hitap kullanılır", () => {
+  const draft = buildMissingPartEmail({ customer_name: null, sd_document: "T123", note: null });
+  assert.match(draft.body, /^Değerli Müşterimiz,/);
+  assert.doesNotMatch(draft.body, /Sayın Değerli/);
 });
