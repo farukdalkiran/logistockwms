@@ -607,7 +607,7 @@ export default function TrackingTable() {
                             onClick={() => openOutlookDraft(rec)}
                             disabled={!hasValidRecipientEmail(rec.email) || !hasValidMissingPartOrderNumber(rec.sd_document)}
                             title={!hasValidRecipientEmail(rec.email) ? "Kayıt e-posta adresi eksik veya hatalı" : !hasValidMissingPartOrderNumber(rec.sd_document) ? "T ile başlayan sipariş numarası bulunamadı" : "Outlook'ta e-posta taslağı aç, gönderme"}
-                            className="inline-flex items-center gap-1 rounded border border-blue-200 bg-blue-50 px-2 py-1.5 text-[10px] font-bold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40
+                            className="inline-flex items-center gap-1 rounded border border-blue-200 bg-blue-50 px-2 py-1.5 text-[10px] font-bold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             <Mail className="h-3.5 w-3.5 shrink-0" /> Outlook
                           </button>
