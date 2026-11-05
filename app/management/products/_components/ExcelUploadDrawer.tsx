@@ -1,356 +1,427 @@
 "use client";
 
-import { useState, DragEvent, useEffect } from "react";
-import * as XLSX from "xlsx"; // npm install xlsx
+import { useEffect, useState, type DragEvent } from "react";
+import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
-import { 
-  FileSpreadsheet, UploadCloud, AlertCircle, 
-  CheckCircle2, Download, Loader2, Info, X, TableProperties
+import {
+  buildCatalogReview,
+  catalogWritePayload,
+  parseCatalogSheet,
+  type CatalogReviewRow,
+  type StoredCatalogProduct,
+} from "@/lib/catalog-excel-review";
+import {
+  AlertCircle, AlertTriangle, CheckCircle2, Download, FileSpreadsheet,
+  Info, Loader2, PackageCheck, RefreshCw, UploadCloud, X,
 } from "lucide-react";
 
-export default function ExcelUploadModal({ onClose, onSuccess }: { onClose: () => void, onSuccess: () => void }) {
+type ImportMode = "update" | "skip";
+type ImportResult = {
+  inserted: number;
+  updated: number;
+  ignored: number;
+  conflicted: number;
+  failures: string[];
+};
+
+const FETCH_PAGE_SIZE = 500;
+const INSERT_BATCH_SIZE = 100;
+const UPDATE_CONCURRENCY = 8;
+
+async function loadCatalog(): Promise<StoredCatalogProduct[]> {
+  const items: StoredCatalogProduct[] = [];
+  for (let from = 0; ; from += FETCH_PAGE_SIZE) {
+    const { data, error } = await supabase.from("products")
+      .select("id,barcode,sku,name,is_consumable")
+      .order("id", { ascending: true })
+      .range(from, from + FETCH_PAGE_SIZE - 1);
+    if (error) throw error;
+    items.push(...(data || []));
+    if (!data || data.length < FETCH_PAGE_SIZE) break;
+  }
+  return items;
+}
+
+function downloadTemplate() {
+  const ws = XLSX.utils.json_to_sheet([
+    {
+      "Barkod": "8690000000001",
+      "SKU": "PRD-001",
+      "Ürün Adı": "Örnek Ticari Ürün",
+      "Kategori": "Çanta",
+      "Görsel URL": "",
+      "Sarf Malzeme mi?": "HAYIR",
+      "Max Sipariş Limiti": 50,
+    },
+    {
+      "Barkod": "8690000000002",
+      "SKU": "SRF-001",
+      "Ürün Adı": "Örnek Sarf Malzemesi",
+      "Kategori": "Ambalaj",
+      "Görsel URL": "",
+      "Sarf Malzeme mi?": "EVET",
+      "Max Sipariş Limiti": 20,
+    },
+  ]);
+  ws["!cols"] = [16, 18, 48, 22, 48, 21, 20].map((wch) => ({ wch }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Urun_Sablonu");
+  XLSX.writeFile(wb, "LogiStock_Urun_Import_Sablonu.xlsx");
+}
+
+export default function ExcelUploadModal({
+  onClose,
+  onSuccess,
+}: {
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
   const [loading, setLoading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [errorLog, setErrorLog] = useState<string | null>(null);
-  const [successCount, setSuccessCount] = useState<number | null>(null);
+  const [review, setReview] = useState<CatalogReviewRow[] | null>(null);
+  const [fileName, setFileName] = useState("");
+  const [progress, setProgress] = useState("");
+  const [result, setResult] = useState<ImportResult | null>(null);
 
-  // ESC tuşu ile modali kapatma desteği
+  const newRows = review?.filter((item) => item.status === "new") || [];
+  const existingRows = review?.filter((item) => item.status === "existing") || [];
+  const conflictRows = review?.filter((item) => item.status === "conflict") || [];
+
   useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !loading) onClose();
+    const closeOnEsc = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !loading) onClose();
     };
-    window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
-  }, [onClose, loading]);
+    window.addEventListener("keydown", closeOnEsc);
+    return () => window.removeEventListener("keydown", closeOnEsc);
+  }, [loading, onClose]);
 
-  // Örnek Excel Şablonu İndirme (Supabase formatına tam uyumlu)
-  const downloadTemplate = () => {
-    const templateData = [
-      {
-        "Barkod": "8690000000001",
-        "SKU": "PRD-001",
-        "Ürün Adı": "Örnek Ticari Ürün",
-        "Kategori": "Elektronik",
-        "Görsel URL": "https://ornek.com/gorsel.jpg",
-        "Sarf Malzeme mi?": "HAYIR",
-        "Max Sipariş Limiti": 50
-      },
-      {
-        "Barkod": "8690000000002",
-        "SKU": "SRF-001",
-        "Ürün Adı": "Koli Bandı 45x100",
-        "Kategori": "Ambalaj",
-        "Görsel URL": "",
-        "Sarf Malzeme mi?": "EVET",
-        "Max Sipariş Limiti": 1000
+  const reset = () => {
+    if (loading) return;
+    setReview(null);
+    setResult(null);
+    setFileName("");
+    setErrorLog(null);
+    setProgress("");
+  };
+
+  const analyzeFile = async (file: File) => {
+    setLoading(true);
+    setReview(null);
+    setResult(null);
+    setErrorLog(null);
+    setFileName(file.name);
+    setProgress("Excel dosyası ve katalog karşılaştırılıyor...");
+    try {
+      if (!/\.(xlsx|xls)$/i.test(file.name)) throw new Error("Lütfen .xlsx veya .xls dosyası seçin.");
+      if (file.size > 15 * 1024 * 1024) throw new Error("En fazla 15 MB Excel dosyası yüklenebilir.");
+
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      if (!worksheet) throw new Error("Excel dosyasında çalışma sayfası bulunamadı.");
+
+      // raw:false barkod sütunundaki metin formatını ve varsa baştaki sıfırları korur.
+      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
+        defval: "",
+        raw: false,
+      });
+      if (!rows.length) throw new Error("Excel dosyası boş.");
+      if (rows.length > 20000) throw new Error("Tek seferde en fazla 20.000 satır analiz edilebilir.");
+      if (!Object.hasOwn(rows[0], "Barkod") || !Object.hasOwn(rows[0], "Ürün Adı")) {
+        throw new Error('Dosyada "Barkod" ve "Ürün Adı" sütunları olmalıdır.');
       }
-    ];
 
-    const ws = XLSX.utils.json_to_sheet(templateData);
-    
-    // Sütun genişliklerini ayarlayalım ki Excel şık açılsın
-    ws['!cols'] = [{ wch: 15 }, { wch: 12 }, { wch: 30 }, { wch: 15 }, { wch: 35 }, { wch: 18 }, { wch: 18 }];
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Urun_Sablonu");
-    XLSX.writeFile(wb, "LogiStock_Toplu_Urun_Sablonu.xlsx");
-  };
-
-  // Drag & Drop İşleyicileri
-  const handleDrag = (e: DragEvent<HTMLDivElement | HTMLLabelElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") setDragActive(true);
-    else if (e.type === "dragleave") setDragActive(false);
-  };
-
-  const handleDrop = (e: DragEvent<HTMLLabelElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      processFile(e.dataTransfer.files[0]);
+      const incoming = parseCatalogSheet(rows);
+      const stored = await loadCatalog();
+      setReview(buildCatalogReview(incoming, stored));
+    } catch (error: unknown) {
+      setErrorLog(error instanceof Error ? error.message : "Excel dosyası işlenemedi.");
+    } finally {
+      setLoading(false);
+      setProgress("");
     }
   };
 
-  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      processFile(e.target.files[0]);
-    }
-  };
-
-  // Ana İşleme Motoru (Supabase Entegrasyonu)
-  const processFile = (file: File) => {
+  const executeImport = async (mode: ImportMode) => {
+    if (!review || loading || result) return;
     setLoading(true);
     setErrorLog(null);
-    setSuccessCount(null);
-
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      try {
-        const bstr = event.target?.result;
-        const wb = XLSX.read(bstr, { type: "binary" });
-        const wsname = wb.SheetNames[0];
-        const ws = wb.Sheets[wsname];
-        // Satır verileri aşağıda metin formatında okunur.
-
-        // Barkodları metin olarak oku: Excel'deki baştaki sıfırlar kaybolmamalı.
-        const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: "", raw: false });
-        if (!rows.length) throw new Error("Dosyada ürün satırı bulunamadı.");
-
-        const formattedData = rows.map((row) => ({
-          barcode: String(row["Barkod"] ?? "").trim().toUpperCase(),
-          sku: String(row["SKU"] ?? "").trim().toUpperCase() || null,
-          name: String(row["Ürün Adı"] ?? "").trim().replace(/\s+/g, " "),
-          category: String(row["Kategori"] ?? "").trim() || null,
-          image_url: String(row["Görsel URL"] ?? "").trim() || null,
-          is_consumable: String(row["Sarf Malzeme mi?"] ?? "").trim().toLocaleUpperCase("tr-TR") === "EVET",
-          max_order_limit: Math.max(0, Number.parseInt(String(row["Max Sipariş Limiti"] ?? "0"), 10) || 0),
-        }));
-
-        const seenBarcode = new Set<string>();
-        const seenSku = new Set<string>();
-        const seenNames = new Set<string>();
-        const issues: string[] = [];
-        formattedData.forEach((item, index) => {
-          const line = index + 2;
-          if (!item.barcode || !item.name || /\s/.test(item.barcode)) issues.push(`Satır ${line}: geçersiz barkod veya ürün adı`);
-          if (seenBarcode.has(item.barcode)) issues.push(`Satır ${line}: tekrar eden barkod ${item.barcode}`);
-          seenBarcode.add(item.barcode);
-          if (item.sku) {
-            if (seenSku.has(item.sku)) issues.push(`Satır ${line}: tekrar eden SKU ${item.sku}`);
-            seenSku.add(item.sku);
-          }
-          const nameKey = `${item.is_consumable}:${item.name.toLocaleLowerCase("tr-TR")}`;
-          if (seenNames.has(nameKey)) issues.push(`Satır ${line}: aynı isimde ürün/sarf kartı ${item.name}`);
-          seenNames.add(nameKey);
-        });
-        if (issues.length) throw new Error(`Dosyada ${issues.length} sorun var. Kayıt yapılmadı: ${issues.slice(0, 7).join("; ")}`);
-
-        // Dosyanın tamamı taranmadan tek bir ürün bile yazılmaz.
-        // Upsert kullanılmaz: mevcut ürün, stok kartı ve görseller korunur.
-        const CHUNK = 150;
-        for (let i = 0; i < formattedData.length; i += CHUNK) {
-          const batch = formattedData.slice(i, i + CHUNK);
-          const [barcodes, skus, names] = await Promise.all([
-            supabase.from("products").select("barcode,name").in("barcode", batch.map((p) => p.barcode)),
-            batch.some((p) => p.sku)
-              ? supabase.from("products").select("sku,name").in("sku", batch.map((p) => p.sku).filter((sku): sku is string => Boolean(sku)))
-              : Promise.resolve({ data: [] as { sku: string; name: string }[], error: null }),
-            supabase.from("products").select("name,is_consumable,barcode").in("name", batch.map((p) => p.name)),
-          ]);
-          for (const check of [barcodes, skus, names]) {
-            if (check.error) throw new Error(check.error.message);
-          }
-          if (barcodes.data?.length) issues.push(`Barkod kayıtlı: ${barcodes.data.slice(0, 3).map((p) => p.barcode).join(", ")}`);
-          if (skus.data?.length) issues.push(`SKU kayıtlı: ${skus.data.slice(0, 3).map((p) => p.sku).join(", ")}`);
-          const named = names.data?.filter((existing) => batch.some((item) => item.is_consumable === existing.is_consumable && item.name === existing.name)) || [];
-          if (named.length) issues.push(`Ürün adı kayıtlı: ${named.slice(0, 3).map((p) => p.name).join(", ")}`);
-        }
-        if (issues.length) throw new Error(`Mevcut katalogda ${issues.length} çakışma grubu bulundu. Hiçbir kart değiştirilmedi: ${issues.slice(0, 8).join("; ")}`);
-
-        let inserted = 0;
-        for (let i = 0; i < formattedData.length; i += CHUNK) {
-          const batch = formattedData.slice(i, i + CHUNK);
-          const { error } = await supabase.from("products").insert(batch);
-          if (error) {
-            const reason = error.code === "23505" ? "Barkod veya SKU bu sırada başka bir oturumda kaydedildi." : error.message;
-            throw new Error(`${inserted} yeni kart eklendi, kalanlar durduruldu. ${reason}`);
-          }
-          inserted += batch.length;
-        }
-        setSuccessCount(inserted);
-        onSuccess(); // Arka planda tabloyu yenile
-        
-        // Başarı mesajını gösterip modali otomatik kapat
-        setTimeout(() => {
-          onClose();
-        }, 2500);
-
-      } catch (err: any) {
-        setErrorLog(err.message || "Dosya okunurken bilinmeyen bir hata oluştu.");
-      } finally {
-        setLoading(false);
-      }
+    setProgress("Onaylanan kayıtlar işleniyor...");
+    const summary: ImportResult = {
+      inserted: 0,
+      updated: 0,
+      ignored: mode === "skip" ? existingRows.length : 0,
+      conflicted: conflictRows.length,
+      failures: [],
     };
-    reader.readAsBinaryString(file);
+
+    // İncelemede sorunlu görülen kartlara işlem yapılmaz.
+    // Onay verilmeden hiçbir veritabanı yazması yapılmaz.
+    try {
+      if (mode === "update") {
+        for (let from = 0; from < existingRows.length; from += UPDATE_CONCURRENCY) {
+          const batch = existingRows.slice(from, from + UPDATE_CONCURRENCY);
+          setProgress("Mevcut kartlar güncelleniyor: " + Math.min(from + batch.length, existingRows.length) + "/" + existingRows.length);
+
+          const operations = await Promise.all(batch.map(async (item) => {
+            const target = item.existing;
+            if (!target) return { success: false, issue: "Satır " + item.incoming.line + ": ürün eşleşmesi yok." };
+            try {
+              const { data, error } = await supabase.from("products")
+                .update(catalogWritePayload(item.incoming, true))
+                .eq("id", target.id)
+                .eq("barcode", target.barcode)
+                .select("id");
+              if (error) throw error;
+              if (!data?.length) throw new Error("Ürün barkodu başka işlemde değişmiş veya yetki reddedilmiş.");
+              return { success: true, issue: "" };
+            } catch (error: unknown) {
+              const message = error instanceof Error ? error.message : "Güncelleme hatası.";
+              return { success: false, issue: "Satır " + item.incoming.line + " (" + item.incoming.barcode + "): " + message };
+            }
+          }));
+
+          for (const operation of operations) {
+            if (operation.success) summary.updated += 1;
+            else summary.failures.push(operation.issue);
+          }
+        }
+      }
+
+      for (let from = 0; from < newRows.length; from += INSERT_BATCH_SIZE) {
+        const batch = newRows.slice(from, from + INSERT_BATCH_SIZE);
+        setProgress("Yeni ürünler ekleniyor: " + Math.min(from + batch.length, newRows.length) + "/" + newRows.length);
+        const payloads = batch.map((item) => catalogWritePayload(item.incoming, false));
+        const { error } = await supabase.from("products").insert(payloads);
+        if (!error) {
+          summary.inserted += batch.length;
+          continue;
+        }
+
+        if (error.code !== "23505") {
+          summary.failures.push("Satır " + batch[0].incoming.line + " ve sonrası (" + batch.length + " kayıt): " + error.message);
+          continue;
+        }
+
+        // Onaydan sonra başka bir kullanıcı aynı barkodu eklediyse,
+        // yalnızca o satırı atlayıp diğer yeni kartları kaydet.
+        for (const item of batch) {
+          const { error: rowError } = await supabase.from("products")
+            .insert(catalogWritePayload(item.incoming, false));
+          if (rowError) {
+            summary.failures.push("Satır " + item.incoming.line + " (" + item.incoming.barcode + "): " +
+              (rowError.code === "23505" ? "Bu kayıt artık mevcut, atlandı." : rowError.message));
+          } else {
+            summary.inserted += 1;
+          }
+        }
+      }
+
+      setResult(summary);
+      if (summary.inserted || summary.updated) onSuccess();
+    } catch (error: unknown) {
+      setResult(summary);
+      setErrorLog(error instanceof Error ? error.message : "Beklenmeyen kayıt hatası.");
+      if (summary.inserted || summary.updated) onSuccess();
+    } finally {
+      setLoading(false);
+      setProgress("");
+    }
+  };
+
+  const handleDrag = (event: DragEvent<HTMLLabelElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDragActive(event.type === "dragenter" || event.type === "dragover");
+  };
+  const handleDrop = (event: DragEvent<HTMLLabelElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDragActive(false);
+    const file = event.dataTransfer.files?.[0];
+    if (file && !loading) void analyzeFile(file);
   };
 
   return (
-    // FULL SCREEN OVERLAY
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 sm:p-6 animate-in fade-in">
-      
-      {/* MODAL KAPSAYICI */}
-      <div className="bg-white rounded-[5px] shadow-2xl w-full max-w-5xl h-[90vh] sm:h-[80vh] flex flex-col overflow-hidden animate-in zoom-in-95 relative">
-        
-        {/* MODAL HEADER */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-[5px] bg-[#dc3545]/10 flex items-center justify-center text-[#dc3545]">
-              <TableProperties size={20} />
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-3 backdrop-blur-sm sm:p-6"
+      role="dialog" aria-modal="true" aria-labelledby="product-excel-title">
+      <div className="flex h-[94vh] max-h-[850px] w-full max-w-5xl flex-col overflow-hidden rounded-[5px] border border-slate-200 bg-white shadow-2xl">
+        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 bg-slate-50 px-5 py-4">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[5px] bg-red-50 text-[#dc3545]">
+              <FileSpreadsheet size={21} />
             </div>
             <div>
-              <h2 className="text-lg font-black text-slate-800">Toplu Excel İçe Aktarımı</h2>
-              <p className="text-xs text-slate-500 font-medium">Mevcut kayıtları değiştirmeden sadece yeni ve benzersiz ürün kartlarını ekleyin.</p>
+              <h2 id="product-excel-title" className="text-base font-bold text-slate-900 md:text-lg">Excel ile Ürün Kataloğu Aktarımı</h2>
+              <p className="mt-1 text-xs text-slate-500">Önce kontrol, sonra onay. Mevcut stok kayıtları korunur.</p>
             </div>
           </div>
-          <button 
-            onClick={onClose} 
-            disabled={loading}
-            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-[5px] transition-colors disabled:opacity-50"
-          >
-            <X size={20} />
-          </button>
-        </div>
+          <button onClick={onClose} disabled={loading} aria-label="Pencereyi kapat"
+            className="rounded-[5px] p-2 text-slate-500 hover:bg-slate-200 disabled:opacity-40"><X size={20} /></button>
+        </header>
 
-        {/* MODAL BODY - 2 KOLONLU YAPI */}
-        <div className="flex flex-col lg:flex-row flex-1 overflow-hidden">
-          
-          {/* SOL KOLON: Kılavuz ve Şablon (Scrollable) */}
-          <div className="w-full lg:w-5/12 bg-slate-50/50 border-r border-slate-200 p-6 overflow-y-auto">
-            <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-4 flex items-center gap-2">
-              <Info size={16} className="text-indigo-500" />
-              Veri Formatı Kuralları
-            </h3>
-            
-            <p className="text-xs text-slate-600 mb-5 leading-relaxed">
-              Sistemin verileri doğru ayıklaması ve raflanabilir hale getirmesi için 
-              Excel dosyanızın <strong className="text-slate-800">1. Satırı</strong> sütun başlıklarına ayrılmalı ve aşağıdaki isimleri içermelidir:
-            </p>
-
-            {/* Kural Tablosu */}
-            <div className="bg-white border border-slate-200 rounded-[5px] overflow-hidden mb-6 shadow-sm">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200">
-                  <tr>
-                    <th className="px-3 py-2">Sütun Başlığı</th>
-                    <th className="px-3 py-2">Durum</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  <tr>
-                    <td className="px-3 py-2 font-mono text-slate-800">Barkod</td>
-                    <td className="px-3 py-2 text-[#dc3545] font-bold">Zorunlu</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 font-mono text-slate-800">Ürün Adı</td>
-                    <td className="px-3 py-2 text-[#dc3545] font-bold">Zorunlu</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 font-mono text-slate-800">SKU</td>
-                    <td className="px-3 py-2 text-slate-500 font-medium">Opsiyonel, benzersizse kullanılır</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 font-mono text-slate-800">Kategori</td>
-                    <td className="px-3 py-2 text-slate-400">Opsiyonel</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 font-mono text-slate-800">Görsel URL</td>
-                    <td className="px-3 py-2 text-slate-400">Opsiyonel</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 font-mono text-slate-800">Sarf Malzeme mi?</td>
-                    <td className="px-3 py-2 text-slate-500 font-medium">"EVET" veya "HAYIR"</td>
-                  </tr>
-                  <tr>
-                    <td className="px-3 py-2 font-mono text-slate-800">Max Sipariş Limiti</td>
-                    <td className="px-3 py-2 text-slate-500 font-medium">Sadece Rakam (Örn: 50)</td>
-                  </tr>
-                </tbody>
-              </table>
+        <div className="grid flex-1 min-h-0 grid-cols-1 overflow-y-auto lg:grid-cols-[290px_1fr] lg:overflow-hidden">
+          <aside className="border-b border-slate-200 bg-slate-50/80 p-5 lg:overflow-y-auto lg:border-b-0 lg:border-r">
+            <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-700"><Info size={16} /> Aktarım kuralları</p>
+            <p className="mt-3 text-xs leading-relaxed text-slate-600">Excel dosyasının ilk satırında <strong>Barkod</strong> ve <strong>Ürün Adı</strong> sütunları bulunmalıdır. SKU, kategori, görsel URL ve sipariş limiti isteğe bağlıdır.</p>
+            <div className="mt-4 space-y-3 text-xs text-slate-700">
+              <div className="rounded-[5px] border border-slate-200 bg-white p-3">
+                <p className="font-bold">Mevcutları Güncelle</p>
+                <p className="mt-1 text-slate-500">Eşleşen kartın bilgileri güncellenir. Boş Excel hücreleri mevcut değeri silmez. Birincil barkod, stok ve sipariş geçmişi değiştirilmez.</p>
+              </div>
+              <div className="rounded-[5px] border border-slate-200 bg-white p-3">
+                <p className="font-bold">Mevcutları Yoksay</p>
+                <p className="mt-1 text-slate-500">Tanımlı kartlara dokunulmaz. Sadece yeni barkodlu ürünler eklenir.</p>
+              </div>
+              <div className="rounded-[5px] border border-amber-200 bg-amber-50 p-3">
+                <p className="font-bold text-amber-900">Çelişkili eşleşmeler</p>
+                <p className="mt-1 text-amber-800">Barkod ve SKU farklı ürünlere aitse o satır güvenlik için otomatik güncellenmez.</p>
+              </div>
             </div>
+            <button type="button" onClick={downloadTemplate}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-[5px] border border-slate-300 bg-white px-3 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-100">
+              <Download size={16} /> Örnek Excel Şablonunu İndir
+            </button>
+          </aside>
 
-            <div className="bg-indigo-50 border border-indigo-100 rounded-[5px] p-4">
-              <p className="text-xs text-indigo-800 mb-3 font-medium">
-                Vakit kaybetmemek için hazır, formatı ayarlanmış boş şablonu indirebilirsiniz.
-              </p>
-              <button 
-                onClick={downloadTemplate}
-                className="w-full flex items-center justify-center gap-2 h-10 bg-white border border-indigo-200 text-indigo-700 rounded-[5px] text-sm font-bold hover:bg-indigo-600 hover:text-white transition-colors shadow-sm"
-              >
-                <Download size={16} />
-                Hazır Şablonu İndir
-              </button>
-            </div>
-          </div>
-
-          {/* SAĞ KOLON: Upload Alanı */}
-          <div className="w-full lg:w-7/12 p-6 flex flex-col bg-white">
-            
-            {/* Dinamik Durum Ekranları */}
+          <main className="flex min-h-[350px] flex-col gap-4 p-5 lg:overflow-y-auto">
             {errorLog && (
-              <div className="mb-6 flex items-start gap-3 bg-red-50 border border-red-200 text-red-700 p-4 rounded-[5px] animate-in fade-in slide-in-from-top-2">
-                <AlertCircle size={20} className="shrink-0 text-[#dc3545] mt-0.5" />
-                <div>
-                  <h4 className="font-bold text-sm mb-1">Yükleme Başarısız</h4>
-                  <p className="text-xs font-medium">{errorLog}</p>
-                </div>
+              <div className="flex items-start gap-2 rounded-[5px] border border-red-200 bg-red-50 p-3 text-xs text-red-800" role="alert">
+                <AlertCircle size={17} className="shrink-0" /><span>{errorLog}</span>
+              </div>
+            )}
+            {loading && (
+              <div className="flex items-center gap-2 rounded-[5px] border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-700" role="status">
+                <Loader2 size={16} className="animate-spin text-[#dc3545]" /> {progress}
               </div>
             )}
 
-            {successCount !== null && (
-              <div className="mb-6 flex items-center gap-3 bg-emerald-50 border border-emerald-200 text-emerald-700 p-5 rounded-[5px] animate-in fade-in slide-in-from-top-2 shadow-sm">
-                <CheckCircle2 size={28} className="shrink-0 text-emerald-600" />
-                <div>
-                  <h4 className="font-black text-base">İşlem Tamamlandı!</h4>
-                  <p className="text-sm font-medium">{successCount} adet veri başarıyla LogiStock veritabanına eklendi.</p>
-                </div>
-              </div>
-            )}
-
-            {/* Sürükle Bırak (Drag & Drop) Alanı */}
-            {!successCount && (
-              <label 
-                onDragEnter={handleDrag}
-                onDragLeave={handleDrag}
-                onDragOver={handleDrag}
-                onDrop={handleDrop}
-                className={`flex-1 flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-2xl cursor-pointer transition-all duration-200 ease-in-out group min-h-[300px]
-                  ${dragActive 
-                    ? "border-[#dc3545] bg-red-50/50 scale-[0.99]" 
-                    : "border-slate-300 hover:border-[#dc3545]/50 hover:bg-slate-50"
-                  }
-                  ${loading ? "opacity-50 pointer-events-none" : ""}
-                `}
-              >
-                <input 
-                  type="file" 
-                  accept=".xlsx, .xls" 
-                  className="hidden" 
-                  onChange={handleFileInput}
-                  disabled={loading}
-                />
-                
-                {loading ? (
-                  <div className="flex flex-col items-center text-[#dc3545]">
-                    <Loader2 size={48} className="animate-spin mb-4" />
-                    <span className="font-black text-lg">Veriler Çözümleniyor...</span>
-                    <span className="text-sm text-slate-500 mt-2">Supabase ile senkronize ediliyor, pencereyi kapatmayın.</span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="w-20 h-20 bg-white shadow-sm border border-slate-200 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 group-hover:border-red-200 group-hover:shadow-md transition-all duration-300">
-                      <FileSpreadsheet size={36} className="text-slate-400 group-hover:text-[#dc3545] transition-colors" />
-                    </div>
-                    <span className="text-slate-800 font-black text-xl mb-2 text-center">
-                      Excel Dosyasını Buraya Sürükleyin
-                    </span>
-                    <span className="text-slate-500 text-sm font-medium text-center">
-                      veya <span className="text-[#dc3545] underline underline-offset-2">bilgisayarınızdan seçin</span> (.xlsx, .xls)
-                    </span>
-                  </>
-                )}
+            {!review && (
+              <label onDragEnter={handleDrag} onDragLeave={handleDrag} onDragOver={handleDrag} onDrop={handleDrop}
+                className={"flex min-h-[300px] flex-1 cursor-pointer flex-col items-center justify-center rounded-[5px] border-2 border-dashed p-6 text-center transition-colors " +
+                  (dragActive ? "border-red-500 bg-red-50" : "border-slate-300 bg-slate-50/50 hover:border-red-400") +
+                  (loading ? " pointer-events-none opacity-50" : "")}>
+                <input type="file" accept=".xlsx,.xls" className="hidden" disabled={loading}
+                  onChange={(event) => { const file = event.target.files?.[0]; if (file) void analyzeFile(file); event.target.value = ""; }} />
+                <UploadCloud size={40} className="mb-3 text-slate-400" />
+                <p className="text-base font-bold text-slate-800">Excel dosyasını sürükleyin veya seçin</p>
+                <p className="mt-2 text-xs text-slate-500">.xlsx / .xls, en fazla 15 MB. Ön izlemeden önce kayıt yapılmaz.</p>
               </label>
             )}
 
-            {/* Bilgi Footer */}
-            <div className="mt-6 flex items-center justify-center gap-2 text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-              <UploadCloud size={14} />
-              LogiStock Secure Upload Engine
-            </div>
+            {review && !result && (
+              <>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">Kayıt Ön İncelemesi</h3>
+                    <p className="mt-1 max-w-md truncate text-xs text-slate-500" title={fileName}>{fileName}</p>
+                  </div>
+                  <button type="button" disabled={loading} onClick={reset}
+                    className="flex items-center gap-1 rounded-[5px] border border-slate-300 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                    <RefreshCw size={14} /> Başka Dosya Seç
+                  </button>
+                </div>
 
-          </div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className="rounded-[5px] border border-slate-200 bg-white p-3"><p className="text-[11px] text-slate-500">Toplam satır</p><p className="mt-1 text-xl font-bold text-slate-900">{review.length}</p></div>
+                  <div className="rounded-[5px] border border-emerald-200 bg-emerald-50 p-3"><p className="text-[11px] text-emerald-700">Yeni ürün</p><p className="mt-1 text-xl font-bold text-emerald-800">{newRows.length}</p></div>
+                  <div className="rounded-[5px] border border-amber-200 bg-amber-50 p-3"><p className="text-[11px] text-amber-800">Mevcut ürün</p><p className="mt-1 text-xl font-bold text-amber-900">{existingRows.length}</p></div>
+                  <div className="rounded-[5px] border border-red-200 bg-red-50 p-3"><p className="text-[11px] text-red-700">Kontrol gerekli</p><p className="mt-1 text-xl font-bold text-red-800">{conflictRows.length}</p></div>
+                </div>
+
+                {existingRows.length > 0 && (
+                  <div className="rounded-[5px] border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                    <div className="flex items-start gap-2"><AlertTriangle size={17} className="shrink-0" />
+                      <p><strong>{existingRows.length} ürün zaten veritabanında mevcut.</strong> Bunları güncellemek veya yoksaymak için aşağıdaki butonlardan birini seçin. Yeni ürünler her iki seçenekle de eklenecektir.</p>
+                    </div>
+                  </div>
+                )}
+
+                {existingRows.length > 0 && (
+                  <section>
+                    <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-700">Eşleşen ürünler</h4>
+                    <div className="max-h-48 overflow-auto rounded-[5px] border border-slate-200">
+                      <table className="w-full min-w-[460px] text-left text-xs">
+                        <thead className="sticky top-0 bg-slate-100 text-slate-600"><tr><th className="p-2">Satır</th><th className="p-2">Ürün</th><th className="p-2">Eşleşme</th><th className="p-2">Uyarı</th></tr></thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {existingRows.slice(0, 100).map((item) => (
+                            <tr key={item.incoming.line}>
+                              <td className="p-2">{item.incoming.line}</td>
+                              <td className="p-2"><p className="max-w-60 truncate font-semibold" title={item.existing?.name}>{item.existing?.name}</p><p className="mt-1 font-mono text-[10px] text-slate-500">{item.existing?.barcode}</p></td>
+                              <td className="p-2">{item.matchedOn?.join(", ")}</td>
+                              <td className="p-2 text-amber-700">{item.reason || "Güncellenebilir"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {existingRows.length > 100 && <p className="mt-1 text-[11px] text-slate-500">İlk 100 eşleşme gösteriliyor.</p>}
+                  </section>
+                )}
+
+                {conflictRows.length > 0 && (
+                  <section>
+                    <h4 className="mb-2 flex items-center gap-2 text-xs font-bold text-red-800"><AlertCircle size={15} /> İşlem yapılmayacak çelişkili satırlar ({conflictRows.length})</h4>
+                    <div className="max-h-36 overflow-auto rounded-[5px] border border-red-200">
+                      {conflictRows.slice(0, 60).map((item) => (
+                        <div key={item.incoming.line} className="border-b border-red-100 p-2 text-xs last:border-b-0">
+                          <span className="font-semibold">Satır {item.incoming.line} - {item.incoming.barcode || "Barkod yok"}</span>
+                          <span className="ml-2 text-red-700">{item.reason}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {conflictRows.length > 60 && <p className="mt-1 text-[11px] text-slate-500">İlk 60 sorun gösteriliyor.</p>}
+                  </section>
+                )}
+
+                <div className="mt-auto rounded-[5px] border border-slate-200 bg-slate-50 p-3">
+                  <p className="mb-3 text-xs text-slate-600">Onay verilene kadar dosyadaki hiçbir ürün oluşturulmaz veya güncellenmez.</p>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                    {existingRows.length > 0 && (
+                      <button type="button" disabled={loading} onClick={() => void executeImport("update")}
+                        className="flex flex-1 items-center justify-center gap-2 rounded-[5px] bg-[#dc3545] px-4 py-3 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-50">
+                        <PackageCheck size={16} /> Mevcutları Güncelle + Yenileri Ekle
+                      </button>
+                    )}
+                    <button type="button" disabled={loading || (!newRows.length && !existingRows.length)}
+                      onClick={() => void executeImport("skip")}
+                      className="flex flex-1 items-center justify-center gap-2 rounded-[5px] border border-slate-300 bg-white px-4 py-3 text-xs font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-50">
+                      {existingRows.length ? "Mevcutları Yoksay + Yenileri Ekle" : "Yeni Ürünleri Ekle"}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {result && (
+              <div className="flex flex-col gap-4 rounded-[5px] border border-emerald-200 bg-emerald-50 p-5">
+                <div className="flex items-center gap-3 text-emerald-800">
+                  <CheckCircle2 size={26} /><h3 className="text-base font-bold">Aktarım Tamamlandı</h3>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+                  <p className="rounded-[5px] bg-white p-3 text-slate-700">Yeni eklenen <strong className="block text-xl text-emerald-800">{result.inserted}</strong></p>
+                  <p className="rounded-[5px] bg-white p-3 text-slate-700">Güncellenen <strong className="block text-xl text-emerald-800">{result.updated}</strong></p>
+                  <p className="rounded-[5px] bg-white p-3 text-slate-700">Yoksayılan <strong className="block text-xl text-slate-800">{result.ignored}</strong></p>
+                  <p className="rounded-[5px] bg-white p-3 text-slate-700">Çelişkili <strong className="block text-xl text-red-700">{result.conflicted}</strong></p>
+                </div>
+                {result.failures.length > 0 && (
+                  <div className="max-h-44 overflow-y-auto rounded-[5px] border border-amber-300 bg-white p-3 text-xs text-amber-900">
+                    <p className="font-bold">{result.failures.length} kayıt işlenemedi</p>
+                    {result.failures.slice(0, 50).map((issue, index) => <p className="mt-1" key={index}>{issue}</p>)}
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={reset} className="rounded-[5px] border border-emerald-300 bg-white px-4 py-2.5 text-xs font-bold text-emerald-900">Yeni Dosya Seç</button>
+                  <button type="button" onClick={onClose} className="rounded-[5px] bg-slate-900 px-4 py-2.5 text-xs font-bold text-white">Kapat</button>
+                </div>
+              </div>
+            )}
+          </main>
         </div>
+        <footer className="flex shrink-0 items-center justify-center gap-2 border-t border-slate-100 px-4 py-2 text-[10px] font-semibold text-slate-400">
+          <UploadCloud size={13} /> LogiStock WMS / Ürün veri aktarımı
+        </footer>
       </div>
     </div>
   );
