@@ -91,7 +91,10 @@ export default function BoxesTable({
           id, box_barcode, product_id, quantity, created_at,
           products (name, barcode, sku, image_url)
         `, { count: "exact" })
+        // Aynı oluşturulma zamanına sahip kayıtlar için benzersiz ikinci sıralama.
+        // Böylece sayfalar arasında aynı koli tekrar gösterilmez.
         .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .range(from, to);
 
       if (debouncedSearch) {
