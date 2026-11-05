@@ -92,7 +92,7 @@ export default function ExcelUploadModal({ onClose, onSuccess }: { onClose: () =
         const wb = XLSX.read(bstr, { type: "binary" });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
-        const data = XLSX.utils.sheet_to_json(ws);
+        // Satır verileri aşağıda metin formatında okunur.
 
         // Barkodları metin olarak oku: Excel'deki baştaki sıfırlar kaybolmamalı.
         const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: "", raw: false });
@@ -134,9 +134,9 @@ export default function ExcelUploadModal({ onClose, onSuccess }: { onClose: () =
           const batch = formattedData.slice(i, i + CHUNK);
           const [barcodes, skus, names] = await Promise.all([
             supabase.from("products").select("barcode,name").in("barcode", batch.map((p) => p.barcode)),
-            ...[batch.map((p) => p.sku).filter((sku): sku is string => Boolean(sku)).length
+            batch.some((p) => p.sku)
               ? supabase.from("products").select("sku,name").in("sku", batch.map((p) => p.sku).filter((sku): sku is string => Boolean(sku)))
-              : Promise.resolve({ data: [], error: null })],
+              : Promise.resolve({ data: [] as { sku: string; name: string }[], error: null }),
             supabase.from("products").select("name,is_consumable,barcode").in("name", batch.map((p) => p.name)),
           ]);
           for (const check of [barcodes, skus, names]) {
