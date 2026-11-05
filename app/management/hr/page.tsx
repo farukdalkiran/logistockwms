@@ -32,6 +32,14 @@ export default async function HRManagementPage() {
     return <div className="m-6 rounded-[5px] border border-red-200 bg-red-50 p-6 text-sm font-bold text-red-700">Profiliniz bulunamadı. Sistem yöneticisiyle iletişime geçin.</div>;
   }
 
+  // Page-editor is the single source of truth for the HR navigation links.
+  const { data: rolePermissions } = profile.role === "Developer"
+    ? { data: null }
+    : await supabase.from("roles").select("permissions").eq("role_code", profile.role).maybeSingle();
+  const permissions = Array.isArray(rolePermissions?.permissions) ? rolePermissions.permissions : [];
+  const canSeeInsights = profile.role === "Developer" || permissions.includes("hr_insights");
+  const canSeeReports = profile.role === "Developer" || permissions.includes("hr_reports");
+
   const branchId: string | null = profile.branch_id ?? null;
   const isDeveloper = profile.role === "Developer" || profile.role === "Admin";
   if (!branchId && !isDeveloper) redirect("/management/unauthorized");
@@ -77,12 +85,16 @@ export default async function HRManagementPage() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {canSeeInsights && (
               <Link href="/management/hr/insights" className="inline-flex items-center gap-2 rounded-[5px] bg-[#dc3545] px-3.5 py-2.5 text-[11px] font-bold text-white transition-colors hover:bg-[#b91c1c]">
                 Personel 360 & Analiz <ArrowUpRight size={14} />
               </Link>
+              )}
+              {canSeeReports && (
               <Link href="/management/hr/reports" className="inline-flex items-center gap-2 rounded-[5px] border border-slate-200 px-3.5 py-2.5 text-[11px] font-bold text-slate-700 transition-colors hover:bg-slate-50">
                 Mesai Raporları <ArrowUpRight size={14} />
               </Link>
+              )}
             </div>
           </div>
 
