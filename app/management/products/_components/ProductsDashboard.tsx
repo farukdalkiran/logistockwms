@@ -131,14 +131,10 @@ export default function ProductsDashboard({
 {/* ==============================================
           1. ENDÜSTRİYEL MASTER PANEL (Ürün Yönetimi)
       ================================================ */}
-      <div className="relative w-full min-h-[220px] flex flex-col lg:flex-row justify-between p-6 md:p-8 bg-slate-900 border-b-2 border-slate-400 overflow-hidden gap-8 rounded-sm mb-6">
+      <div className="relative w-full min-h-[220px] flex flex-col lg:flex-row justify-between p-6 md:p-8 bg-slate-900 border border-slate-700 overflow-hidden gap-8 rounded-[5px] mb-2">
         
         {/* Arka Plan Görseli ve Endüstriyel Karartma */}
-        <img 
-          src="https://img.magnific.com/free-photo/spacious-warehouse-with-rows-shelves-forklift_84443-74085.jpg?t=st=1779108507~exp=1779112107~hmac=834c43fbd471b0766ff07fba31ef7c5cc6527409831e16ab7112e2dc4f5c9ac6&w=1480"
-          alt="Inventory Management"
-          className="absolute inset-0 w-full h-full object-cover opacity-30 mix-blend-luminosity"
-        />
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_85%_10%,rgba(220,53,69,.15),transparent_45%)]" />
         <div className="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-900/90 to-transparent"></div>
         
         {/* Sol Alan: Başlık ve Sistem Bilgi Kartı */}
@@ -148,7 +144,7 @@ export default function ProductsDashboard({
               <Package className="w-7 h-7 text-white" />
             </div>
             <div>
-              <h1 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tight">Ürün Kataloğu ve Stok Kartları</h1>
+              <h1 className="text-xl md:text-2xl font-bold text-white uppercase tracking-tight">Ürün Kataloğu ve Stok Kartları</h1>
               <p className="text-[#dc3545] text-xs font-bold uppercase tracking-widest mt-1">Ticari Ürün & Sarf Malzeme Veritabanı</p>
             </div>
           </div>
@@ -159,7 +155,7 @@ export default function ProductsDashboard({
             <div className="flex flex-col gap-1.5">
               <h4 className="text-slate-200 text-xs font-bold uppercase tracking-widest">Master Veri Bilgilendirmesi</h4>
               <p className="text-slate-400 text-xs font-semibold leading-relaxed">
-                Bu panel, depo içerisindeki tüm barkodlu ürünlerin (ticari veya sarf) ana kartlarının yönetildiği veri giriş merkezidir. Sisteme tanımlı olmayan hiçbir barkod <strong className="text-slate-200">mal kabul (putaway)</strong> veya <strong className="text-slate-200">sayım</strong> işlemlerinde el terminalleri tarafından okutulamaz.
+                Bu panel, tüm ürün ve sarf kartlarının kayıt merkezidir. Aynı ürün adı, barkod veya SKU ile mükerrer kart açılması engellenir. Tanımlanmamış barkodlar <strong className="text-slate-200">mal kabul (putaway)</strong> veya <strong className="text-slate-200">sayım</strong> işlemlerinde el terminalleri tarafından okutulamaz.
               </p>
             </div>
           </div>
@@ -206,7 +202,7 @@ export default function ProductsDashboard({
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         
         {/* Kart 1: Toplam */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex flex-col justify-between h-full">
+        <div className="bg-white rounded-[5px] border border-slate-200 shadow-sm p-5 flex flex-col justify-between h-full">
           <div className="flex items-start justify-between mb-2">
             <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Toplam Kayıt</p>
             <Activity size={16} className="text-slate-400" />
@@ -220,7 +216,7 @@ export default function ProductsDashboard({
         </div>
 
         {/* Kart 2: Ürünler */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex flex-col justify-between h-full border-l-4 border-l-slate-700">
+        <div className="bg-white rounded-[5px] border border-slate-200 shadow-sm p-5 flex flex-col justify-between h-full border-l-4 border-l-slate-700">
           <div className="flex items-start justify-between mb-2">
             <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Ürünler</p>
             <Box size={16} className="text-slate-700" />
@@ -235,7 +231,7 @@ export default function ProductsDashboard({
         </div>
 
         {/* Kart 3: Sarf */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex flex-col justify-between h-full border-l-4 border-l-amber-500">
+        <div className="bg-white rounded-[5px] border border-slate-200 shadow-sm p-5 flex flex-col justify-between h-full border-l-4 border-l-amber-500">
           <div className="flex items-start justify-between mb-2">
             <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Sarf Malzemeler</p>
             <ShoppingCart size={16} className="text-amber-500" />
@@ -250,7 +246,7 @@ export default function ProductsDashboard({
         </div>
 
         {/* Kart 4: Uyarı */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex flex-col justify-between h-full border-l-4 border-l-[#dc3545]">
+        <div className="bg-white rounded-[5px] border border-slate-200 shadow-sm p-5 flex flex-col justify-between h-full border-l-4 border-l-[#dc3545]">
           <div className="flex items-start justify-between mb-2">
             <p className="text-[11px] font-bold text-[#dc3545] uppercase tracking-widest">Görseli Eksik</p>
             <AlertTriangle size={16} className="text-[#dc3545]" />
@@ -271,7 +267,7 @@ export default function ProductsDashboard({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         
         {/* Sınıf Dağılımı Çubuğu */}
-        <div className="lg:col-span-1 bg-white rounded-xl border border-slate-200 shadow-sm p-5 md:p-6">
+        <div className="lg:col-span-1 bg-white rounded-[5px] border border-slate-200 shadow-sm p-5 md:p-6">
           <h4 className="text-sm font-black text-slate-800 mb-5 flex items-center gap-2">
             <Layers size={16} className="text-slate-400" /> Sınıf Dağılımı
           </h4>
@@ -314,7 +310,7 @@ export default function ProductsDashboard({
         </div>
 
         {/* Kategori Hacimleri Tablosu */}
-        <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm p-5 md:p-6">
+        <div className="lg:col-span-2 bg-white rounded-[5px] border border-slate-200 shadow-sm p-5 md:p-6">
           <h4 className="text-sm font-black text-slate-800 mb-5 flex items-center gap-2">
             <BarChart3 size={16} className="text-slate-400" /> En Yüksek Hacimli Alt Kategoriler
           </h4>
