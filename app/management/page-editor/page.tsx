@@ -159,7 +159,17 @@ export default function PageEditor() {
     if (!formData.id || !formData.name || !formData.path) return alert("Lütfen zorunlu alanları doldurun.");
     
     setIsSubmitting(true);
-    
+
+    // Read the latest permission arrays before saving so parallel edits do not
+    // overwrite another administrator's unrelated permissions.
+    const { data: latestRoles, error: rolesReadError } = await supabase
+      .from("roles").select("role_code, permissions");
+    if (rolesReadError || !latestRoles) {
+      alert("Rol yetkileri doğrulanamadı. Kayıt yapılmadı.");
+      setIsSubmitting(false);
+      return;
+    }
+
     const payload = {
       id: formData.id,
       name: formData.name,
@@ -189,8 +199,8 @@ export default function PageEditor() {
     }
 
     // 2. Rol Yetkilerini (Permissions Array) Güncelle
-    for (const role of roles) {
-      let currentPerms = role.permissions || [];
+    for (const role of latestRoles) {
+      let currentPerms = [...(role.permissions || [])];
       const shouldHaveAccess = selectedRoles.includes(role.role_code);
       const hasAccess = currentPerms.includes(formData.id);
 
@@ -202,7 +212,14 @@ export default function PageEditor() {
 
       // Eğer değişiklik olduysa Supabase'e yaz
       if (shouldHaveAccess !== hasAccess) {
-        await supabase.from("roles").update({ permissions: currentPerms }).eq("role_code", role.role_code);
+        const { error: roleUpdateError } = await supabase
+          .from("roles").update({ permissions: currentPerms }).eq("role_code", role.role_code);
+        if (roleUpdateError) {
+          alert(`Yetki kaydı tamamlanamadı: ${role.role_code}. Hata: ${roleUpdateError.message}. Önceki başarılı değişiklikler korunmuş olabilir, rol izinlerini yeniden kontrol edin.`);
+          await fetchData();
+          setIsSubmitting(false);
+          return;
+        }
       }
     }
 
