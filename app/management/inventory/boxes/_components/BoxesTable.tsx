@@ -23,6 +23,7 @@ import {
 
 interface BoxItem {
   id: string;
+  lgs_id: number;
   box_barcode: string;
   product_id: string;
   quantity: number;
@@ -88,13 +89,12 @@ export default function BoxesTable({
       let query = supabase
         .from("boxes")
         .select(`
-          id, box_barcode, product_id, quantity, created_at,
+          id, lgs_id, box_barcode, product_id, quantity, created_at,
           products (name, barcode, sku, image_url)
         `, { count: "exact" })
         // Aynı oluşturulma zamanına sahip kayıtlar için benzersiz ikinci sıralama.
         // Böylece sayfalar arasında aynı koli tekrar gösterilmez.
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: false })
+        .order("lgs_id", { ascending: false })
         .range(from, to);
 
       if (debouncedSearch) {
