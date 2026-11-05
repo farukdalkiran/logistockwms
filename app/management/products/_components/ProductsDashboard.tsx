@@ -358,7 +358,7 @@ export default function ProductsDashboard({
       {isExcelDrawerOpen && (
         <ExcelUploadDrawer
           onClose={() => setIsExcelDrawerOpen(false)}
-          onSuccess={handleSuccess}
+          onSuccess={() => { void fetchDashboardData(); onUpdate?.(); }}
         />
       )}
     </div>
