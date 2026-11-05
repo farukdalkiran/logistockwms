@@ -27,6 +27,7 @@ import {
 
 interface Product {
   id: string;
+  lgs_id: number;
   barcode: string;
   alt_barcodes: string[]; // YENİ EKLENEN
   sku: string;
@@ -58,7 +59,7 @@ export default function ProductsTable({
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
   const [filters, setFilters] = useState({ category: "all", type: "all" });
   const [sortConfig, setSortConfig] = useState({
-    key: "created_at",
+    key: "lgs_id",
     direction: "desc",
   });
 
@@ -132,9 +133,9 @@ export default function ProductsTable({
 
       const from = (page - 1) * rowsPerPage;
       const to = from + rowsPerPage - 1;
-      query = query
-        .order(sortConfig.key, { ascending: sortConfig.direction === "asc" })
-        .range(from, to);
+      query = query.order(sortConfig.key, { ascending: sortConfig.direction === "asc" });
+      if (sortConfig.key !== "lgs_id") query = query.order("lgs_id", { ascending: false });
+      query = query.range(from, to);
 
       const { data, count, error } = await query;
       if (error) throw error;
