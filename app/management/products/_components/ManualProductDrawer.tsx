@@ -40,8 +40,16 @@ export default function ManualProductModal({ onClose, onSuccess }: ManualProduct
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.barcode.trim() || !formData.name.trim()) {
-      setErrorLog("Barkod ve Ürün Adı alanları zorunludur.");
+    const barcode = formData.barcode.trim().toUpperCase();
+    const sku = formData.sku.trim().toUpperCase();
+    const name = formData.name.trim().replace(/\s+/g, " ");
+
+    if (!barcode || !name || /\s/.test(barcode) || barcode.length > 120) {
+      setErrorLog("Barkod boşluk içermemeli; ürün adı zorunludur.");
+      return;
+    }
+    if (!Number.isSafeInteger(formData.max_order_limit) || formData.max_order_limit < 0) {
+      setErrorLog("Sipariş limiti negatif olamaz.");
       return;
     }
 
@@ -49,10 +57,38 @@ export default function ManualProductModal({ onClose, onSuccess }: ManualProduct
     setErrorLog(null);
 
     try {
+      // Ön kontrol kullanıcıya hangi kartın zaten var olduğunu gösterir.
+      // Asıl eş zamanlı kayıt koruması veritabanı UNIQUE indekslerindedir.
+      const [barcodeMatch, boxMatch, skuMatch, nameMatches] = await Promise.all([
+        supabase.from("products").select("id,name,barcode").ilike("barcode", barcode).limit(1),
+        supabase.from("boxes").select("id,box_barcode").ilike("box_barcode", barcode).limit(1),
+        sku ? supabase.from("products").select("id,name,barcode").ilike("sku", sku).limit(1) : Promise.resolve({ data: [], error: null }),
+        supabase.from("products").select("id,name,barcode,is_consumable").ilike("name", name).limit(30)
+      ]);
+      for (const check of [barcodeMatch, boxMatch, skuMatch, nameMatches]) {
+        if (check.error) throw new Error(check.error.message);
+      }
+      if (barcodeMatch.data?.length) {
+        throw new Error(`Bu barkod zaten "${barcodeMatch.data[0].name}" ürün kartına ait. Yeni kart oluşturmayın.`);
+      }
+      if (boxMatch.data?.length) {
+        throw new Error(`Bu barkod bir koli kartında (${boxMatch.data[0].box_barcode}) kullanılıyor.`);
+      }
+      if (skuMatch.data?.length) {
+        throw new Error(`Bu SKU "${skuMatch.data[0].name}" kartında kayıtlı. Mevcut kartı güncelleyin.`);
+      }
+      const nameMatch = nameMatches.data?.find((item) =>
+        item.is_consumable === formData.is_consumable &&
+        item.name.trim().replace(/\s+/g, " ").toLocaleLowerCase("tr-TR") === name.toLocaleLowerCase("tr-TR")
+      );
+      if (nameMatch) {
+        throw new Error(`"${nameMatch.name}" zaten ${nameMatch.barcode} barkoduyla tanımlı. Mükerrer kart yerine mevcut ürünü düzenleyin.`);
+      }
+
       const { error } = await supabase.from("products").insert([{
-        barcode: formData.barcode.trim(),
-        sku: formData.sku.trim() || null,
-        name: formData.name.trim(),
+        barcode,
+        sku: sku || null,
+        name,
         category: formData.category.trim() || null,
         image_url: formData.image_url.trim() || null,
         is_consumable: formData.is_consumable,
@@ -60,9 +96,8 @@ export default function ManualProductModal({ onClose, onSuccess }: ManualProduct
       }]);
 
       if (error) {
-        // Benzersiz barkod hatası (PostgreSQL 23505 = unique_violation)
-        if (error.code === '23505') {
-          throw new Error("Bu barkod numarası sistemde zaten kayıtlı!");
+        if (error.code === "23505") {
+          throw new Error("Bu barkod veya SKU başka bir kayıt tarafından kullanılıyor. Katalogdan kontrol edin.");
         }
         throw new Error(error.message || "Veritabanı kayıt hatası.");
       }
@@ -91,25 +126,25 @@ export default function ManualProductModal({ onClose, onSuccess }: ManualProduct
       
       {/* MODAL KAPSAYICI */}
       <div 
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] flex flex-col overflow-hidden animate-in zoom-in-95 relative"
+        className="bg-white rounded-[5px] shadow-2xl w-full max-w-5xl max-h-[95vh] flex flex-col overflow-hidden animate-in zoom-in-95 relative"
         onClick={(e) => e.stopPropagation()}
       >
         
         {/* MODAL HEADER */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-[#dc3545]/10 flex items-center justify-center text-[#dc3545]">
+            <div className="w-10 h-10 rounded-[5px] bg-[#dc3545]/10 flex items-center justify-center text-[#dc3545]">
               <PackagePlus size={20} />
             </div>
             <div>
               <h2 className="text-lg font-black text-slate-800">Yeni Ürün Ekle</h2>
-              <p className="text-xs text-slate-500 font-medium">Manuel olarak yeni bir ürün veya sarf malzeme kartı oluşturun.</p>
+              <p className="text-xs text-slate-500 font-medium">Barkod, SKU ve ürün adı çakışmaları kayıttan önce kontrol edilir.</p>
             </div>
           </div>
           <button 
             onClick={onClose} 
             disabled={loading}
-            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-50"
+            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-[5px] transition-colors disabled:opacity-50"
           >
             <X size={20} />
           </button>
@@ -145,7 +180,7 @@ export default function ManualProductModal({ onClose, onSuccess }: ManualProduct
                   
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <label className="text-xs font-bold text-slate-600">Barkod Numarası <span className="text-[#dc3545]">*</span></label>
+                      <label className="text-xs font-bold text-slate-600">Benzersiz Barkod Numarası <span className="text-[#dc3545]">*</span></label>
                       <div className="relative">
                         <Barcode size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                         <input 
@@ -153,7 +188,7 @@ export default function ManualProductModal({ onClose, onSuccess }: ManualProduct
                           autoFocus
                           type="text" 
                           placeholder="Örn: 570201..."
-                          className="w-full h-10 pl-9 pr-3 text-sm border border-slate-300 rounded-lg focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] outline-none transition-all placeholder:text-slate-400"
+                          className="w-full h-10 pl-9 pr-3 text-sm border border-slate-300 rounded-[5px] focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] outline-none transition-all placeholder:text-slate-400"
                           value={formData.barcode} 
                           onChange={e => setFormData({...formData, barcode: e.target.value})} 
                         />
@@ -167,7 +202,7 @@ export default function ManualProductModal({ onClose, onSuccess }: ManualProduct
                         <input 
                           type="text" 
                           placeholder="Örn: 10294"
-                          className="w-full h-10 pl-9 pr-3 text-sm border border-slate-300 rounded-lg focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] outline-none transition-all placeholder:text-slate-400"
+                          className="w-full h-10 pl-9 pr-3 text-sm border border-slate-300 rounded-[5px] focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] outline-none transition-all placeholder:text-slate-400"
                           value={formData.sku} 
                           onChange={e => setFormData({...formData, sku: e.target.value.toUpperCase()})} 
                         />
@@ -180,7 +215,7 @@ export default function ManualProductModal({ onClose, onSuccess }: ManualProduct
                         required 
                         type="text" 
                         placeholder="Tam ve açıklayıcı ürün adı girin"
-                        className="w-full h-10 px-3 text-sm border border-slate-300 rounded-lg focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] outline-none transition-all placeholder:text-slate-400 font-medium text-slate-800"
+                        className="w-full h-10 px-3 text-sm border border-slate-300 rounded-[5px] focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] outline-none transition-all placeholder:text-slate-400 font-medium text-slate-800"
                         value={formData.name} 
                         onChange={e => setFormData({...formData, name: e.target.value})} 
                       />
@@ -193,7 +228,7 @@ export default function ManualProductModal({ onClose, onSuccess }: ManualProduct
                         <input 
                           type="text" 
                           placeholder="Örn: LEGO Classic"
-                          className="w-full h-10 pl-9 pr-3 text-sm border border-slate-300 rounded-lg focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] outline-none transition-all placeholder:text-slate-400"
+                          className="w-full h-10 pl-9 pr-3 text-sm border border-slate-300 rounded-[5px] focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] outline-none transition-all placeholder:text-slate-400"
                           value={formData.category} 
                           onChange={e => setFormData({...formData, category: e.target.value})} 
                         />
@@ -207,7 +242,7 @@ export default function ManualProductModal({ onClose, onSuccess }: ManualProduct
                         <input 
                           type="url" 
                           placeholder="https://..."
-                          className="w-full h-10 pl-9 pr-3 text-sm border border-slate-300 rounded-lg focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] outline-none transition-all placeholder:text-slate-400"
+                          className="w-full h-10 pl-9 pr-3 text-sm border border-slate-300 rounded-[5px] focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] outline-none transition-all placeholder:text-slate-400"
                           value={formData.image_url} 
                           onChange={e => setFormData({...formData, image_url: e.target.value})} 
                         />
@@ -227,7 +262,7 @@ export default function ManualProductModal({ onClose, onSuccess }: ManualProduct
                     {/* Modern Switch Toggle */}
                     <label className="flex items-center justify-between cursor-pointer group">
                       <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${formData.is_consumable ? 'bg-amber-100 text-amber-600' : 'bg-slate-200 text-slate-500'}`}>
+                        <div className={`w-10 h-10 rounded-[5px] flex items-center justify-center transition-colors ${formData.is_consumable ? 'bg-amber-100 text-amber-600' : 'bg-slate-200 text-slate-500'}`}>
                           <ShoppingCart size={20} />
                         </div>
                         <div>
@@ -259,7 +294,7 @@ export default function ManualProductModal({ onClose, onSuccess }: ManualProduct
                         <input 
                           type="number" 
                           min="1" 
-                          className="w-full sm:w-1/2 h-10 px-3 text-sm border-2 border-amber-300 rounded-lg focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none transition-all font-bold text-amber-700 bg-amber-50"
+                          className="w-full sm:w-1/2 h-10 px-3 text-sm border-2 border-amber-300 rounded-[5px] focus:border-amber-500 focus:ring-1 focus:ring-amber-500 outline-none transition-all font-bold text-amber-700 bg-amber-50"
                           value={formData.max_order_limit || ''} 
                           onChange={e => setFormData({...formData, max_order_limit: parseInt(e.target.value) || 0})} 
                         />
@@ -354,7 +389,7 @@ export default function ManualProductModal({ onClose, onSuccess }: ManualProduct
           <button 
             type="button"
             onClick={onClose}
-            className="px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
+            className="px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-200 rounded-[5px] transition-colors"
           >
             İptal
           </button>
@@ -362,7 +397,7 @@ export default function ManualProductModal({ onClose, onSuccess }: ManualProduct
             type="submit"
             form="productForm" // Form ID'si ile footer butonunu bağlıyoruz
             disabled={loading || success}
-            className="flex items-center justify-center gap-2 px-6 py-2.5 bg-[#dc3545] text-white text-sm font-bold rounded-lg hover:bg-red-700 transition-colors shadow-md disabled:opacity-70 min-w-[140px]"
+            className="flex items-center justify-center gap-2 px-6 py-2.5 bg-[#dc3545] text-white text-sm font-bold rounded-[5px] hover:bg-red-700 transition-colors shadow-md disabled:opacity-70 min-w-[140px]"
           >
             {loading ? (
               <><Loader2 size={16} className="animate-spin" /> Kaydediliyor</>
