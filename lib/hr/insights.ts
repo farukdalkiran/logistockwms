@@ -90,7 +90,7 @@ async function pages<T>(
 }
 
 export async function getHRIntelligenceData(monthValue?: string, branchValue?: string): Promise<HRIntelligence> {
-  const actor = await getHRActor();
+  const actor = await getHRActor(false, "hr_insights");
   const { candidate, begin, end } = parseMonth(monthValue);
   const selectedBranch = actor.isGlobal
     ? (branchValue && branchValue !== "ALL" ? assertHRBranch(actor, branchValue) : null)
