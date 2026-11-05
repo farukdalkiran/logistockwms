@@ -7,7 +7,7 @@ const FULL_ACCESS_ROLES = new Set(["Developer", "Admin"]);
 const VIEW_PERMISSIONS = new Set(["hr_reports", "hr_personnel", "hr_leave_management"]);
 const MANAGE_PERMISSIONS = new Set(["hr_personnel"]);
 
-export async function getHRActor(manage = false) {
+export async function getHRActor(manage = false, requiredPermission?: string) {
   const session = await createClient();
   const { data: { user }, error: authError } = await session.auth.getUser();
   if (authError || !user) throw new Error("Oturum bulunamadı.");
@@ -33,20 +33,32 @@ export async function getHRActor(manage = false) {
   if (!isGlobal && !branchId) throw new Error("İşlem için şube ataması gerekiyor.");
 
   let canManage = isGlobal || role === "HR";
-  if (!isGlobal) {
+  // Explicit page permissions apply even to Admin; only Developer bypasses.
+  // Without a specific permission, retain the existing HR permission model.
+  if (!isGlobal || (requiredPermission && role !== "Developer")) {
     const { data: assignedRole, error: roleError } = await db
       .from("roles").select("permissions").eq("role_code", role).maybeSingle();
-    if (roleError) throw new Error("Rol yetkileri doğrulanamadı.");
-    const rawPermissions: unknown = assignedRole?.permissions;
+    if (roleError || !assignedRole) throw new Error("Rol yetkileri doğrulanamadı.");
+    const rawPermissions: unknown = assignedRole.permissions;
     const permissions = Array.isArray(rawPermissions)
       ? rawPermissions.map(String)
       : typeof rawPermissions === "string"
         ? rawPermissions.replace(/[{}"]/g, "").split(",").map(v => v.trim())
         : [];
-    canManage = role === "HR" || permissions.some(permission => MANAGE_PERMISSIONS.has(permission));
-    const allowed = manage ? MANAGE_PERMISSIONS : VIEW_PERMISSIONS;
-    if (role !== "HR" && !permissions.some(permission => allowed.has(permission))) {
-      throw new Error("İnsan kaynakları yönetim yetkiniz bulunmuyor.");
+
+    if (requiredPermission && !permissions.includes(requiredPermission)) {
+      throw new Error("Bu insan kaynakları sayfasını görüntüleme yetkiniz bulunmuyor.");
+    }
+
+    if (!isGlobal) {
+      canManage = role === "HR" || permissions.some(permission => MANAGE_PERMISSIONS.has(permission));
+      const allowed = manage ? MANAGE_PERMISSIONS : VIEW_PERMISSIONS;
+      if (manage && role !== "HR" && !permissions.some(permission => MANAGE_PERMISSIONS.has(permission))) {
+        throw new Error("İnsan kaynakları yönetim yetkiniz bulunmuyor.");
+      }
+      if (!requiredPermission && role !== "HR" && !permissions.some(permission => allowed.has(permission))) {
+        throw new Error("İnsan kaynakları yönetim yetkiniz bulunmuyor.");
+      }
     }
   }
 
