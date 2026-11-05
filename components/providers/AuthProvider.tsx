@@ -51,7 +51,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             id: userId,
             email: email || "",
             fullName: meta?.full_name || "Faruk Dalkıran",
-            role: profile.role || "Developer",
+            role: profile.role || "Limited",
             branchName: resolvedBranchName || "Şube Tanımsız",
             isGlobalAdmin: profile.role === "Developer" || profile.role === "Admin",
           });

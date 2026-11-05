@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   let res = NextResponse.next({
     request: {
       headers: req.headers,
@@ -112,6 +112,26 @@ export async function middleware(req: NextRequest) {
     // Giriş yapmış cihaz manuel olarak /login rotasına giderse onu içeri it
     if (path === "/login") {
       return NextResponse.redirect(new URL("/", req.url));
+    }
+
+    // /management is protected before either HTML or RSC data is rendered.
+    // Page-editor permissions are resolved in the database from auth.uid().
+    // No cached role claims or client-side CSS guards are trusted.
+    if ((path === "/management" || path.startsWith("/management/")) && path !== "/management/unauthorized") {
+      const { data: hasAccess, error: accessError } = await supabase.rpc(
+        "wms_can_access_management_route",
+        { requested_path: path }
+      );
+
+      // Fail closed when permissions cannot be verified.
+      if (accessError || hasAccess !== true) {
+        if (accessError) console.error("Management authorization failed:", accessError.message);
+        const denied = NextResponse.redirect(new URL("/management/unauthorized", req.url));
+        // Preserve cookies refreshed by the Supabase SSR client on this request.
+        res.cookies.getAll().forEach((cookie) => denied.cookies.set(cookie));
+        denied.headers.set("Cache-Control", "private, no-store");
+        return denied;
+      }
     }
 
     // C. ESKİ TERMİNAL ZIRHI (Şu anki operasyonda kullanılmaya devam edebilir)
