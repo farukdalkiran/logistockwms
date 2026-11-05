@@ -209,7 +209,7 @@ export default function ExcelBoxUploadDrawer({
         // Aynı barkod güncellenmez ve başarılı aktarım sayısına eklenmez.
         const existingBoxBarcodes = new Set<string>();
         const productBarcodesUsedAsBoxes = new Set<string>();
-        for (let i = 0; i < readyBoxes.length; i += SAFE_CHUNK_SIZE) {
+        for (let i = 0; i < validBoxes.length; i += SAFE_CHUNK_SIZE) {
           const barcodes = validBoxes.slice(i, i + SAFE_CHUNK_SIZE).map((box) => box.box_barcode);
           const [boxMatches, productMatches] = await Promise.all([
             supabase.from("boxes").select("box_barcode").in("box_barcode", barcodes),
@@ -245,7 +245,7 @@ export default function ExcelBoxUploadDrawer({
         const totalInsertChunks = Math.ceil(readyBoxes.length / SAFE_CHUNK_SIZE);
         let insertedCount = 0;
 
-        for (let i = 0; i < validBoxes.length; i += SAFE_CHUNK_SIZE) {
+        for (let i = 0; i < readyBoxes.length; i += SAFE_CHUNK_SIZE) {
           const currentInsertIdx = Math.floor(i / SAFE_CHUNK_SIZE) + 1;
           setLoadingStatus(`Koli Tanımları Akıtılıyor: Paket ${currentInsertIdx} / ${totalInsertChunks}`);
           
