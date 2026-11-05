@@ -118,9 +118,9 @@ export default function ProductsTable({
 
       if (debouncedSearch) {
         // İsim, SKU, Ana Barkod veya Alternatif Barkod Dizisinde (exact match) arama
-        const safeSearch = debouncedSearch.replace(/[^\\p{L}\\p{N}\\s-]/gu, "").trim();
+        const safeSearch = debouncedSearch.replace(/[^\p{L}\p{N}\s-]/gu, "").trim();
         if (safeSearch) query = query.or(
-          `barcode.ilike.%${safeSearch}%,sku.ilike.%${safeSearch}%,name.ilike.%${safeSearch}%,alt_barcodes.cs.{${safeSearch.replace(/\\s/g, "")}}`,
+          `barcode.ilike.%${safeSearch}%,sku.ilike.%${safeSearch}%,name.ilike.%${safeSearch}%,alt_barcodes.cs.{${safeSearch.replace(/\s/g, "")}}`,
         );
       }
       if (filters.category !== "all")
