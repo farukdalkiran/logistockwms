@@ -94,27 +94,72 @@ export default function ExcelUploadModal({ onClose, onSuccess }: { onClose: () =
         const ws = wb.Sheets[wsname];
         const data = XLSX.utils.sheet_to_json(ws);
 
-        // Verileri DB şemasına göre haritala ve temizle
-        const formattedData = data.map((row: any) => ({
-          barcode: String(row["Barkod"] || "").trim(),
-          sku: String(row["SKU"] || "").trim(),
-          name: String(row["Ürün Adı"] || "").trim(),
-          category: String(row["Kategori"] || "").trim(),
-          image_url: String(row["Görsel URL"] || "").trim() || null,
-          is_consumable: String(row["Sarf Malzeme mi?"] || "").toUpperCase() === "EVET",
-          max_order_limit: parseInt(row["Max Sipariş Limiti"]) || 0
-        })).filter(item => item.barcode && item.name); // Sadece zorunlu alanları dolu olanları al
+        // Barkodları metin olarak oku: Excel'deki baştaki sıfırlar kaybolmamalı.
+        const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: "", raw: false });
+        if (!rows.length) throw new Error("Dosyada ürün satırı bulunamadı.");
 
-        if (formattedData.length === 0) {
-          throw new Error("Excel dosyasında geçerli veri bulunamadı. Lütfen zorunlu alanların (Barkod, Ürün Adı) doldurulduğundan emin olun.");
+        const formattedData = rows.map((row) => ({
+          barcode: String(row["Barkod"] ?? "").trim().toUpperCase(),
+          sku: String(row["SKU"] ?? "").trim().toUpperCase() || null,
+          name: String(row["Ürün Adı"] ?? "").trim().replace(/\s+/g, " "),
+          category: String(row["Kategori"] ?? "").trim() || null,
+          image_url: String(row["Görsel URL"] ?? "").trim() || null,
+          is_consumable: String(row["Sarf Malzeme mi?"] ?? "").trim().toLocaleUpperCase("tr-TR") === "EVET",
+          max_order_limit: Math.max(0, Number.parseInt(String(row["Max Sipariş Limiti"] ?? "0"), 10) || 0),
+        }));
+
+        const seenBarcode = new Set<string>();
+        const seenSku = new Set<string>();
+        const seenNames = new Set<string>();
+        const issues: string[] = [];
+        formattedData.forEach((item, index) => {
+          const line = index + 2;
+          if (!item.barcode || !item.name || /\s/.test(item.barcode)) issues.push(`Satır ${line}: geçersiz barkod veya ürün adı`);
+          if (seenBarcode.has(item.barcode)) issues.push(`Satır ${line}: tekrar eden barkod ${item.barcode}`);
+          seenBarcode.add(item.barcode);
+          if (item.sku) {
+            if (seenSku.has(item.sku)) issues.push(`Satır ${line}: tekrar eden SKU ${item.sku}`);
+            seenSku.add(item.sku);
+          }
+          const nameKey = `${item.is_consumable}:${item.name.toLocaleLowerCase("tr-TR")}`;
+          if (seenNames.has(nameKey)) issues.push(`Satır ${line}: aynı isimde ürün/sarf kartı ${item.name}`);
+          seenNames.add(nameKey);
+        });
+        if (issues.length) throw new Error(`Dosyada ${issues.length} sorun var. Kayıt yapılmadı: ${issues.slice(0, 7).join("; ")}`);
+
+        // Dosyanın tamamı taranmadan tek bir ürün bile yazılmaz.
+        // Upsert kullanılmaz: mevcut ürün, stok kartı ve görseller korunur.
+        const CHUNK = 150;
+        for (let i = 0; i < formattedData.length; i += CHUNK) {
+          const batch = formattedData.slice(i, i + CHUNK);
+          const [barcodes, skus, names] = await Promise.all([
+            supabase.from("products").select("barcode,name").in("barcode", batch.map((p) => p.barcode)),
+            ...[batch.map((p) => p.sku).filter((sku): sku is string => Boolean(sku)).length
+              ? supabase.from("products").select("sku,name").in("sku", batch.map((p) => p.sku).filter((sku): sku is string => Boolean(sku)))
+              : Promise.resolve({ data: [], error: null })],
+            supabase.from("products").select("name,is_consumable,barcode").in("name", batch.map((p) => p.name)),
+          ]);
+          for (const check of [barcodes, skus, names]) {
+            if (check.error) throw new Error(check.error.message);
+          }
+          if (barcodes.data?.length) issues.push(`Barkod kayıtlı: ${barcodes.data.slice(0, 3).map((p) => p.barcode).join(", ")}`);
+          if (skus.data?.length) issues.push(`SKU kayıtlı: ${skus.data.slice(0, 3).map((p) => p.sku).join(", ")}`);
+          const named = names.data?.filter((existing) => batch.some((item) => item.is_consumable === existing.is_consumable && item.name === existing.name)) || [];
+          if (named.length) issues.push(`Ürün adı kayıtlı: ${named.slice(0, 3).map((p) => p.name).join(", ")}`);
         }
+        if (issues.length) throw new Error(`Mevcut katalogda ${issues.length} çakışma grubu bulundu. Hiçbir kart değiştirilmedi: ${issues.slice(0, 8).join("; ")}`);
 
-        // Supabase Upsert (Barkoda göre eşleşirse günceller, yoksa yeni ekler)
-        const { error } = await supabase.from("products").upsert(formattedData, { onConflict: "barcode" });
-
-        if (error) throw error;
-
-        setSuccessCount(formattedData.length);
+        let inserted = 0;
+        for (let i = 0; i < formattedData.length; i += CHUNK) {
+          const batch = formattedData.slice(i, i + CHUNK);
+          const { error } = await supabase.from("products").insert(batch);
+          if (error) {
+            const reason = error.code === "23505" ? "Barkod veya SKU bu sırada başka bir oturumda kaydedildi." : error.message;
+            throw new Error(`${inserted} yeni kart eklendi, kalanlar durduruldu. ${reason}`);
+          }
+          inserted += batch.length;
+        }
+        setSuccessCount(inserted);
         onSuccess(); // Arka planda tabloyu yenile
         
         // Başarı mesajını gösterip modali otomatik kapat
@@ -136,23 +181,23 @@ export default function ExcelUploadModal({ onClose, onSuccess }: { onClose: () =
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 sm:p-6 animate-in fade-in">
       
       {/* MODAL KAPSAYICI */}
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] sm:h-[80vh] flex flex-col overflow-hidden animate-in zoom-in-95 relative">
+      <div className="bg-white rounded-[5px] shadow-2xl w-full max-w-5xl h-[90vh] sm:h-[80vh] flex flex-col overflow-hidden animate-in zoom-in-95 relative">
         
         {/* MODAL HEADER */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-[#dc3545]/10 flex items-center justify-center text-[#dc3545]">
+            <div className="w-10 h-10 rounded-[5px] bg-[#dc3545]/10 flex items-center justify-center text-[#dc3545]">
               <TableProperties size={20} />
             </div>
             <div>
               <h2 className="text-lg font-black text-slate-800">Toplu Excel İçe Aktarımı</h2>
-              <p className="text-xs text-slate-500 font-medium">LogiStock veritabanına on binlerce veriyi saniyeler içinde yükleyin.</p>
+              <p className="text-xs text-slate-500 font-medium">Mevcut kayıtları değiştirmeden sadece yeni ve benzersiz ürün kartlarını ekleyin.</p>
             </div>
           </div>
           <button 
             onClick={onClose} 
             disabled={loading}
-            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-50"
+            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-[5px] transition-colors disabled:opacity-50"
           >
             <X size={20} />
           </button>
@@ -174,7 +219,7 @@ export default function ExcelUploadModal({ onClose, onSuccess }: { onClose: () =
             </p>
 
             {/* Kural Tablosu */}
-            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden mb-6 shadow-sm">
+            <div className="bg-white border border-slate-200 rounded-[5px] overflow-hidden mb-6 shadow-sm">
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200">
                   <tr>
@@ -215,13 +260,13 @@ export default function ExcelUploadModal({ onClose, onSuccess }: { onClose: () =
               </table>
             </div>
 
-            <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+            <div className="bg-indigo-50 border border-indigo-100 rounded-[5px] p-4">
               <p className="text-xs text-indigo-800 mb-3 font-medium">
                 Vakit kaybetmemek için hazır, formatı ayarlanmış boş şablonu indirebilirsiniz.
               </p>
               <button 
                 onClick={downloadTemplate}
-                className="w-full flex items-center justify-center gap-2 h-10 bg-white border border-indigo-200 text-indigo-700 rounded-lg text-sm font-bold hover:bg-indigo-600 hover:text-white transition-colors shadow-sm"
+                className="w-full flex items-center justify-center gap-2 h-10 bg-white border border-indigo-200 text-indigo-700 rounded-[5px] text-sm font-bold hover:bg-indigo-600 hover:text-white transition-colors shadow-sm"
               >
                 <Download size={16} />
                 Hazır Şablonu İndir
@@ -234,7 +279,7 @@ export default function ExcelUploadModal({ onClose, onSuccess }: { onClose: () =
             
             {/* Dinamik Durum Ekranları */}
             {errorLog && (
-              <div className="mb-6 flex items-start gap-3 bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl animate-in fade-in slide-in-from-top-2">
+              <div className="mb-6 flex items-start gap-3 bg-red-50 border border-red-200 text-red-700 p-4 rounded-[5px] animate-in fade-in slide-in-from-top-2">
                 <AlertCircle size={20} className="shrink-0 text-[#dc3545] mt-0.5" />
                 <div>
                   <h4 className="font-bold text-sm mb-1">Yükleme Başarısız</h4>
@@ -244,7 +289,7 @@ export default function ExcelUploadModal({ onClose, onSuccess }: { onClose: () =
             )}
 
             {successCount !== null && (
-              <div className="mb-6 flex items-center gap-3 bg-emerald-50 border border-emerald-200 text-emerald-700 p-5 rounded-xl animate-in fade-in slide-in-from-top-2 shadow-sm">
+              <div className="mb-6 flex items-center gap-3 bg-emerald-50 border border-emerald-200 text-emerald-700 p-5 rounded-[5px] animate-in fade-in slide-in-from-top-2 shadow-sm">
                 <CheckCircle2 size={28} className="shrink-0 text-emerald-600" />
                 <div>
                   <h4 className="font-black text-base">İşlem Tamamlandı!</h4>
