@@ -44,6 +44,7 @@ export default function ProductsTable({
   externalRefresh?: number;
 }) {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [showArchived, setShowArchived] = useState(false);
 
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<
@@ -113,12 +114,13 @@ export default function ProductsTable({
   const fetchProducts = useCallback(async () => {
     setLoading(true);
     try {
-      let query = supabase.from("products").select("*", { count: "exact" }).eq("is_active", true);
+      let query = supabase.from("products").select("*", { count: "exact" }).eq("is_active", !showArchived);
 
       if (debouncedSearch) {
         // İsim, SKU, Ana Barkod veya Alternatif Barkod Dizisinde (exact match) arama
-        query = query.or(
-          `barcode.ilike.%${debouncedSearch}%,sku.ilike.%${debouncedSearch}%,name.ilike.%${debouncedSearch}%,alt_barcodes.cs.{${debouncedSearch}}`,
+        const safeSearch = debouncedSearch.replace(/[^\\p{L}\\p{N}\\s-]/gu, "").trim();
+        if (safeSearch) query = query.or(
+          `barcode.ilike.%${safeSearch}%,sku.ilike.%${safeSearch}%,name.ilike.%${safeSearch}%,alt_barcodes.cs.{${safeSearch.replace(/\\s/g, "")}}`,
         );
       }
       if (filters.category !== "all")
@@ -143,7 +145,7 @@ export default function ProductsTable({
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch, filters, sortConfig, page, rowsPerPage]);
+  }, [debouncedSearch, filters, sortConfig, page, rowsPerPage, showArchived]);
 
   useEffect(() => {
     fetchCategories();
@@ -254,61 +256,72 @@ export default function ProductsTable({
   const handleUpdateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingProduct) return;
+    const name = editingProduct.name.trim().replace(/\s+/g, " ");
+    const sku = (editingProduct.sku || "").trim().toUpperCase();
+    if (!name) { alert("Ürün adı boş olamaz."); return; }
     setEditLoading(true);
-    const { error } = await supabase
-      .from("products")
-      .update({
-        sku: editingProduct.sku,
-        name: editingProduct.name,
+    try {
+      const [skuResult, nameResult] = await Promise.all([
+        sku ? supabase.from("products").select("id,name").ilike("sku", sku).neq("id", editingProduct.id).limit(1)
+          : Promise.resolve({ data: [] as { id: string; name: string }[], error: null }),
+        supabase.from("products").select("id,name,is_consumable")
+          .ilike("name", name).neq("id", editingProduct.id).limit(30),
+      ]);
+      if (skuResult.error || nameResult.error) throw new Error(skuResult.error?.message || nameResult.error?.message);
+      if (skuResult.data?.length) throw new Error(`SKU başka üründe kullanılıyor: ${skuResult.data[0].name}`);
+      const duplicate = nameResult.data?.find((item) =>
+        item.is_consumable === editingProduct.is_consumable &&
+        item.name.trim().toLocaleLowerCase("tr-TR") === name.toLocaleLowerCase("tr-TR"));
+      if (duplicate) throw new Error(`Aynı isimde ürün kartı var: ${duplicate.name}`);
+      const { error } = await supabase.from("products").update({
+        sku: sku || null,
+        name,
         category: editingProduct.category,
         image_url: editingProduct.image_url,
         is_consumable: editingProduct.is_consumable,
-        max_order_limit: editingProduct.is_consumable
-          ? editingProduct.max_order_limit
-          : 0,
-      })
-      .eq("id", editingProduct.id);
-
-    if (!error) {
+        max_order_limit: editingProduct.is_consumable ? editingProduct.max_order_limit : 0,
+      }).eq("id", editingProduct.id);
+      if (error) throw new Error(error.code === "23505" ? "Barkod veya SKU zaten kullanılıyor." : error.message);
       setEditingProduct(null);
       handleSuccess();
-    } else alert("Güncelleme hatası: " + error.message);
-    setEditLoading(false);
+    } catch (error) {
+      alert("Güncelleme engellendi: " + (error instanceof Error ? error.message : "Bilinmeyen hata"));
+    } finally {
+      setEditLoading(false);
+    }
   };
 
+  // Stok ve hareket geçmişi referanslarını korumak için kalıcı DELETE yerine arşivle.
   const executeDelete = async () => {
     if (!productToDelete) return;
     setDeleteLoading(true);
-    const { error } = await supabase
-      .from("products")
-      .delete()
-      .eq("id", productToDelete.id);
-
+    const { error } = await supabase.from("products")
+      .update({ is_active: false }).eq("id", productToDelete.id);
     if (!error) {
       setProductToDelete(null);
-      handleSuccess();
       setSelectedIds((prev) => prev.filter((id) => id !== productToDelete.id));
-    } else alert("Silme hatası: " + error.message);
+      handleSuccess();
+    } else alert("Arşivleme hatası: " + error.message);
     setDeleteLoading(false);
   };
 
   const executeBulkDelete = async () => {
-    if (selectedIds.length === 0) return;
+    if (!selectedIds.length) return;
     setBulkDeleteLoading(true);
-
-    const { error } = await supabase
-      .from("products")
-      .delete()
-      .in("id", selectedIds);
-
+    const { error } = await supabase.from("products")
+      .update({ is_active: false }).in("id", selectedIds);
     if (!error) {
       setIsBulkDeleteModalOpen(false);
       setSelectedIds([]);
       handleSuccess();
-    } else {
-      alert("Toplu silme hatası: " + error.message);
-    }
+    } else alert("Toplu arşivleme hatası: " + error.message);
     setBulkDeleteLoading(false);
+  };
+
+  const restoreArchivedProduct = async (id: string) => {
+    const { error } = await supabase.from("products").update({ is_active: true }).eq("id", id);
+    if (error) alert("Kart yeniden etkinleştirilemedi: " + error.message);
+    else handleSuccess();
   };
 
   return (
@@ -317,7 +330,7 @@ export default function ProductsTable({
         {/* ================================================================= */}
         {/* BİRLEŞİK KONTROL MERKEZİ (FERAH, AYDINLIK VE YÜKSEK KONTRASTLI) */}
         {/* ================================================================= */}
-        <div className="bg-white border border-slate-200 border-t-4 border-t-[#dc3545] rounded-sm shadow-sm flex flex-col shrink-0 relative overflow-hidden z-10 font-['Quicksand']">
+        <div className="bg-white border border-slate-200 border-t-4 border-t-[#dc3545] rounded-sm shadow-sm flex flex-col shrink-0 relative overflow-hidden z-10 ">
           {/* Hafif Endüstriyel Dokunuş (Sadece çok silik bir arka plan çizgisi) */}
           <div className="absolute inset-0 opacity-[0.015] bg-[repeating-linear-gradient(45deg,#000,#000_1px,transparent_1px,transparent_10px)] pointer-events-none"></div>
 
@@ -354,6 +367,12 @@ export default function ProductsTable({
 
             {/* Sağ Taraf: İndirme ve Yenileme Butonları */}
             <div className="flex items-center gap-3 w-full md:w-auto justify-end">
+              <button type="button"
+                onClick={() => { setShowArchived((value) => !value); setSelectedIds([]); setPage(1); }}
+                aria-pressed={showArchived}
+                className={`h-10 px-3 rounded-[5px] text-[11px] font-bold border transition-colors ${showArchived ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"}`}>
+                {showArchived ? "Aktif Ürünlere Dön" : "Arşivlenenler"}
+              </button>
               <button
                 onClick={exportToCSV}
                 className="h-10 flex items-center justify-center gap-2 px-4 bg-white border border-slate-300 text-slate-700 hover:text-[#dc3545] hover:bg-red-50 hover:border-red-200 rounded-sm text-[11px] font-black uppercase tracking-wider transition-all shadow-sm"
@@ -477,7 +496,7 @@ export default function ProductsTable({
               onClick={() => setIsBulkDeleteModalOpen(true)}
               className="text-xs font-bold px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 shadow-sm transition-all flex items-center gap-1.5"
             >
-              <Trash2 size={14} /> Toplu Sil
+              <Trash2 size={14} /> Toplu Arşivle
             </button>
           </div>
         )}
@@ -632,6 +651,12 @@ export default function ProductsTable({
                     </td>
                     <td className="p-3 text-right pr-4">
                       <div className="flex items-center justify-end gap-2 opacity-80 group-hover/row:opacity-100 transition-opacity">
+                        {showArchived ? (
+                          <button type="button" onClick={() => restoreArchivedProduct(product.id)}
+                            className="rounded-[5px] border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100">
+                            Yeniden Etkinleştir
+                          </button>
+                        ) : (<>
                         <button
                           onClick={() => setEditingProduct(product)}
                           className="p-1.5 text-slate-500 bg-white border border-slate-200 hover:text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 rounded-md transition-all shadow-sm"
@@ -642,10 +667,11 @@ export default function ProductsTable({
                         <button
                           onClick={() => setProductToDelete(product)}
                           className="p-1.5 text-slate-500 bg-white border border-slate-200 hover:text-[#dc3545] hover:bg-red-50 hover:border-red-200 rounded-md transition-all shadow-sm"
-                          title="Kalıcı Olarak Sil"
+                          title="Ürünü Arşivle"
                         >
                           <Trash2 size={16} />
                         </button>
+                        </>)}
                       </div>
                     </td>
                   </tr>
@@ -911,13 +937,13 @@ export default function ProductsTable({
               <AlertCircle size={32} className="text-[#dc3545]" />
             </div>
             <h2 className="text-xl font-black text-slate-800 text-center mb-2">
-              Ürünü Silmek İstediğinize Emin Misiniz?
+              Ürünü Arşivlemek İstediğinize Emin Misiniz?
             </h2>
             <p className="text-sm text-slate-500 text-center mb-6 leading-relaxed">
               <strong className="text-slate-800 block mb-2 text-base bg-slate-50 p-2 rounded border border-slate-100">
                 {productToDelete.barcode} - {productToDelete.name}
               </strong>
-              Sistemden kalıcı olarak silinecektir.{" "}
+              Kart pasife alınacak; stok ve sipariş geçmişi korunacaktır.{" "}
               <span className="text-[#dc3545] font-bold block mt-1">
                 Bu işlem geri alınamaz.
               </span>
@@ -939,7 +965,7 @@ export default function ProductsTable({
                 {deleteLoading ? (
                   <Loader2 size={16} className="animate-spin" />
                 ) : (
-                  "Kalıcı Olarak Sil"
+                  "Arşivle"
                 )}
               </button>
             </div>
@@ -960,14 +986,14 @@ export default function ProductsTable({
               <AlertTriangle size={32} className="text-[#dc3545]" />
             </div>
             <h2 className="text-xl font-black text-slate-800 text-center mb-2">
-              Toplu Silme İşlemi
+              Toplu Arşivleme İşlemi
             </h2>
             <p className="text-sm text-slate-500 text-center mb-6 leading-relaxed">
               Seçili{" "}
               <strong className="text-slate-800 font-bold">
                 {selectedIds.length}
               </strong>{" "}
-              kaydı sistemden kalıcı olarak silmek istediğinize emin misiniz?{" "}
+              kaydı arşivlemek istediğinize emin misiniz? Geçmiş kayıtlar korunacaktır.{" "}
               <span className="text-[#dc3545] font-bold block mt-1">
                 Bu işlem geri alınamaz.
               </span>
@@ -989,7 +1015,7 @@ export default function ProductsTable({
                 {bulkDeleteLoading ? (
                   <Loader2 size={16} className="animate-spin" />
                 ) : (
-                  "Seçilenleri Sil"
+                  "Seçilenleri Arşivle"
                 )}
               </button>
             </div>
