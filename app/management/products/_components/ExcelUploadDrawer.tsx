@@ -238,7 +238,7 @@ export default function ExcelUploadModal({ onClose, onSuccess }: { onClose: () =
                   </tr>
                   <tr>
                     <td className="px-3 py-2 font-mono text-slate-800">SKU</td>
-                    <td className="px-3 py-2 text-[#dc3545] font-bold">Zorunlu</td>
+                    <td className="px-3 py-2 text-slate-500 font-medium">Opsiyonel, benzersizse kullanılır</td>
                   </tr>
                   <tr>
                     <td className="px-3 py-2 font-mono text-slate-800">Kategori</td>
