@@ -95,17 +95,20 @@ export default function BoxesTable({
         .range(from, to);
 
       if (debouncedSearch) {
-        const { data: matchedProducts } = await supabase
-          .from("products")
-          .select("id")
-          .or(`barcode.ilike.%${debouncedSearch}%,sku.ilike.%${debouncedSearch}%,name.ilike.%${debouncedSearch}%`);
-
-        const productIds = matchedProducts?.map((p) => p.id) || [];
-
-        if (productIds.length > 0) {
-          query = query.or(`box_barcode.ilike.%${debouncedSearch}%,product_id.in.(${productIds.join(',')})`);
-        } else {
-          query = query.ilike("box_barcode", `%${debouncedSearch}%`);
+        // PostgREST filter syntax must not contain raw user-controlled punctuation.
+        const safeSearch = debouncedSearch.replace(/[^\p{L}\p{N}\s-]/gu, "").trim();
+        if (safeSearch) {
+          const { data: matchedProducts, error: searchError } = await supabase
+            .from("products").select("id")
+            .or(`barcode.ilike.%${safeSearch}%,sku.ilike.%${safeSearch}%,name.ilike.%${safeSearch}%`)
+            .limit(250);
+          if (searchError) throw searchError;
+          const productIds = matchedProducts?.map((p) => p.id) || [];
+          if (productIds.length) {
+            query = query.or(`box_barcode.ilike.%${safeSearch}%,product_id.in.(${productIds.join(",")})`);
+          } else {
+            query = query.ilike("box_barcode", `%${safeSearch}%`);
+          }
         }
       }
 
@@ -150,7 +153,6 @@ export default function BoxesTable({
       editingBox.id,
       editingBox.box_barcode,
       editingBox.quantity,
-      "3976" 
     );
 
     if (result.success) {
@@ -167,7 +169,7 @@ export default function BoxesTable({
     if (!boxToDelete) return;
     setDeleteLoading(true);
     
-    const result = await deleteBoxesAction([boxToDelete.id], "3976");
+    const result = await deleteBoxesAction([boxToDelete.id]);
 
     if (result.success) {
       setSelectedIds((prev) => prev.filter((id) => id !== boxToDelete.id));
@@ -183,7 +185,7 @@ export default function BoxesTable({
     if (selectedIds.length === 0) return;
     setBulkDeleteLoading(true);
 
-    const result = await deleteBoxesAction(selectedIds, "3976");
+    const result = await deleteBoxesAction(selectedIds);
 
     if (result.success) {
       setIsBulkDeleteModalOpen(false);
@@ -196,7 +198,7 @@ export default function BoxesTable({
   };
 
   return (
-    <div className="flex flex-col gap-6 w-full font-['Quicksand']">
+    <div className="flex flex-col gap-6 w-full ">
       
       {/* KONTROL MERKEZİ */}
       <div className="bg-white border border-slate-200 border-t-4 border-t-[#dc3545] rounded-sm shadow-sm flex flex-col md:flex-row items-center justify-between p-4 gap-4 relative overflow-hidden z-10">
