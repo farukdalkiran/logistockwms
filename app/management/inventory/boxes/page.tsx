@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import CatalogNavigation from "@/components/wms/CatalogNavigation";
 import BoxesDashboard from "./_components/BoxesDashboard";
 import BoxesTable from "./_components/BoxesTable";
 
@@ -12,11 +13,9 @@ export default function BoxesPage() {
   };
 
   return (
-    <div className="flex flex-col min-h-screen gap-6 bg-slate-50 p-4 md:p-6 lg:p-8">
-      {/* Üst Kısım: İstatistikler ve Aksiyon Butonları */}
+    <div className="flex min-h-screen flex-col gap-4 bg-slate-50 p-4 md:gap-5 md:p-6 lg:p-8">
+      <CatalogNavigation active="boxes" />
       <BoxesDashboard onUpdate={handleUpdate} />
-
-      {/* Alt Kısım: Akıllı Veri Tablosu */}
       <BoxesTable externalRefresh={refreshKey} />
     </div>
   );

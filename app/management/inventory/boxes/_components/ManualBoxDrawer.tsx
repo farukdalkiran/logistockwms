@@ -53,8 +53,9 @@ export default function ManualBoxModal({ onClose, onSuccess }: { onClose: () => 
       try {
         const { data, error } = await supabase
           .from("products")
-          .select("id, name, image_url, category, sku, is_consumable")
-          .eq("barcode", searchBarcode)
+          .select("id, name, image_url, category, sku, is_consumable, barcode")
+          .eq("barcode", searchBarcode.toUpperCase())
+          .eq("is_active", true)
           .single();
 
         if (error || !data) {
@@ -79,12 +80,12 @@ export default function ManualBoxModal({ onClose, onSuccess }: { onClose: () => 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.box_barcode.trim() || !formData.product_barcode.trim() || formData.quantity <= 0) {
+    if (!formData.box_barcode.trim() || !formData.product_barcode.trim() || !Number.isSafeInteger(formData.quantity) || formData.quantity <= 0 || /\s/.test(formData.box_barcode.trim())) {
       setErrorLog("Lütfen tüm alanları geçerli şekilde doldurun.");
       return;
     }
 
-    if (!previewProduct || productNotFound) {
+    if (!previewProduct || productNotFound || previewProduct.barcode !== formData.product_barcode.trim().toUpperCase()) {
       setErrorLog("Girdiğiniz ürün barkodu sistemde bulunamadı. Lütfen geçerli bir ürün barkodu girin.");
       return;
     }
@@ -93,13 +94,20 @@ export default function ManualBoxModal({ onClose, onSuccess }: { onClose: () => 
     setErrorLog(null);
 
     try {
-      // Önceki adımda hazırladığımız Server Action'ı çağırıyoruz.
-      // Not: "3976" Faruk Dalkıran'ın ID'si. Eğer sisteme auth entegreyse dinamik verilebilir.
+      const normalizedBarcode = formData.box_barcode.trim().toUpperCase();
+      const [existingBox, existingProduct] = await Promise.all([
+        supabase.from("boxes").select("id,box_barcode").ilike("box_barcode", normalizedBarcode).limit(1),
+        supabase.from("products").select("id,name").ilike("barcode", normalizedBarcode).limit(1),
+      ]);
+      if (existingBox.error || existingProduct.error) throw new Error(existingBox.error?.message || existingProduct.error?.message);
+      if (existingBox.data?.length) throw new Error(`"${normalizedBarcode}" barkodlu koli zaten tanımlı. Mevcut koliyi düzenleyin.`);
+      if (existingProduct.data?.length) throw new Error(`Bu barkod "${existingProduct.data[0].name}" ürününe ait, koli barkodu olarak kullanılamaz.`);
+
       const result = await createBoxAction({
-        box_barcode: formData.box_barcode.trim(),
+        box_barcode: normalizedBarcode,
         product_id: previewProduct.id,
         quantity: formData.quantity
-      }, "3976");
+      });
 
       if (!result.success) {
         throw new Error(result.error);
@@ -127,25 +135,25 @@ export default function ManualBoxModal({ onClose, onSuccess }: { onClose: () => 
       
       {/* MODAL KAPSAYICI */}
       <div 
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] flex flex-col overflow-hidden animate-in zoom-in-95 relative"
+        className="bg-white rounded-[5px] shadow-2xl w-full max-w-5xl max-h-[95vh] flex flex-col overflow-hidden animate-in zoom-in-95 relative"
         onClick={(e) => e.stopPropagation()}
       >
         
         {/* MODAL HEADER */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-[#dc3545]/10 flex items-center justify-center text-[#dc3545]">
+            <div className="w-10 h-10 rounded-[5px] bg-[#dc3545]/10 flex items-center justify-center text-[#dc3545]">
               <Box size={20} />
             </div>
             <div>
-              <h2 className="text-lg font-black text-slate-800">Tekil Koli (Master Barkod) Oluştur</h2>
-              <p className="text-xs text-slate-500 font-medium">Toplu raflama ve toplama işlemleri için dış koli barkodu tanımlayın.</p>
+              <h2 className="text-lg font-black text-slate-800">Yeni Koli Barkodu Oluştur</h2>
+              <p className="text-xs text-slate-500 font-medium">Barkodların benzersizliği ve bağlı ürünün geçerliliği kontrol edilir.</p>
             </div>
           </div>
           <button 
             onClick={onClose} 
             disabled={loading}
-            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-50"
+            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-[5px] transition-colors disabled:opacity-50"
           >
             <X size={20} />
           </button>
@@ -191,7 +199,7 @@ export default function ManualBoxModal({ onClose, onSuccess }: { onClose: () => 
                           autoFocus
                           type="text" 
                           placeholder="Örn: BOX-8691010..."
-                          className="w-full h-11 pl-9 pr-3 text-sm border-2 border-slate-300 rounded-lg focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] outline-none transition-all placeholder:text-slate-400 font-bold text-slate-800"
+                          className="w-full h-11 pl-9 pr-3 text-sm border-2 border-slate-300 rounded-[5px] focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] outline-none transition-all placeholder:text-slate-400 font-bold text-slate-800"
                           value={formData.box_barcode} 
                           onChange={e => setFormData({...formData, box_barcode: e.target.value.toUpperCase()})} 
                         />
@@ -216,14 +224,14 @@ export default function ManualBoxModal({ onClose, onSuccess }: { onClose: () => 
                           required 
                           type="text" 
                           placeholder="Ürün barkodunu okutun veya yazın..."
-                          className={`w-full h-11 pl-9 pr-3 text-sm border-2 rounded-lg outline-none transition-all placeholder:text-slate-400 font-bold
+                          className={`w-full h-11 pl-9 pr-3 text-sm border-2 rounded-[5px] outline-none transition-all placeholder:text-slate-400 font-bold
                             ${previewProduct ? 'border-emerald-400 bg-emerald-50 text-emerald-800 focus:border-emerald-500 focus:ring-emerald-500' : 
                               productNotFound && formData.product_barcode.length > 2 ? 'border-red-400 bg-red-50 text-red-800 focus:border-red-500 focus:ring-red-500' : 
                               'border-slate-300 focus:border-blue-500 focus:ring-blue-500 text-slate-800'
                             }
                           `}
                           value={formData.product_barcode} 
-                          onChange={e => setFormData({...formData, product_barcode: e.target.value})} 
+                          onChange={e => { setPreviewProduct(null); setFormData({...formData, product_barcode: e.target.value.toUpperCase()}); }} 
                         />
                       </div>
                     </div>
@@ -237,7 +245,7 @@ export default function ManualBoxModal({ onClose, onSuccess }: { onClose: () => 
                           required 
                           type="number" 
                           min="1"
-                          className="w-full h-11 pl-9 pr-3 text-sm border-2 border-slate-300 rounded-lg focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] outline-none transition-all font-black text-slate-800 bg-slate-50"
+                          className="w-full h-11 pl-9 pr-3 text-sm border-2 border-slate-300 rounded-[5px] focus:border-[#dc3545] focus:ring-1 focus:ring-[#dc3545] outline-none transition-all font-black text-slate-800 bg-slate-50"
                           value={formData.quantity || ''} 
                           onChange={e => setFormData({...formData, quantity: parseInt(e.target.value) || 0})} 
                         />
@@ -265,7 +273,7 @@ export default function ManualBoxModal({ onClose, onSuccess }: { onClose: () => 
               
               {/* Ürün Bulunamadı / Bekleniyor Ekranı */}
               {!previewProduct ? (
-                <div className="text-center p-8 bg-white/50 backdrop-blur-sm rounded-2xl border border-slate-200 border-dashed">
+                <div className="text-center p-8 bg-white/50 backdrop-blur-sm rounded-[5px] border border-slate-200 border-dashed">
                   <Box size={48} className="mx-auto text-slate-300 mb-3" />
                   <p className="text-sm font-bold text-slate-500">Ürün Barkodu Bekleniyor</p>
                   <p className="text-xs text-slate-400 mt-1 max-w-[200px]">Sol taraftaki forma geçerli bir ürün barkodu girdiğinizde, koli içeriği burada belirecektir.</p>
@@ -273,10 +281,10 @@ export default function ManualBoxModal({ onClose, onSuccess }: { onClose: () => 
               ) : (
                 
                 /* Bulunan Ürün Koli Önizleme Kartı */
-                <div className="bg-white w-full max-w-[280px] rounded-2xl shadow-xl border border-slate-200 overflow-hidden group animate-in zoom-in-95 duration-300 relative">
+                <div className="bg-white w-full max-w-[280px] rounded-[5px] shadow-xl border border-slate-200 overflow-hidden group animate-in zoom-in-95 duration-300 relative">
                   
                   {/* Koli Adet Badge'i (Sol Üstte Vurgulu) */}
-                  <div className="absolute top-3 right-3 z-20 flex items-center gap-1 bg-[#dc3545] text-white px-3 py-1.5 rounded-lg shadow-lg">
+                  <div className="absolute top-3 right-3 z-20 flex items-center gap-1 bg-[#dc3545] text-white px-3 py-1.5 rounded-[5px] shadow-lg">
                     <X size={14} className="opacity-80"/>
                     <span className="font-black text-lg leading-none">{formData.quantity}</span>
                     <span className="text-[10px] uppercase font-bold tracking-widest opacity-80 mt-0.5">Adet</span>
@@ -351,7 +359,7 @@ export default function ManualBoxModal({ onClose, onSuccess }: { onClose: () => 
           <button 
             type="button"
             onClick={onClose}
-            className="px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
+            className="px-5 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-200 rounded-[5px] transition-colors"
           >
             İptal
           </button>
@@ -359,7 +367,7 @@ export default function ManualBoxModal({ onClose, onSuccess }: { onClose: () => 
             type="submit"
             form="boxForm" // Form ID'si ile footer butonunu bağlıyoruz
             disabled={loading || success || !previewProduct || productNotFound || formData.quantity <= 0 || !formData.box_barcode}
-            className="flex items-center justify-center gap-2 px-6 py-2.5 bg-[#dc3545] text-white text-sm font-bold rounded-lg hover:bg-red-700 transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed min-w-[150px]"
+            className="flex items-center justify-center gap-2 px-6 py-2.5 bg-[#dc3545] text-white text-sm font-bold rounded-[5px] hover:bg-red-700 transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed min-w-[150px]"
           >
             {loading ? (
               <><Loader2 size={16} className="animate-spin" /> Kaydediliyor</>

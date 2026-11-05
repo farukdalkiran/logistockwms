@@ -115,7 +115,7 @@ export default function ExcelBoxUploadDrawer({
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
         
-        const excelRows: any[] = XLSX.utils.sheet_to_json(ws);
+        const excelRows: any[] = XLSX.utils.sheet_to_json(ws, { raw: false, defval: "" });
 
         if (excelRows.length === 0) {
           throw new Error("Excel dosyasında işlenecek veri satırı bulunamadı.");
@@ -130,7 +130,7 @@ export default function ExcelBoxUploadDrawer({
 
         const excelProductBarcodes = Array.from(
           new Set(
-            excelRows.map((row: any) => String(row["Koli İçi Ürün Barkodu"] || "").trim())
+            excelRows.map((row: any) => String(row["Koli İçi Ürün Barkodu"] || "").trim().toUpperCase())
           )
         ).filter(Boolean);
 
@@ -147,7 +147,8 @@ export default function ExcelBoxUploadDrawer({
           const { data: dbProducts, error: dbError } = await supabase
             .from("products")
             .select("id, barcode")
-            .in("barcode", chunk);
+            .in("barcode", chunk)
+            .eq("is_active", true);
 
           if (dbError) throw dbError;
           dbProducts?.forEach((p) => barcodeToIdMap.set(p.barcode, p.id));
@@ -157,14 +158,15 @@ export default function ExcelBoxUploadDrawer({
         setLoadingStatus("Tanımsız ve hatalı satırlar ayrıştırılıyor...");
         const validBoxes: any[] = [];
         const temporaryCorrupted: CorruptedRow[] = [];
+        const seenBoxes = new Set<string>();
 
         excelRows.forEach((row: any, index: number) => {
-          const boxBarcode = String(row["Dış Koli Barkodu"] || "").trim();
+          const boxBarcode = String(row["Dış Koli Barkodu"] || "").trim().toUpperCase();
           const productBarcode = String(row["Koli İçi Ürün Barkodu"] || "").trim();
-          const quantity = parseInt(row["Koli İçi Adet"]);
+          const quantity = Number(row["Koli İçi Adet"]);
           const rowNum = index + 2;
 
-          if (!boxBarcode || !productBarcode || isNaN(quantity) || quantity <= 0) {
+          if (!boxBarcode || !productBarcode || !Number.isSafeInteger(quantity) || quantity <= 0 || /\s/.test(boxBarcode)) {
             temporaryCorrupted.push({
               satir: rowNum,
               box_barcode: boxBarcode || "EKSİK",
@@ -174,6 +176,15 @@ export default function ExcelBoxUploadDrawer({
             });
             return;
           }
+
+          if (seenBoxes.has(boxBarcode)) {
+            temporaryCorrupted.push({
+              satir: rowNum, box_barcode: boxBarcode, product_barcode: productBarcode,
+              quantity, hata_nedeni: "Aynı Excel dosyasında tekrar eden dış koli barkodu."
+            });
+            return;
+          }
+          seenBoxes.add(boxBarcode);
 
           const productId = barcodeToIdMap.get(productBarcode);
           if (!productId) {
@@ -194,28 +205,58 @@ export default function ExcelBoxUploadDrawer({
           });
         });
 
+        // Kayıt öncesi mevcut koli ve ürün barkodları kontrol edilir.
+        // Aynı barkod güncellenmez ve başarılı aktarım sayısına eklenmez.
+        const existingBoxBarcodes = new Set<string>();
+        const productBarcodesUsedAsBoxes = new Set<string>();
+        for (let i = 0; i < validBoxes.length; i += SAFE_CHUNK_SIZE) {
+          const barcodes = validBoxes.slice(i, i + SAFE_CHUNK_SIZE).map((box) => box.box_barcode);
+          const [boxMatches, productMatches] = await Promise.all([
+            supabase.from("boxes").select("box_barcode").in("box_barcode", barcodes),
+            supabase.from("products").select("barcode").in("barcode", barcodes),
+          ]);
+          if (boxMatches.error || productMatches.error) {
+            throw new Error(boxMatches.error?.message || productMatches.error?.message);
+          }
+          boxMatches.data?.forEach((box) => existingBoxBarcodes.add(box.box_barcode.toUpperCase()));
+          productMatches.data?.forEach((product) => productBarcodesUsedAsBoxes.add(product.barcode.toUpperCase()));
+        }
+        const readyBoxes = validBoxes.filter((box) => {
+          const reason = existingBoxBarcodes.has(box.box_barcode)
+            ? "Koli barkodu daha önce tanımlanmış. Kayıt atlandı; mevcut koli korunuyor."
+            : productBarcodesUsedAsBoxes.has(box.box_barcode)
+              ? "Bu barkod ürün kartında kullanılıyor, koliye atanamaz."
+              : null;
+          if (!reason) return true;
+          temporaryCorrupted.push({
+            satir: 0, box_barcode: box.box_barcode, product_barcode: "MEVCUT",
+            quantity: box.quantity, hata_nedeni: reason
+          });
+          return false;
+        });
+
         setCorruptedRows(temporaryCorrupted);
 
-        if (validBoxes.length === 0) {
-          throw new Error(`İşlem durduruldu. Dosyadaki ${temporaryCorrupted.length} satırın tamamı tanımsız ürün içeriyor.`);
+        if (readyBoxes.length === 0) {
+          throw new Error(`Yeni koli tanımı bulunamadı. ${temporaryCorrupted.length} satır geçersiz veya mükerrer. Hata raporunu kontrol edin.`);
         }
 
         // --- 3. ETAP: VERİTABANI ENJEKSİYON KUYRUĞU (KESİNTİSİZ AKIŞ) ---
-        const totalInsertChunks = Math.ceil(validBoxes.length / SAFE_CHUNK_SIZE);
+        const totalInsertChunks = Math.ceil(readyBoxes.length / SAFE_CHUNK_SIZE);
         let insertedCount = 0;
 
-        for (let i = 0; i < validBoxes.length; i += SAFE_CHUNK_SIZE) {
+        for (let i = 0; i < readyBoxes.length; i += SAFE_CHUNK_SIZE) {
           const currentInsertIdx = Math.floor(i / SAFE_CHUNK_SIZE) + 1;
           setLoadingStatus(`Koli Tanımları Akıtılıyor: Paket ${currentInsertIdx} / ${totalInsertChunks}`);
           
-          const chunk = validBoxes.slice(i, i + SAFE_CHUNK_SIZE);
+          const chunk = readyBoxes.slice(i, i + SAFE_CHUNK_SIZE);
           
           // Güncellenen Server Action çağrılıyor
-          const result = await bulkCreateBoxesAction(chunk, "3976");
+          const result = await bulkCreateBoxesAction(chunk);
           if (!result.success) {
             throw new Error(result.error);
           }
-          insertedCount += chunk.length;
+          insertedCount += result.count ?? 0;
         }
 
         setSuccessCount(insertedCount);
@@ -249,7 +290,7 @@ export default function ExcelBoxUploadDrawer({
             </div>
             <div>
               <h2 className="text-lg font-black text-slate-800 uppercase tracking-tight">Toplu Koli Yükleme Otomasyonu</h2>
-              <p className="text-xs text-slate-500 font-medium">Büyük ölçekli koli listelerini otomatik ayıklayarak sisteme entegre edin.</p>
+              <p className="text-xs text-slate-500 font-medium">Mevcut barkodları ve hatalı satırları raporlayarak yalnızca yeni kolileri ekleyin.</p>
             </div>
           </div>
           <button 
