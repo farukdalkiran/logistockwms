@@ -487,7 +487,7 @@ export default function ProductsTable({
         </div>
 
         {/* TOPLU İŞLEM ÇUBUĞU */}
-        {selectedIds.length > 0 && (
+        {selectedIds.length > 0 && !showArchived && (
           <div className="bg-red-50 px-4 py-2 border-b border-red-100 flex items-center justify-between animate-in fade-in slide-in-from-top-2 shrink-0">
             <span className="text-sm font-bold text-[#dc3545]">
               {selectedIds.length} kayıt seçildi
