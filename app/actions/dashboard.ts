@@ -94,6 +94,8 @@ async function fetchDashboardDataCore(userId: string) {
     { count: pendingCount },
     { count: boxesCount },
     { count: productsCount },
+    { data: recentProducts, error: recentProductsError },
+    { data: recentBoxes, error: recentBoxesError },
   ] = await Promise.all([
     branchCountQuery,
     empCountQuery,
@@ -101,7 +103,22 @@ async function fetchDashboardDataCore(userId: string) {
     pendingLeaveQuery,
     supabaseAdmin.from("boxes").select("box_barcode", { count: "exact", head: true }),
     supabaseAdmin.from("products").select("id", { count: "exact", head: true }),
+    supabaseAdmin
+      .from("products")
+      .select("id,name,barcode,sku,category,image_url,lgs_id,created_at,is_consumable")
+      .order("created_at", { ascending: false })
+      .order("lgs_id", { ascending: false })
+      .limit(10),
+    supabaseAdmin
+      .from("boxes")
+      .select("id,box_barcode,quantity,lgs_id,created_at,products(name,barcode,sku,image_url,lgs_id)")
+      .order("created_at", { ascending: false })
+      .order("lgs_id", { ascending: false })
+      .limit(10),
   ]);
+
+  if (recentProductsError) console.error("Son ürünler alınamadı:", recentProductsError.message);
+  if (recentBoxesError) console.error("Son koliler alınamadı:", recentBoxesError.message);
 
   const totalStock =
     stockData?.reduce((acc, curr) => acc + (curr.quantity || 0), 0) || 0;
@@ -282,6 +299,8 @@ async function fetchDashboardDataCore(userId: string) {
       productsTotal: productsCount || 0,
     },
     cargoDistribution,
+    recentProducts: recentProducts || [],
+    recentBoxes: recentBoxes || [],
     recentCargoSessions: formattedCargoSessions,
     recentTransfers: formattedTransfers,
     recentPutawayLogs: formattedPutawayLogs,
