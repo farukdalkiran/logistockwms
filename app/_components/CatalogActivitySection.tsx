@@ -226,6 +226,7 @@ export function CatalogActivitySection() {
               </p>
             </div>
           </div>
+          <div className="flex shrink-0 items-center gap-1.5">
           <button
             type="button"
             onClick={() => void loadRecent()}
@@ -245,6 +246,7 @@ export function CatalogActivitySection() {
             <Search size={15} />
             <span className="hidden sm:inline">ARA</span>
           </button>
+          </div>
         </div>
 
         <div className="grid shrink-0 grid-cols-2 gap-2 border-b border-slate-200 bg-white p-3" role="tablist" aria-label="Son kayıt türü">
