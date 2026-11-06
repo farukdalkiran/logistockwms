@@ -300,7 +300,12 @@ async function fetchDashboardDataCore(userId: string) {
     },
     cargoDistribution,
     recentProducts: recentProducts || [],
-    recentBoxes: recentBoxes || [],
+    recentBoxes: (recentBoxes || []).map((box) => ({
+      ...box,
+      products: Array.isArray(box.products)
+        ? (box.products[0] || null)
+        : (box.products || null),
+    })),
     recentCargoSessions: formattedCargoSessions,
     recentTransfers: formattedTransfers,
     recentPutawayLogs: formattedPutawayLogs,
