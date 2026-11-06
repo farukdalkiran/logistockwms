@@ -1,16 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Box,
   Boxes,
   ChevronLeft,
   ChevronRight,
   Package,
+  RefreshCw,
   Search,
   X,
 } from "lucide-react";
 import { searchHomeCatalogAction } from "@/app/actions/catalog-home";
+import { supabase } from "@/lib/supabase";
 
 export type CatalogProduct = {
   id: string;
@@ -42,11 +44,6 @@ export type CatalogBox = {
 type Mode = "products" | "boxes";
 type CatalogItem = CatalogProduct | CatalogBox;
 
-interface Props {
-  recentProducts: CatalogProduct[];
-  recentBoxes: CatalogBox[];
-}
-
 const formatDate = (value: string | null) => {
   if (!value) return "Tarih bilgisi yok";
   const date = new Date(value);
@@ -63,7 +60,12 @@ const formatDate = (value: string | null) => {
 
 const isBox = (item: CatalogItem): item is CatalogBox => "box_barcode" in item;
 
-export function CatalogActivitySection({ recentProducts, recentBoxes }: Props) {
+export function CatalogActivitySection() {
+  const [recentProducts, setRecentProducts] = useState<CatalogProduct[]>([]);
+  const [recentBoxes, setRecentBoxes] = useState<CatalogBox[]>([]);
+  const [isLoadingRecent, setIsLoadingRecent] = useState(true);
+  const [recentError, setRecentError] = useState("");
+  const recentRequestVersion = useRef(0);
   const [mode, setMode] = useState<Mode>("products");
   const [isOpen, setIsOpen] = useState(false);
   const [searchText, setSearchText] = useState("");
@@ -73,6 +75,55 @@ export function CatalogActivitySection({ recentProducts, recentBoxes }: Props) {
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const requestVersion = useRef(0);
+
+  // Son kayıtlar dashboard cache'ine bağlı değildir. Oturum sahibi kullanıcı
+  // products/boxes tablolarındaki SELECT RLS politikalarıyla salt okunur erişir.
+  // Her istekte yalnızca 10'ar kayıt çekilir; arka planda polling yapılmaz.
+  const loadRecent = useCallback(async () => {
+    const requestId = ++recentRequestVersion.current;
+    setIsLoadingRecent(true);
+    setRecentError("");
+    try {
+      const [productsResult, boxesResult] = await Promise.all([
+        supabase
+          .from("products")
+          .select("id,name,barcode,sku,category,image_url,lgs_id,created_at,is_consumable")
+          .order("created_at", { ascending: false })
+          .order("lgs_id", { ascending: false })
+          .limit(10),
+        supabase
+          .from("boxes")
+          .select("id,box_barcode,quantity,lgs_id,created_at,products(name,barcode,sku,image_url,lgs_id)")
+          .order("created_at", { ascending: false })
+          .order("lgs_id", { ascending: false })
+          .limit(10),
+      ]);
+      if (productsResult.error) throw productsResult.error;
+      if (boxesResult.error) throw boxesResult.error;
+      if (requestId !== recentRequestVersion.current) return;
+      setRecentProducts((productsResult.data || []) as CatalogProduct[]);
+      setRecentBoxes(
+        (boxesResult.data || []).map((box) => ({
+          ...box,
+          products: Array.isArray(box.products)
+            ? (box.products[0] || null)
+            : (box.products || null),
+        })) as CatalogBox[]
+      );
+    } catch (err) {
+      console.error("Son katalog kayıtları yüklenemedi:", err);
+      if (requestId === recentRequestVersion.current) {
+        setRecentError("Son ürün ve koli kayıtları yüklenemedi. Tekrar deneyin.");
+      }
+    } finally {
+      if (requestId === recentRequestVersion.current) setIsLoadingRecent(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadRecent();
+    return () => { recentRequestVersion.current += 1; };
+  }, [loadRecent]);
 
   const closeModal = () => {
     setIsOpen(false);
@@ -177,6 +228,16 @@ export function CatalogActivitySection({ recentProducts, recentBoxes }: Props) {
           </div>
           <button
             type="button"
+            onClick={() => void loadRecent()}
+            disabled={isLoadingRecent}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 transition hover:border-[#dc3545] hover:text-[#dc3545] disabled:opacity-50"
+            aria-label="Son katalog kayıtlarını yenile"
+            title="Son kayıtları yenile"
+          >
+            <RefreshCw size={15} className={isLoadingRecent ? "animate-spin" : ""} />
+          </button>
+          <button
+            type="button"
             onClick={() => openModal()}
             className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 text-[11px] font-black text-slate-700 transition hover:border-[#dc3545] hover:text-[#dc3545]"
             aria-label="Ürün veya koli ara"
@@ -251,10 +312,20 @@ export function CatalogActivitySection({ recentProducts, recentBoxes }: Props) {
               </button>
             );
           })}
-          {items.length === 0 && (
+          {recentError && (
+            <div role="alert" className="mx-3 mt-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-800">
+              {recentError}
+              <button type="button" onClick={() => void loadRecent()} className="mt-2 block text-[#b42332] underline">
+                Tekrar dene
+              </button>
+            </div>
+          )}
+          {items.length === 0 && !recentError && (
             <div className="flex h-44 flex-col items-center justify-center gap-2 p-4 text-center text-slate-400">
               <Boxes size={28} />
-              <p className="text-xs font-semibold">Henüz kayıt bulunamadı.</p>
+              <p className="text-xs font-semibold">
+                {isLoadingRecent ? "Son kayıtlar yükleniyor..." : "Henüz kayıt bulunamadı."}
+              </p>
             </div>
           )}
         </div>
