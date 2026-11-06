@@ -4,10 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   Box,
   Boxes,
-  CalendarClock,
   ChevronLeft,
   ChevronRight,
-  Hash,
   Package,
   Search,
   X,
