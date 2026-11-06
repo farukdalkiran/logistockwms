@@ -18,17 +18,22 @@ import {
   BellRing,
   UserCheck,
   RefreshCw,
+  Truck,
 } from "lucide-react";
 
 import {
   TransferCenterSection,
   TransferData,
 } from "./_components/TransferCenterSection";
-import {
-  CargoDistributionSection,
+import type {
   CargoDistributionItem,
   CargoSessionData,
 } from "./_components/CargoDistributionSection";
+import { CatalogActivitySection } from "./_components/CatalogActivitySection";
+import type {
+  CatalogProduct,
+  CatalogBox,
+} from "./_components/CatalogActivitySection";
 import {
   WarehouseLogsSection,
   PutawayLogData,
@@ -48,6 +53,8 @@ interface DashboardData {
     productsTotal: number;
   };
   cargoDistribution: CargoDistributionItem[];
+  recentProducts: CatalogProduct[];
+  recentBoxes: CatalogBox[];
   recentTransfers: TransferData[];
   recentPutawayLogs: PutawayLogData[];
   recentLeaveLogs: LeaveLogData[];
@@ -216,6 +223,31 @@ export default function ManagementDashboard() {
               <p className="text-slate-400 text-xs sm:text-sm font-medium mt-2 max-w-2xl leading-relaxed border-l-2 border-slate-700 pl-3">
                 Tüm şube, depo ve personel operasyonlarını gerçek zamanlı yönetebileceğiniz, sıfır hata toleranslı merkezi kontrol paneli.
               </p>
+              {/* Kargo özeti artık ayrı büyük kart yerine başlıkta kompakt biçimde yer alır. */}
+              <div className="mt-4 flex flex-wrap items-center gap-2" aria-label="Bugünkü kargo dağılımı">
+                <div className="inline-flex items-center gap-2 rounded-md border border-white/15 bg-white/10 px-3 py-2 text-[11px] font-bold text-white">
+                  <Truck size={15} className="text-red-300" />
+                  <span className="text-slate-300">BUGÜN KARGO</span>
+                  <strong className="font-mono text-sm text-white">
+                    {(data?.cargoDistribution || []).reduce((total, item) => total + item.count, 0).toLocaleString("tr-TR")}
+                  </strong>
+                </div>
+                {(data?.cargoDistribution || []).slice(0, 5).map((item) => (
+                  <div key={item.carrier} className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-slate-800/80 px-3 py-2 text-[10px] font-semibold text-slate-200">
+                    <span className="h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: item.color }} />
+                    <span>{item.carrier}</span>
+                    <strong className="font-mono text-white">{item.count.toLocaleString("tr-TR")}</strong>
+                  </div>
+                ))}
+                {(data?.cargoDistribution || []).length > 5 && (
+                  <span className="text-[10px] font-semibold text-slate-400">
+                    +{(data?.cargoDistribution || []).length - 5} firma
+                  </span>
+                )}
+                {(data?.cargoDistribution || []).length === 0 && (
+                  <span className="text-[10px] font-medium text-slate-400">Bugün kayıt bulunamadı</span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -356,11 +388,9 @@ export default function ManagementDashboard() {
             getStatusStyle={getStatusStyle}
             getStatusText={getStatusText}
           />
-          <CargoDistributionSection
-            cargoDistribution={data?.cargoDistribution || []}
-            recentCargoSessions={data?.recentCargoSessions || []}
-            getStatusStyle={getStatusStyle}
-            getStatusText={getStatusText}
+          <CatalogActivitySection
+            recentProducts={data?.recentProducts || []}
+            recentBoxes={data?.recentBoxes || []}
           />
         </div>
 
