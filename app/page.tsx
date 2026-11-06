@@ -30,10 +30,6 @@ import type {
   CargoSessionData,
 } from "./_components/CargoDistributionSection";
 import { CatalogActivitySection } from "./_components/CatalogActivitySection";
-import type {
-  CatalogProduct,
-  CatalogBox,
-} from "./_components/CatalogActivitySection";
 import {
   WarehouseLogsSection,
   PutawayLogData,
@@ -53,8 +49,6 @@ interface DashboardData {
     productsTotal: number;
   };
   cargoDistribution: CargoDistributionItem[];
-  recentProducts: CatalogProduct[];
-  recentBoxes: CatalogBox[];
   recentTransfers: TransferData[];
   recentPutawayLogs: PutawayLogData[];
   recentLeaveLogs: LeaveLogData[];
@@ -388,10 +382,7 @@ export default function ManagementDashboard() {
             getStatusStyle={getStatusStyle}
             getStatusText={getStatusText}
           />
-          <CatalogActivitySection
-            recentProducts={data?.recentProducts || []}
-            recentBoxes={data?.recentBoxes || []}
-          />
+          <CatalogActivitySection />
         </div>
 
         {/* 3. VE 4. BÖLÜMLER */}
