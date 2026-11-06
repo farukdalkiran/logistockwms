@@ -85,7 +85,15 @@ export async function searchHomeCatalogAction(
       .order("lgs_id", { ascending: false })
       .limit(25);
     if (error) throw error;
-    return { success: true, items: data || [] };
+    return {
+      success: true,
+      items: (data || []).map((box) => ({
+        ...box,
+        products: Array.isArray(box.products)
+          ? (box.products[0] || null)
+          : (box.products || null),
+      })),
+    };
   } catch (error) {
     console.error("Anasayfa katalog arama hatası:", error);
     return { success: false, error: "Arama sonuçları alınamadı.", items: [] };
