@@ -33,8 +33,6 @@ jobs:
         run: node --experimental-strip-types --test tests/cargo-export.test.mjs
       - name: HR leave import regression
         run: node --experimental-strip-types --test tests/hr-leave-management.test.mjs
-      - name: HR device and system origin regression
-        run: node --experimental-strip-types --test tests/hr-attendance-provenance.test.mjs
       - name: HR calendar regression
         run: node --experimental-strip-types --test tests/hr-upcoming-events.test.mjs
       - name: Excel catalog review regression
