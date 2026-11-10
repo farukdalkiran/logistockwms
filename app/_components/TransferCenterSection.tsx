@@ -282,7 +282,7 @@ export function TransferCenterSection({
 
   return (
     <>
-      <div className="lg:col-span-12 bg-white border border-slate-300 shadow-sm rounded-md flex flex-col w-full h-[600px] overflow-hidden">
+      <div className="lg:col-span-8 bg-white border border-slate-300 shadow-sm rounded-md flex flex-col w-full h-[600px] overflow-hidden">
         {/* 1. Header, Arama Çubuğu ve Liste Excel Butonu */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 p-4 border-b-2 border-slate-200 bg-slate-50 shrink-0">
           <div className="flex items-center gap-3">
