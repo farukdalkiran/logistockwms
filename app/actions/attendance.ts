@@ -1,6 +1,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server';
+import { isCheckInLocationCode } from '@/lib/attendance/check-in-location';
 
 // Yardımcı Fonksiyon: Saati bir sonraki 15 dakikalık dilime (tavana) yuvarlar
 function roundToNext15Minutes(date: Date): Date {
@@ -28,10 +29,16 @@ function getTrtYMD(dateObj: Date): string {
 export async function processAttendanceScan(
   scannedCode: string, 
   actionType: 'IN' | 'OUT',
-  branchId: string | null 
+  branchId: string | null,
+  checkInLocationCode?: string | null
 ) {
   if (!scannedCode || !/^\d{5}$/.test(scannedCode)) {
     return { success: false, message: 'LÜTFEN 5 HANELİ KİMLİK NUMARANIZI GİRİNİZ!' };
+  }
+
+  // Fiziksel giriş noktası kullanıcı hesabından bağımsızdır. Çıkışta kullanılmaz.
+  if (actionType === 'IN' && !isCheckInLocationCode(checkInLocationCode)) {
+    return { success: false, message: 'LÜTFEN BU CİHAZIN GİRİŞ KONUMUNU SEÇİNİZ!' };
   }
 
   const empId = scannedCode;
@@ -134,6 +141,7 @@ export async function processAttendanceScan(
           branch_id: activeBranchId,
           check_in_time: actualTime,
           rounded_check_in: roundedTimeIso,
+          check_in_location_code: checkInLocationCode,
           status: 'ON_TIME'
         });
 
