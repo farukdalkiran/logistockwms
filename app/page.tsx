@@ -18,10 +18,8 @@ import {
   UserCheck,
   RefreshCw,
   Truck,
-  Clock3,
   CalendarDays,
   ArrowUpRight,
-  CheckCircle2,
 } from "lucide-react";
 
 import {
@@ -74,7 +72,6 @@ export default function ManagementDashboard() {
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [data, setData] = useState<DashboardData | null>(null);
-  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const [refreshError, setRefreshError] = useState("");
   const inFlightRef = useRef(false);
 
@@ -88,7 +85,6 @@ export default function ManagementDashboard() {
       if (!force && dashboardClientCache && dashboardClientCache.userId === userId &&
           now - dashboardClientCache.timestamp < CLIENT_CACHE_TTL) {
         setData(dashboardClientCache.data);
-        setLastUpdatedAt(dashboardClientCache.timestamp);
         setLoading(false);
         return;
       }
@@ -104,7 +100,6 @@ export default function ManagementDashboard() {
           const freshData = result.data as DashboardData;
           const timestamp = Date.now();
           setData(freshData);
-          setLastUpdatedAt(timestamp);
           dashboardClientCache = { userId, data: freshData, timestamp };
         } else {
           setRefreshError(result.error || "Veriler güncellenemedi.");
@@ -212,7 +207,7 @@ export default function ManagementDashboard() {
     <div className="min-h-screen flex flex-col bg-slate-50 font-['Quicksand'] text-slate-800 selection:bg-[#dc3545] selection:text-white overflow-x-hidden">
       <Navbar />
 
-      <main className="flex-1 w-full max-w-[1550px] mx-auto px-4 md:px-6 lg:px-8 py-6 flex flex-col gap-6 overflow-hidden pb-16">
+      <main className="flex-1 w-full max-w-[1400px] mx-auto px-4 md:px-6 lg:px-8 py-6 flex flex-col gap-6 overflow-hidden pb-16">
         
         {/* Yenilenen ana başlık: iş akışı ve güncelleme bilgisi */}
         <section className="relative overflow-hidden rounded-[26px] bg-[#101a2c] text-white shadow-xl shadow-slate-200/70">
@@ -245,9 +240,6 @@ export default function ManagementDashboard() {
                 >
                   <RefreshCw size={16} className={isRefreshing ? "animate-spin" : ""} /> {isRefreshing ? "Güncelleniyor..." : "Paneli yenile"}
                 </button>
-                <span className="inline-flex items-center gap-2 text-xs font-medium text-slate-300">
-                  <Clock3 size={15} className="text-emerald-400" /> 08.00–17.00 · 30 dakikada bir
-                </span>
               </div>
             </div>
             <div className="flex flex-col justify-center border-t border-white/10 bg-white/[0.04] p-6 sm:p-8 lg:col-span-4 lg:border-l lg:border-t-0">
@@ -269,12 +261,6 @@ export default function ManagementDashboard() {
                   <span className="text-[11px] font-medium text-slate-400">Son transferler</span>
                 </div>
               </div>
-              <div className="mt-5 flex items-center gap-2 border-t border-white/10 pt-4 text-xs text-slate-300">
-                <CheckCircle2 size={16} className="shrink-0 text-emerald-400" />
-                <span>Son veri: <strong className="font-mono text-white">
-                  {lastUpdatedAt ? new Intl.DateTimeFormat("tr-TR", { timeZone: "Europe/Istanbul", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }).format(new Date(lastUpdatedAt)) : "Henüz yüklenmedi"}
-                </strong></span>
-              </div>
             </div>
           </div>
         </section>
@@ -283,11 +269,6 @@ export default function ManagementDashboard() {
             {refreshError}
           </div>
         )}
-
-        <CargoOverviewSection
-          cargoDistribution={data?.cargoDistribution || []}
-          recentCargoSessions={data?.recentCargoSessions || []}
-        />
 
         {/* Uyarı Paneli (Mobil uyumlu hale getirildi) */}
         {hasPending && (
@@ -379,8 +360,12 @@ export default function ManagementDashboard() {
           ))}
         </div>
 
-        {/* Geniş operasyon merkezi */}
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
+        {/* 1. SATIR: SOL KARGO (4) / SAĞ TRANSFER (8) */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full items-start mt-2">
+          <CargoOverviewSection
+            cargoDistribution={data?.cargoDistribution || []}
+            recentCargoSessions={data?.recentCargoSessions || []}
+          />
           <TransferCenterSection
             recentTransfers={data?.recentTransfers || []}
             getStatusStyle={getStatusStyle}
@@ -388,14 +373,13 @@ export default function ManagementDashboard() {
           />
         </div>
 
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
+        {/* 2. SATIR: SOL ÜRÜN/KOLİ (7) / SAĞ LOGLAR (5) */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full items-start mt-2">
+          <CatalogActivitySection />
           <WarehouseLogsSection
             recentPutawayLogs={data?.recentPutawayLogs || []}
           />
         </div>
-
-        {/* Alt bölüm: geniş ürün ve koli galerisi / arama */}
-        <CatalogActivitySection />
       </main>
       <Footer />
     </div>
