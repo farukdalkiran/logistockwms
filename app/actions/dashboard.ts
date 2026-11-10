@@ -3,6 +3,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { unstable_cache } from "next/cache";
+import { createClient as createSessionClient } from "@/lib/supabase/server";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -18,8 +19,9 @@ async function fetchDashboardDataCore(userId: string) {
     .eq("id", userId)
     .single();
 
+  if (!userProfile) throw new Error("Dashboard kullanıcı profili bulunamadı.");
+
   const isGlobal =
-    !userProfile ||
     userProfile.role === "Developer" ||
     userProfile.role === "Admin" ||
     !userProfile.branch_id;
@@ -107,17 +109,27 @@ async function fetchDashboardDataCore(userId: string) {
     stockData?.reduce((acc, curr) => acc + (curr.quantity || 0), 0) || 0;
 
   // 3. Kargo Dağılımları (Giriş Yapılan Şube Personellerine Göre İzole)
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // Gündüz vardiyası ve gün değişimi Türkiye saatine göre hesaplanır.
+  const turkeyDateParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Istanbul", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date());
+  const part = (key: string) => turkeyDateParts.find((p) => p.type === key)?.value || "";
+  const year = part("year");
+  const month = part("month");
+  const day = part("day");
+  const dayStart = year + "-" + month + "-" + day + "T00:00:00+03:00";
+  const nextDay = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day) + 1))
+    .toISOString().slice(0, 10) + "T00:00:00+03:00";
 
   let cargoQuery = supabaseAdmin
     .from("cargo_sessions")
     .select(
       "id, carrier_name, status, total_items, started_at, completed_at, employee_id",
     )
-    .gte("started_at", today.toISOString())
+    .gte("started_at", dayStart)
+    .lt("started_at", nextDay)
     .order("started_at", { ascending: false })
-    .limit(50);
+    .limit(1000);
 
   if (targetBranchId) {
     cargoQuery =
@@ -291,11 +303,11 @@ async function fetchDashboardDataCore(userId: string) {
   };
 }
 
-// 2. SUNUCU BELLEKLEME KATMANI (60 Saniye Boyunca DB'yi Yormaz)
+// 2. SUNUCU BELLEKLEME KATMANI (30 dakika)
 const getCachedDashboardData = unstable_cache(
   async (userId: string) => fetchDashboardDataCore(userId),
   ["logistock-dashboard-cache"],
-  { revalidate: 60 }
+  { revalidate: 1800 }
 );
 
 export async function getDashboardDataServer(
@@ -305,6 +317,14 @@ export async function getDashboardDataServer(
   try {
     if (!userId) {
       return { success: false, error: "Kullanıcı oturumu bulunamadı." };
+    }
+
+    // Service role kullanan dashboard sorgusunu, tarayıcının gönderdiği
+    // userId'ye güvenmeden gerçek oturum kimliğiyle sınırla.
+    const sessionClient = await createSessionClient();
+    const { data: { user }, error: authError } = await sessionClient.auth.getUser();
+    if (authError || !user || user.id !== userId) {
+      return { success: false, error: "Oturum doğrulaması başarısız." };
     }
 
     const data = forceRefresh
