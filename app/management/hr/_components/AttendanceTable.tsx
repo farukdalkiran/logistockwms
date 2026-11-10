@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
 import { supabase } from "@/lib/supabase";
-import { getCheckInLocationName } from "@/lib/attendance/check-in-location";
 import {monthlyCreditedHours,istanbulDate,type PublicHoliday} from "@/lib/attendance/day-coverage";
 
 import {
@@ -50,7 +49,6 @@ interface AttendanceRecord {
   employee_id: string;
   check_in_time: string | null;
   check_out_time: string | null;
-  check_in_location_code: string | null;
   check_in_device_type: string | null;
   is_system_adjusted: boolean;
   break_hours: number | string | null;
@@ -452,10 +450,9 @@ export default function AttendanceTable({
             employee_id,
             check_in_time,
             check_out_time,
-            check_in_location_code,
             check_in_device_type,
             is_system_adjusted,
-            break_hours:
+            break_hours,
             working_hours,
             status,
             employees!attendance_employee_id_fkey (
@@ -1002,7 +999,6 @@ export default function AttendanceTable({
                 const monthlyLate = monthlyLates[employeeId] ?? 0;
 
                 const isLeave = isLeaveStatus(record.status);
-                const checkInLocationName = !isLeave ? getCheckInLocationName(record.check_in_location_code) : null;
 
                 const leaveText = getLeaveName(record.status);
 
@@ -1056,15 +1052,6 @@ export default function AttendanceTable({
                             >
                               {record.employees?.position_title || "PERSONEL"}
                             </span>
-                            {checkInLocationName && (
-                              <span
-                                title={`Giriş konumu: ${checkInLocationName}`}
-                                aria-label={`Giriş konumu: ${checkInLocationName}`}
-                                className="inline-flex h-[18px] shrink-0 items-center justify-center rounded-sm border border-slate-200 bg-slate-100 px-1.5 font-mono text-[9px] font-black tracking-wide text-slate-700"
-                              >
-                                {record.check_in_location_code}
-                              </span>
-                            )}
                           </div>
                         </div>
                       </div>

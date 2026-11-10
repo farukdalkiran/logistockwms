@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { processAttendanceScan } from "@/app/actions/attendance";
 import { supabase } from "@/lib/supabase";
 import { detectCheckInDeviceType } from "@/lib/attendance/record-provenance";
-import { CHECK_IN_LOCATIONS, CHECK_IN_LOCATION_STORAGE_KEY, isCheckInLocationCode, type CheckInLocationCode } from "@/lib/attendance/check-in-location";
 import { Check, AlertCircle, ShieldAlert, User } from "lucide-react";
 
 interface BarcodeScannerProps {
@@ -20,7 +19,6 @@ export default function BarcodeScanner({
   const router = useRouter();
   const [actionType, setActionType] = useState<"IN" | "OUT">("IN");
   const [terminalId, setTerminalId] = useState("");
-  const [checkInLocation, setCheckInLocation] = useState<CheckInLocationCode | "">("");
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<{
     type: "success" | "error";
@@ -31,23 +29,10 @@ export default function BarcodeScanner({
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(CHECK_IN_LOCATION_STORAGE_KEY);
-      if (isCheckInLocationCode(saved)) setCheckInLocation(saved);
-    } catch {
-      // Tarayıcı depolaması kapalıysa kullanıcı konumu bu oturumda seçebilir.
-    }
-  }, []);
-
-  useEffect(() => {
     inputRef.current?.focus();
 
     // WMS Kiosk Lojiği: Ekranda nereye tıklanırsa tıklansın odak inputta kalsın
-    const handleGlobalClick = (event: MouseEvent) => {
-      // Konum seçimi açıkken kiosk odak koruması menüyü kapatmamalı.
-      if (event.target instanceof Element && event.target.closest("[data-attendance-location-control]")) return;
-      inputRef.current?.focus();
-    };
+    const handleGlobalClick = () => inputRef.current?.focus();
     window.addEventListener("click", handleGlobalClick);
 
     const realtimeChannel = supabase
@@ -98,11 +83,6 @@ export default function BarcodeScanner({
       return;
     }
 
-    if (actionType === "IN" && !isCheckInLocationCode(checkInLocation)) {
-      triggerFeedback("error", "ÖNCE BU CİHAZIN GİRİŞ KONUMUNU SEÇİNİZ!");
-      return;
-    }
-
     setTerminalId("");
     setLoading(true);
 
@@ -112,7 +92,6 @@ export default function BarcodeScanner({
         currentId, 
         actionType,
         branchId,
-        actionType === "IN" ? checkInLocation : null,
         actionType === "IN" ? detectCheckInDeviceType(window.navigator.userAgent) : null
       );
 
@@ -152,34 +131,6 @@ export default function BarcodeScanner({
             ></span>
             {branchName}
           </span>
-        </div>
-        <div data-attendance-location-control className="shrink-0 pl-3 text-right">
-          <label htmlFor="attendance-check-in-location" className="mb-1 block text-[9px] font-bold uppercase tracking-wide text-slate-400">
-            Giriş Konumu
-          </label>
-          <select
-            id="attendance-check-in-location"
-            value={checkInLocation}
-            onChange={(event) => {
-              const next = event.target.value;
-              const code = isCheckInLocationCode(next) ? next : "";
-              setCheckInLocation(code);
-              try {
-                if (code) window.localStorage.setItem(CHECK_IN_LOCATION_STORAGE_KEY, code);
-                else window.localStorage.removeItem(CHECK_IN_LOCATION_STORAGE_KEY);
-              } catch {
-                // Depolama yoksa bile açık sayfada seçilen konum kullanılabilir.
-              }
-            }}
-            title="Bu tarayıcı için bir kez seçilir; yalnızca mesai girişlerine işlenir."
-            aria-label="Bu cihazın mesai giriş konumu"
-            className="h-8 max-w-[138px] rounded-sm border border-slate-500 bg-slate-800 px-2 text-[11px] font-bold text-white outline-none focus:border-white"
-          >
-            <option value="">Konum Seç</option>
-            {CHECK_IN_LOCATIONS.map((location) => (
-              <option key={location.code} value={location.code}>{location.code} · {location.label}</option>
-            ))}
-          </select>
         </div>
       </div>
 
