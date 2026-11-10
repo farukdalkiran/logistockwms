@@ -1025,13 +1025,13 @@ export default function AttendanceTable({
                               "BİLİNMEYEN PERSONEL"}
                           </div>
 
-                          <div className="mt-0.5 flex items-center gap-1.5">
+                          <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
                             {roleType === "DEVELOPER" && (
                               <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
                             )}
 
                             <span
-                              className={`max-w-[170px] truncate text-[9px] font-bold uppercase tracking-wide ${
+                              className={`min-w-0 max-w-[170px] truncate text-[9px] font-bold uppercase tracking-wide ${
                                 roleType === "DEVELOPER"
                                   ? "text-violet-600"
                                   : roleType === "MANAGER"
