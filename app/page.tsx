@@ -210,12 +210,12 @@ export default function ManagementDashboard() {
       <main className="flex-1 w-full max-w-[1400px] mx-auto px-4 md:px-6 lg:px-8 py-6 flex flex-col gap-6 overflow-hidden pb-16">
         
         {/* Yenilenen ana başlık: iş akışı ve güncelleme bilgisi */}
-        <section className="relative overflow-hidden rounded-[26px] bg-[#101a2c] text-white shadow-xl shadow-slate-200/70">
+        <section className="relative overflow-hidden rounded-md border border-slate-800 border-l-[6px] border-l-[#dc3545] bg-[#101a2c] text-white shadow-xl shadow-slate-300/70">
           <div className="pointer-events-none absolute -right-24 -top-36 h-96 w-96 rounded-full bg-[#dc3545]/20 blur-3xl" />
           <div className="pointer-events-none absolute -bottom-40 left-1/3 h-72 w-72 rounded-full bg-indigo-500/10 blur-3xl" />
           <div className="pointer-events-none absolute inset-0 opacity-[0.06] [background-image:linear-gradient(90deg,white_1px,transparent_1px),linear-gradient(white_1px,transparent_1px)] [background-size:40px_40px]" />
           <div className="relative grid grid-cols-1 lg:grid-cols-12">
-            <div className="px-6 py-8 sm:px-8 md:py-10 lg:col-span-8">
+            <div className="px-5 py-5 sm:px-6 sm:py-6 lg:col-span-8">
               <div className="flex flex-wrap items-center gap-2.5">
                 <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.14em] text-slate-200">
                   <span className="h-2 w-2 rounded-full bg-emerald-400" /> OPERASYON MERKEZİ
@@ -224,40 +224,40 @@ export default function ManagementDashboard() {
                   <Building2 size={13} /> {isGlobal ? "Tüm şubeler" : profileSafe?.branch_name || branchName || "Şube görünümü"}
                 </span>
               </div>
-              <p className="mt-7 text-sm font-black tracking-[0.16em] text-rose-300">LOGISTOCK / WMS</p>
-              <h1 className="mt-2 max-w-2xl text-3xl font-black leading-[1.13] tracking-tight sm:text-4xl lg:text-5xl">
+              <p className="mt-3 text-[11px] font-black tracking-[0.16em] text-rose-300">LOGISTOCK / WMS</p>
+              <h1 className="mt-1 max-w-2xl text-2xl font-black leading-tight tracking-tight sm:text-3xl">
                 Operasyonun tüm akışı <span className="text-rose-400">tek ekranda.</span>
               </h1>
-              <p className="mt-4 max-w-xl text-sm font-medium leading-6 text-slate-300">
+              <p className="mt-2 max-w-xl text-xs font-medium leading-5 text-slate-300">
                 Kargo adetlerini izleyin, transferleri takip edin ve güncel ürün-koli kayıtlarında hızlıca arama yapın.
               </p>
-              <div className="mt-7 flex flex-wrap items-center gap-3">
+              <div className="mt-4 flex flex-wrap items-center gap-3">
                 <button
                   type="button"
                   onClick={() => void fetchData(true)}
                   disabled={isRefreshing}
-                  className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#dc3545] px-5 text-xs font-extrabold text-white shadow-lg shadow-red-950/20 transition hover:bg-[#c32b3b] disabled:opacity-50"
+                  className="inline-flex min-h-9 items-center gap-2 rounded-md bg-[#dc3545] px-5 text-xs font-extrabold text-white shadow-lg shadow-red-950/20 transition hover:bg-[#c32b3b] disabled:opacity-50"
                 >
                   <RefreshCw size={16} className={isRefreshing ? "animate-spin" : ""} /> {isRefreshing ? "Güncelleniyor..." : "Paneli yenile"}
                 </button>
               </div>
             </div>
-            <div className="flex flex-col justify-center border-t border-white/10 bg-white/[0.04] p-6 sm:p-8 lg:col-span-4 lg:border-l lg:border-t-0">
+            <div className="flex flex-col justify-center border-t border-white/10 bg-white/[0.04] p-4 sm:p-5 lg:col-span-4 lg:border-l lg:border-t-0">
               <div className="flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-[0.18em] text-slate-400"><CalendarDays size={15} /> Güncel görünüm</div>
-              <p className="mt-3 text-lg font-black text-white">
+              <p className="mt-1.5 text-base font-black text-white">
                 {new Intl.DateTimeFormat("tr-TR", { timeZone: "Europe/Istanbul", day: "numeric", month: "long", year: "numeric" }).format(new Date())}
               </p>
-              <div className="mt-6 grid grid-cols-2 gap-3">
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="rounded-md border border-white/10 bg-white/5 p-3">
                   <Truck size={19} className="text-rose-300" />
-                  <strong className="mt-3 block font-mono text-2xl font-black">
+                  <strong className="mt-1.5 block font-mono text-xl font-black">
                     {(data?.cargoDistribution || []).reduce((total, item) => total + item.count, 0).toLocaleString("tr-TR")}
                   </strong>
                   <span className="text-[11px] font-medium text-slate-400">Bugünkü kargo</span>
                 </div>
-                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                <div className="rounded-md border border-white/10 bg-white/5 p-3">
                   <ArrowUpRight size={19} className="text-emerald-300" />
-                  <strong className="mt-3 block font-mono text-2xl font-black">{data?.recentTransfers.length || 0}</strong>
+                  <strong className="mt-1.5 block font-mono text-xl font-black">{data?.recentTransfers.length || 0}</strong>
                   <span className="text-[11px] font-medium text-slate-400">Son transferler</span>
                 </div>
               </div>
@@ -272,7 +272,7 @@ export default function ManagementDashboard() {
 
         {/* Uyarı Paneli (Mobil uyumlu hale getirildi) */}
         {hasPending && (
-          <div className="w-full bg-amber-50 border border-amber-200 border-l-[4px] border-l-amber-500 rounded-md shadow-sm p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mt-1">
+          <div className="w-full bg-amber-50 border border-amber-200 border-l-[4px] border-l-amber-500 rounded-sm shadow-md p-4 sm:p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mt-1">
             <div className="flex flex-col gap-1 w-full">
               <div className="flex items-center gap-2 text-amber-800">
                 <BellRing className="w-5 h-5 animate-bounce" />
@@ -341,7 +341,7 @@ export default function ManagementDashboard() {
           ].map((kpi, idx) => (
             <div
               key={idx}
-              className="bg-white p-4 border border-slate-200 shadow-sm rounded-md flex flex-col justify-between gap-3 transition-colors hover:border-slate-400 group"
+              className="bg-white p-4 border border-slate-200 shadow-md shadow-slate-200/80 rounded-md flex flex-col justify-between gap-3 transition-colors hover:border-slate-400 group"
             >
               <div className="flex items-start justify-between">
                 <div className={`w-9 h-9 flex items-center justify-center rounded-md border ${kpi.bg}`}>

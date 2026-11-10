@@ -92,7 +92,7 @@ export function WarehouseLogsSection({ recentPutawayLogs }: { recentPutawayLogs:
   const shelfCount = logs.filter((log) => classifyLog(log.action_type) === "shelf").length;
 
   return (
-    <section className="lg:col-span-5 flex h-[600px] min-w-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+    <section className="lg:col-span-5 flex h-[600px] min-w-0 flex-col overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg shadow-slate-200/70">
       <header className="shrink-0 border-b border-slate-200 bg-white">
         <div className="flex items-start justify-between gap-3 px-4 pt-4 pb-3">
           <div className="flex min-w-0 items-center gap-3">
