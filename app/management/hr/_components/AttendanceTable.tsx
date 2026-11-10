@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 
 import { supabase } from "@/lib/supabase";
-import { getCheckInLocationName } from "@/lib/attendance/check-in-location";
 import {monthlyCreditedHours,istanbulDate,type PublicHoliday} from "@/lib/attendance/day-coverage";
 
 import {
@@ -26,6 +25,8 @@ import {
   CircleAlert,
   Wifi,
   SearchX,
+  Smartphone,
+  Bot,
 } from "lucide-react";
 
 /* =============================================
@@ -48,7 +49,8 @@ interface AttendanceRecord {
   employee_id: string;
   check_in_time: string | null;
   check_out_time: string | null;
-  check_in_location_code: string | null;
+  check_in_device_type: string | null;
+  is_system_adjusted: boolean;
   break_hours: number | string | null;
   working_hours: number | string | null;
   status: string | null;
@@ -448,7 +450,8 @@ export default function AttendanceTable({
             employee_id,
             check_in_time,
             check_out_time,
-            check_in_location_code,
+            check_in_device_type,
+            is_system_adjusted,
             break_hours,
             working_hours,
             status,
@@ -824,6 +827,8 @@ export default function AttendanceTable({
           <span className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-extrabold text-slate-600 tabular-nums">
             {records.length}
           </span>
+          <span className="hidden items-center gap-1 rounded-sm border border-sky-100 bg-sky-50 px-1.5 py-0.5 text-[9px] font-bold text-sky-700 sm:inline-flex"><Smartphone size={11} /> Telefon</span>
+          <span className="hidden items-center gap-1 rounded-sm border border-violet-100 bg-violet-50 px-1.5 py-0.5 text-[9px] font-bold text-violet-700 sm:inline-flex"><Bot size={12} /> Sistem</span>
         </div>
 
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -994,7 +999,6 @@ export default function AttendanceTable({
                 const monthlyLate = monthlyLates[employeeId] ?? 0;
 
                 const isLeave = isLeaveStatus(record.status);
-                const checkInLocationName = !isLeave ? getCheckInLocationName(record.check_in_location_code) : null;
 
                 const leaveText = getLeaveName(record.status);
 
@@ -1014,15 +1018,22 @@ export default function AttendanceTable({
                         <RoleAvatar role={roleType} />
 
                         <div className="min-w-0">
-                          <div
-                            title={
-                              record.employees?.full_name ??
-                              "Bilinmeyen Personel"
-                            }
-                            className="max-w-[175px] truncate text-[11px] font-extrabold uppercase tracking-[0.015em] text-[#0F172B]"
-                          >
-                            {record.employees?.full_name ||
-                              "BİLİNMEYEN PERSONEL"}
+                          <div className="flex min-w-0 items-center gap-1">
+                            <div title={record.employees?.full_name ?? "Bilinmeyen Personel"} className="min-w-0 truncate text-[11px] font-extrabold uppercase tracking-[0.015em] text-[#0F172B]">
+                              {record.employees?.full_name || "BİLİNMEYEN PERSONEL"}
+                            </div>
+                            {!isLeave && record.check_in_device_type === "PHONE" && (
+                              <span title="Telefon üzerinden mesai girişi" aria-label="Telefon üzerinden mesai girişi"
+                                className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[4px] border border-sky-200 bg-sky-50 text-sky-700">
+                                <Smartphone size={12} strokeWidth={2.3} aria-hidden="true" />
+                              </span>
+                            )}
+                            {!isLeave && record.is_system_adjusted && (
+                              <span title="Sistem üzerinden oluşturulmuş veya düzenlenmiş mesai" aria-label="Sistem üzerinden oluşturulmuş veya düzenlenmiş mesai"
+                                className="inline-flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[4px] border border-violet-200 bg-violet-50 text-violet-700">
+                                <Bot size={13} strokeWidth={2.3} aria-hidden="true" />
+                              </span>
+                            )}
                           </div>
 
                           <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
@@ -1041,15 +1052,6 @@ export default function AttendanceTable({
                             >
                               {record.employees?.position_title || "PERSONEL"}
                             </span>
-                            {checkInLocationName && (
-                              <span
-                                title={`Giriş konumu: ${checkInLocationName}`}
-                                aria-label={`Giriş konumu: ${checkInLocationName}`}
-                                className="inline-flex h-[18px] shrink-0 items-center justify-center rounded-sm border border-slate-200 bg-slate-100 px-1.5 font-mono text-[9px] font-black tracking-wide text-slate-700"
-                              >
-                                {record.check_in_location_code}
-                              </span>
-                            )}
                           </div>
                         </div>
                       </div>

@@ -149,7 +149,8 @@ export async function submitLogRequest(params: LogRequestParams) {
             rounded_check_out: roundedOutIso,
             break_hours: breakHours,
             working_hours: outIso ? parseFloat(netWorkingHours.toFixed(2)) : null,
-            status: 'MANUAL_EDIT_AUTO_APPROVED'
+            status: 'MANUAL_EDIT_AUTO_APPROVED',
+            is_system_adjusted: true
           });
 
         if (insError) throw insError;
@@ -176,7 +177,8 @@ export async function submitLogRequest(params: LogRequestParams) {
             rounded_check_out: roundedOutIso,
             break_hours: breakHours,
             working_hours: outIso ? parseFloat(netWorkingHours.toFixed(2)) : null,
-            status: 'MANUAL_EDIT_AUTO_APPROVED'
+            status: 'MANUAL_EDIT_AUTO_APPROVED',
+            is_system_adjusted: true
           })
           .eq('id', params.attendance_id);
 
