@@ -12,13 +12,16 @@ import {
   Users,
   AlertCircle,
   Layers,
-  Database,
   BoxSelect,
   Box,
   BellRing,
   UserCheck,
   RefreshCw,
   Truck,
+  Clock3,
+  CalendarDays,
+  ArrowUpRight,
+  CheckCircle2,
 } from "lucide-react";
 
 import {
@@ -36,7 +39,7 @@ import {
 } from "./_components/WarehouseLogsSection";
 import type { LeaveLogData } from "./_components/LeaveMovementsSection";
 import { OrderTrackingSection } from "./_components/OrderTrackingSection";
-import { StoreOrdersHomeSection } from "./_components/StoreOrdersHomeSection";
+import { CargoOverviewSection } from "./_components/CargoOverviewSection";
 import { useWms } from "@/components/providers/WmsSessionProvider";
 
 interface DashboardData {
@@ -63,72 +66,98 @@ let dashboardClientCache: {
   timestamp: number;
 } | null = null;
 
-const CLIENT_CACHE_TTL = 2 * 60 * 1000; // 2 Dakika
+const CLIENT_CACHE_TTL = 30 * 60 * 1000; // 30 dakika
 
 export default function ManagementDashboard() {
   const { userProfile, isLoading: isAuthLoading } = useAuth();
   const { branchType, branchName } = useWms();
   const isOnlineWarehouse = branchType === "Depo" && branchName === "Online Depo";
-  const isStore = branchType === "Mağaza";
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [data, setData] = useState<DashboardData | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  const [refreshError, setRefreshError] = useState("");
+  const inFlightRef = useRef(false);
 
   const fetchedUserIdRef = useRef<string | null>(null);
   const userId = userProfile?.id;
 
   const fetchData = useCallback(
     async (force = false) => {
-      if (!userId) return;
-
+      if (!userId || inFlightRef.current) return;
       const now = Date.now();
-      if (
-        !force &&
-        dashboardClientCache &&
-        dashboardClientCache.userId === userId &&
-        now - dashboardClientCache.timestamp < CLIENT_CACHE_TTL
-      ) {
+      if (!force && dashboardClientCache && dashboardClientCache.userId === userId &&
+          now - dashboardClientCache.timestamp < CLIENT_CACHE_TTL) {
         setData(dashboardClientCache.data);
+        setLastUpdatedAt(dashboardClientCache.timestamp);
         setLoading(false);
         return;
       }
 
-      if (force) {
-        setIsRefreshing(true);
-      } else {
-        setLoading(true);
-      }
+      inFlightRef.current = true;
+      if (force) setIsRefreshing(true);
+      else setLoading(true);
+      setRefreshError("");
 
-      const result = await getDashboardDataServer(userId, force);
-      if (result.success && result.data) {
-        const freshData = result.data as DashboardData;
-        setData(freshData);
-        dashboardClientCache = {
-          userId,
-          data: freshData,
-          timestamp: Date.now(),
-        };
+      try {
+        const result = await getDashboardDataServer(userId, force);
+        if (result.success && result.data) {
+          const freshData = result.data as DashboardData;
+          const timestamp = Date.now();
+          setData(freshData);
+          setLastUpdatedAt(timestamp);
+          dashboardClientCache = { userId, data: freshData, timestamp };
+        } else {
+          setRefreshError(result.error || "Veriler güncellenemedi.");
+        }
+      } catch {
+        setRefreshError("Sunucu bağlantısı kurulamadı. Son veriler korunuyor.");
+      } finally {
+        setLoading(false);
+        setIsRefreshing(false);
+        inFlightRef.current = false;
       }
-
-      setLoading(false);
-      setIsRefreshing(false);
     },
     [userId]
   );
 
   useEffect(() => {
-    if (!isAuthLoading) {
-      if (!userId) {
-        router.replace("/login");
-        return;
-      }
-      if (fetchedUserIdRef.current !== userId) {
-        fetchedUserIdRef.current = userId;
-        fetchData(false);
-      }
+    if (isAuthLoading) return;
+    if (!userId) {
+      router.replace("/login");
+      return;
+    }
+    if (fetchedUserIdRef.current !== userId) {
+      fetchedUserIdRef.current = userId;
+      void fetchData(false);
     }
   }, [userId, isAuthLoading, fetchData, router]);
+
+  // Sekme açıkken her dakika yalnızca yerel zamanı kontrol eder; API isteği
+  // 08:00-17:00 (Türkiye) arasında ve son başarılı yüklemeden 30 dk sonra yapılır.
+  useEffect(() => {
+    if (!userId || isAuthLoading) return;
+
+    const updateIfDue = () => {
+      if (document.visibilityState !== "visible") return;
+      const hour = Number(new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Europe/Istanbul", hour: "2-digit", hourCycle: "h23",
+      }).format(new Date()));
+      if (hour < 8 || hour >= 17) return;
+      if (!dashboardClientCache || dashboardClientCache.userId !== userId ||
+          Date.now() - dashboardClientCache.timestamp >= CLIENT_CACHE_TTL) {
+        void fetchData(true);
+      }
+    };
+
+    const timer = window.setInterval(updateIfDue, 60 * 1000);
+    document.addEventListener("visibilitychange", updateIfDue);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", updateIfDue);
+    };
+  }, [userId, isAuthLoading, fetchData]);
 
   const getStatusStyle = (status: string) => {
     const s = status?.toUpperCase().replace("İ", "I") || "";
@@ -185,105 +214,82 @@ export default function ManagementDashboard() {
     <div className="min-h-screen flex flex-col bg-slate-50 font-['Quicksand'] text-slate-800 selection:bg-[#dc3545] selection:text-white overflow-x-hidden">
       <Navbar />
 
-      <main className="flex-1 w-full max-w-[1400px] mx-auto px-4 md:px-6 lg:px-8 py-6 flex flex-col gap-6 overflow-hidden pb-16">
+      <main className="flex-1 w-full max-w-[1550px] mx-auto px-4 md:px-6 lg:px-8 py-6 flex flex-col gap-6 overflow-hidden pb-16">
         
-        {/* =========================================
-            ÜST BLOK: HERO HEADER (YENİLENMİŞ ENDÜSTRİYEL TASARIM)
-            ========================================= */}
-        <div className="w-full bg-[#0b1120] border border-slate-800 border-l-[6px] border-l-[#dc3545] rounded-lg shadow-xl relative overflow-hidden flex flex-col md:flex-row justify-between">
-          {/* Background Grid Pattern */}
-          <div className="absolute inset-0 opacity-20 bg-[linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] [background-size:20px_20px] pointer-events-none z-0"></div>
-
-          {/* Sol Taraf: Karşılama ve Bilgi */}
-          <div className="relative z-10 p-5 sm:p-6 md:p-8 flex flex-col gap-4 flex-1">
-            <div className="flex flex-wrap items-center gap-2 mb-1">
-              <span className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded shadow-sm tracking-wider font-mono">
-                <div className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-sm bg-emerald-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-sm h-2 w-2 bg-emerald-500"></span>
-                </div>
-                {isGlobal ? "MASTER YETKİ" : "LOKAL BAĞLANTI"}
-              </span>
-              <span className="flex items-center gap-1.5 bg-slate-800 border border-slate-700 text-slate-300 text-[10px] sm:text-xs font-bold px-2.5 py-1 rounded shadow-sm tracking-wider font-mono">
-                <Building2 size={14} className={isGlobal ? "text-blue-400" : "text-amber-400"} />
-                {isGlobal ? "MERKEZ KOMUTA" : profileSafe?.branch_name || "ŞUBE ATANMADI"}
-              </span>
-            </div>
-
-            <div className="flex flex-col">
-              <h1 className="text-2xl sm:text-3xl md:text-4xl font-black text-white tracking-tight uppercase leading-tight">
-                LogiStock <span className="text-[#dc3545]">WMS</span>
+        {/* Yenilenen ana başlık: iş akışı ve güncelleme bilgisi */}
+        <section className="relative overflow-hidden rounded-[26px] bg-[#101a2c] text-white shadow-xl shadow-slate-200/70">
+          <div className="pointer-events-none absolute -right-24 -top-36 h-96 w-96 rounded-full bg-[#dc3545]/20 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-40 left-1/3 h-72 w-72 rounded-full bg-indigo-500/10 blur-3xl" />
+          <div className="pointer-events-none absolute inset-0 opacity-[0.06] [background-image:linear-gradient(90deg,white_1px,transparent_1px),linear-gradient(white_1px,transparent_1px)] [background-size:40px_40px]" />
+          <div className="relative grid grid-cols-1 lg:grid-cols-12">
+            <div className="px-6 py-8 sm:px-8 md:py-10 lg:col-span-8">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.14em] text-slate-200">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400" /> OPERASYON MERKEZİ
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-slate-200">
+                  <Building2 size={13} /> {isGlobal ? "Tüm şubeler" : profileSafe?.branch_name || branchName || "Şube görünümü"}
+                </span>
+              </div>
+              <p className="mt-7 text-sm font-black tracking-[0.16em] text-rose-300">LOGISTOCK / WMS</p>
+              <h1 className="mt-2 max-w-2xl text-3xl font-black leading-[1.13] tracking-tight sm:text-4xl lg:text-5xl">
+                Operasyonun tüm akışı <span className="text-rose-400">tek ekranda.</span>
               </h1>
-              <p className="text-slate-400 text-xs sm:text-sm font-medium mt-2 max-w-2xl leading-relaxed border-l-2 border-slate-700 pl-3">
-                Tüm şube, depo ve personel operasyonlarını gerçek zamanlı yönetebileceğiniz, sıfır hata toleranslı merkezi kontrol paneli.
+              <p className="mt-4 max-w-xl text-sm font-medium leading-6 text-slate-300">
+                Kargo adetlerini izleyin, transferleri takip edin ve güncel ürün-koli kayıtlarında hızlıca arama yapın.
               </p>
-              {/* Kargo özeti artık ayrı büyük kart yerine başlıkta kompakt biçimde yer alır. */}
-              <div className="mt-4 flex flex-wrap items-center gap-2" aria-label="Bugünkü kargo dağılımı">
-                <div className="inline-flex items-center gap-2 rounded-md border border-white/15 bg-white/10 px-3 py-2 text-[11px] font-bold text-white">
-                  <Truck size={15} className="text-red-300" />
-                  <span className="text-slate-300">BUGÜN KARGO</span>
-                  <strong className="font-mono text-sm text-white">
+              <div className="mt-7 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void fetchData(true)}
+                  disabled={isRefreshing}
+                  className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-[#dc3545] px-5 text-xs font-extrabold text-white shadow-lg shadow-red-950/20 transition hover:bg-[#c32b3b] disabled:opacity-50"
+                >
+                  <RefreshCw size={16} className={isRefreshing ? "animate-spin" : ""} /> {isRefreshing ? "Güncelleniyor..." : "Paneli yenile"}
+                </button>
+                <span className="inline-flex items-center gap-2 text-xs font-medium text-slate-300">
+                  <Clock3 size={15} className="text-emerald-400" /> 08.00–17.00 · 30 dakikada bir
+                </span>
+              </div>
+            </div>
+            <div className="flex flex-col justify-center border-t border-white/10 bg-white/[0.04] p-6 sm:p-8 lg:col-span-4 lg:border-l lg:border-t-0">
+              <div className="flex items-center gap-2 text-[10px] font-extrabold uppercase tracking-[0.18em] text-slate-400"><CalendarDays size={15} /> Güncel görünüm</div>
+              <p className="mt-3 text-lg font-black text-white">
+                {new Intl.DateTimeFormat("tr-TR", { timeZone: "Europe/Istanbul", day: "numeric", month: "long", year: "numeric" }).format(new Date())}
+              </p>
+              <div className="mt-6 grid grid-cols-2 gap-3">
+                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                  <Truck size={19} className="text-rose-300" />
+                  <strong className="mt-3 block font-mono text-2xl font-black">
                     {(data?.cargoDistribution || []).reduce((total, item) => total + item.count, 0).toLocaleString("tr-TR")}
                   </strong>
+                  <span className="text-[11px] font-medium text-slate-400">Bugünkü kargo</span>
                 </div>
-                {(data?.cargoDistribution || []).slice(0, 5).map((item) => (
-                  <div key={item.carrier} className="inline-flex items-center gap-2 rounded-md border border-white/10 bg-slate-800/80 px-3 py-2 text-[10px] font-semibold text-slate-200">
-                    <span className="h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: item.color }} />
-                    <span>{item.carrier}</span>
-                    <strong className="font-mono text-white">{item.count.toLocaleString("tr-TR")}</strong>
-                  </div>
-                ))}
-                {(data?.cargoDistribution || []).length > 5 && (
-                  <span className="text-[10px] font-semibold text-slate-400">
-                    +{(data?.cargoDistribution || []).length - 5} firma
-                  </span>
-                )}
-                {(data?.cargoDistribution || []).length === 0 && (
-                  <span className="text-[10px] font-medium text-slate-400">Bugün kayıt bulunamadı</span>
-                )}
+                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                  <ArrowUpRight size={19} className="text-emerald-300" />
+                  <strong className="mt-3 block font-mono text-2xl font-black">{data?.recentTransfers.length || 0}</strong>
+                  <span className="text-[11px] font-medium text-slate-400">Son transferler</span>
+                </div>
+              </div>
+              <div className="mt-5 flex items-center gap-2 border-t border-white/10 pt-4 text-xs text-slate-300">
+                <CheckCircle2 size={16} className="shrink-0 text-emerald-400" />
+                <span>Son veri: <strong className="font-mono text-white">
+                  {lastUpdatedAt ? new Intl.DateTimeFormat("tr-TR", { timeZone: "Europe/Istanbul", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" }).format(new Date(lastUpdatedAt)) : "Henüz yüklenmedi"}
+                </strong></span>
               </div>
             </div>
           </div>
-
-          {/* Sağ Taraf: Metrikler ve Aksiyon */}
-          <div className="relative z-10 bg-slate-900/60 border-t md:border-t-0 md:border-l border-slate-800 p-5 sm:p-6 flex flex-row items-center justify-between md:flex-col md:justify-center gap-5 min-w-[280px]">
-            <div className="flex flex-col w-full gap-5">
-              
-              {/* Sistem Yükü */}
-              <div className="flex flex-col gap-2 w-full">
-                <div className="flex items-center justify-between text-[10px] sm:text-xs font-bold text-slate-400 tracking-wider font-mono">
-                  <span className="flex items-center gap-1.5"><Database size={14} className="text-[#dc3545]"/> DB Doluluk Yükü</span>
-                  <span className="text-white">%{data?.systemLoad || 0}</span>
-                </div>
-                <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden border border-slate-700">
-                  <div 
-                    className="bg-[#dc3545] h-full transition-all duration-700 ease-out" 
-                    style={{ width: `${data?.systemLoad || 0}%` }}
-                  ></div>
-                </div>
-              </div>
-
-              {/* Sistem Saati ve Yenileme */}
-              <div className="flex items-center justify-between mt-1">
-                <div className="flex flex-col">
-                  <span className="text-[10px] text-slate-500 font-bold tracking-wider uppercase font-mono">Sistem Saati</span>
-                  <span className="text-xl sm:text-2xl font-black text-emerald-400 font-mono tracking-tight">
-                    {new Date().toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" })}
-                  </span>
-                </div>
-                <button
-                  onClick={() => fetchData(true)}
-                  disabled={isRefreshing}
-                  title="Verileri Şimdi Yenile"
-                  className="p-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-600 rounded-md text-slate-300 transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
-                >
-                  <RefreshCw size={18} className={isRefreshing ? "animate-spin text-[#dc3545]" : ""} />
-                </button>
-              </div>
-
-            </div>
+        </section>
+        {refreshError && (
+          <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-3 text-xs font-semibold text-amber-800">
+            {refreshError}
           </div>
-        </div>
+        )}
+
+        <CargoOverviewSection
+          cargoDistribution={data?.cargoDistribution || []}
+          recentCargoSessions={data?.recentCargoSessions || []}
+        />
 
         {/* Uyarı Paneli (Mobil uyumlu hale getirildi) */}
         {hasPending && (
@@ -375,23 +381,25 @@ export default function ManagementDashboard() {
           ))}
         </div>
 
-        {/* 1. VE 2. BÖLÜMLER */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full items-start mt-2">
+        {/* Geniş operasyon merkezi */}
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
           <TransferCenterSection
             recentTransfers={data?.recentTransfers || []}
             getStatusStyle={getStatusStyle}
             getStatusText={getStatusText}
           />
-          <CatalogActivitySection />
         </div>
 
-        {/* 3. VE 4. BÖLÜMLER */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full items-start mt-2">
+        <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
           <WarehouseLogsSection
             recentPutawayLogs={data?.recentPutawayLogs || []}
+            fullWidth={!isOnlineWarehouse}
           />
-          {isOnlineWarehouse ? <OrderTrackingSection /> : isStore ? <StoreOrdersHomeSection /> : null}
+          {isOnlineWarehouse && <OrderTrackingSection />}
         </div>
+
+        {/* Alt bölüm: geniş ürün ve koli galerisi / arama */}
+        <CatalogActivitySection />
       </main>
       <Footer />
     </div>
