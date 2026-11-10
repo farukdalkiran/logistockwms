@@ -38,7 +38,6 @@ import {
   PutawayLogData,
 } from "./_components/WarehouseLogsSection";
 import type { LeaveLogData } from "./_components/LeaveMovementsSection";
-import { OrderTrackingSection } from "./_components/OrderTrackingSection";
 import { CargoOverviewSection } from "./_components/CargoOverviewSection";
 import { useWms } from "@/components/providers/WmsSessionProvider";
 
@@ -70,8 +69,7 @@ const CLIENT_CACHE_TTL = 30 * 60 * 1000; // 30 dakika
 
 export default function ManagementDashboard() {
   const { userProfile, isLoading: isAuthLoading } = useAuth();
-  const { branchType, branchName } = useWms();
-  const isOnlineWarehouse = branchType === "Depo" && branchName === "Online Depo";
+  const { branchName } = useWms();
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -393,9 +391,7 @@ export default function ManagementDashboard() {
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
           <WarehouseLogsSection
             recentPutawayLogs={data?.recentPutawayLogs || []}
-            fullWidth={!isOnlineWarehouse}
           />
-          {isOnlineWarehouse && <OrderTrackingSection />}
         </div>
 
         {/* Alt bölüm: geniş ürün ve koli galerisi / arama */}
