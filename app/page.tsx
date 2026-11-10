@@ -204,7 +204,7 @@ export default function ManagementDashboard() {
   }
 
   const profileSafe = userProfile as Record<string, any> | null;
-  const isGlobal = profileSafe?.role === "Developer" || profileSafe?.role === "Admin" || !profileSafe?.branch_id;
+  const isGlobal = profileSafe?.isGlobalAdmin === true;
   const pendingTotal = data?.kpis?.pendingTotal ?? 0;
   const hasPending = pendingTotal > 0;
 
