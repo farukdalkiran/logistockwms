@@ -232,46 +232,22 @@ export function CatalogActivitySection() {
 
   return (
     <>
-      <section aria-labelledby="catalog-title" className="lg:col-span-7 flex h-[600px] w-full min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="relative shrink-0 overflow-hidden bg-[#101a2c] px-4 py-4 text-white md:px-5 md:py-5">
-          <div className="pointer-events-none absolute -right-14 -top-28 h-72 w-72 rounded-full bg-[#dc3545]/15 blur-3xl" />
-          <div className="relative flex flex-wrap items-center justify-between gap-5">
-            <div className="flex min-w-0 items-start gap-3">
-              <div className="rounded-xl border border-white/15 bg-white/10 p-3 text-white"><Boxes size={24} /></div>
-              <div>
-                <p className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-rose-300">Ürün & koli kataloğu</p>
-                <h2 id="catalog-title" className="mt-1 text-xl font-black tracking-tight md:text-2xl">Son Kayıtlar ve Hızlı Sorgulama</h2>
-                <p className="mt-2 max-w-2xl text-xs leading-relaxed text-slate-300 md:text-sm">
-                  Ürün görsellerine, barkod ve LGS kodlarına tek yerden ulaşın. Katalog yalnızca görüntüleme amaçlıdır.
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => void loadRecent()}
-              disabled={isLoadingRecent}
-              className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 text-xs font-extrabold transition hover:bg-white/20 disabled:opacity-50"
-              aria-label="Ürün ve koli kayıtlarını yenile"
-            >
-              <RefreshCw size={16} className={isLoadingRecent ? "animate-spin" : ""} /> Kayıtları yenile
-            </button>
+      <section aria-labelledby="catalog-title" className="lg:col-span-7 flex h-[600px] w-full min-w-0 flex-col overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg shadow-slate-200/70">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3.5">
+          <div className="flex min-w-0 items-center gap-2">
+            <Boxes size={18} className="shrink-0 text-[#dc3545]" />
+            <h2 id="catalog-title" className="text-sm font-black tracking-tight text-slate-900">Ürünler ve Koliler</h2>
           </div>
           <button
             type="button"
             onClick={() => openModal()}
-            className="relative mt-4 flex min-h-12 w-full items-center gap-3 rounded-xl border border-white/15 bg-white px-4 text-left text-slate-500 shadow-lg transition hover:border-rose-300 hover:shadow-xl focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-700 shadow-sm transition hover:border-[#dc3545] hover:text-[#dc3545]"
+            title="Ürün veya koli ara"
+            aria-label="Ürün veya koli ara"
           >
-            <Search size={21} className="shrink-0 text-[#dc3545]" />
-            <span className="flex-1 text-xs font-semibold sm:text-sm">Ürün adı, SKU, barkod, koli kodu veya LGS ID ile sorgula...</span>
-            <span className="hidden rounded-lg bg-slate-900 px-4 py-2 text-xs font-bold text-white sm:inline-flex">Sorgula</span>
-            <ChevronRight size={18} className="sm:hidden" />
+            <Search size={19} />
           </button>
-          <div className="relative mt-2 flex flex-wrap gap-3 text-[10px] font-semibold text-slate-400">
-            <span className="flex items-center gap-1.5"><Package size={13} /> Ürün arama</span>
-            <span className="flex items-center gap-1.5"><Box size={13} /> Koli arama</span>
-            <span>En az 2 karakter · İlk 25 eşleşme</span>
-          </div>
-        </div>
+        </header>
 
         {recentError && (
           <div role="alert" className="m-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs font-semibold text-rose-800">
@@ -284,10 +260,9 @@ export function CatalogActivitySection() {
           <div className="min-w-0 p-3 md:p-4">
             <div className="mb-5 flex items-center justify-between gap-3">
               <div>
-                <h3 className="flex items-center gap-2 text-base font-black text-slate-900"><Package size={18} className="text-[#dc3545]" /> Son Eklenen Ürünler</h3>
-                <p className="mt-1 text-[11px] font-medium text-slate-500">Görselleriyle birlikte son 10 ürün</p>
+                <h3 className="flex items-center gap-2 text-base font-black text-slate-900"><Package size={18} className="text-[#dc3545]" /> Ürünler</h3>
               </div>
-              <button type="button" onClick={() => { chooseMode("products"); openModal(); }} className="shrink-0 rounded-lg bg-rose-50 px-3 py-2 text-[11px] font-extrabold text-[#b42332] transition hover:bg-rose-100">Ürün sorgula</button>
+
             </div>
             <div className="grid grid-cols-1 gap-2.5">
               {recentProducts.map((item) => (
@@ -295,7 +270,7 @@ export function CatalogActivitySection() {
                   key={item.id}
                   type="button"
                   onClick={() => openModal(item)}
-                  className="group flex min-w-0 items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:border-rose-300 hover:bg-rose-50/30 hover:shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#dc3545]"
+                  className="group flex min-w-0 items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-left transition hover:border-rose-300 hover:bg-rose-50/30 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#dc3545]"
                 >
                   <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-100 bg-slate-50">
                     {item.image_url ? <img src={item.image_url} alt={item.name + " ürün görseli"} loading="lazy" className="h-full w-full object-contain p-1" /> : <Package size={28} className="text-slate-300" />}
@@ -321,10 +296,9 @@ export function CatalogActivitySection() {
           <div className="min-w-0 p-3 md:p-4">
             <div className="mb-5 flex items-center justify-between gap-3">
               <div>
-                <h3 className="flex items-center gap-2 text-base font-black text-slate-900"><Box size={18} className="text-indigo-600" /> Son Oluşturulan Koliler</h3>
-                <p className="mt-1 text-[11px] font-medium text-slate-500">Bağlı ürün görselleriyle son 10 koli</p>
+                <h3 className="flex items-center gap-2 text-base font-black text-slate-900"><Box size={18} className="text-indigo-600" /> Koliler</h3>
               </div>
-              <button type="button" onClick={() => { chooseMode("boxes"); openModal(); }} className="shrink-0 rounded-lg bg-indigo-50 px-3 py-2 text-[11px] font-extrabold text-indigo-700 transition hover:bg-indigo-100">Koli sorgula</button>
+
             </div>
             <div className="grid grid-cols-1 gap-2.5">
               {recentBoxes.map((item) => (
@@ -332,7 +306,7 @@ export function CatalogActivitySection() {
                   key={item.id}
                   type="button"
                   onClick={() => openModal(item)}
-                  className="group flex min-w-0 items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 text-left transition hover:border-indigo-300 hover:bg-indigo-50/30 hover:shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500"
+                  className="group flex min-w-0 items-center gap-3 rounded-md border border-slate-200 bg-white p-3 text-left transition hover:border-indigo-300 hover:bg-indigo-50/30 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-500"
                 >
                   <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-100 bg-slate-50">
                     {item.products?.image_url ? <img src={item.products.image_url} alt={(item.products?.name || "Koli") + " ürün görseli"} loading="lazy" className="h-full w-full object-contain p-1" /> : <Box size={28} className="text-slate-300" />}
