@@ -146,7 +146,6 @@ export async function processBulkMissingAttendance(payloads:BulkGapPayload[],man
      check_out_time:timeOut.toISOString(),rounded_check_in:timeIn.toISOString(),
      rounded_check_out:timeOut.toISOString(),break_hours:Number(breakHours.toFixed(2)),
      working_hours:Number((duration-breakHours).toFixed(2)),status:"PRESENT",
-     is_system_adjusted:true,
      manager_id:managerId,
     });
    }

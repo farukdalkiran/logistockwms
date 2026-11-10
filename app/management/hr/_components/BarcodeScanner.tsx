@@ -4,7 +4,6 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { processAttendanceScan } from "@/app/actions/attendance";
 import { supabase } from "@/lib/supabase";
-import { detectCheckInDeviceType } from "@/lib/attendance/record-provenance";
 import { Check, AlertCircle, ShieldAlert, User } from "lucide-react";
 
 interface BarcodeScannerProps {
@@ -91,8 +90,7 @@ export default function BarcodeScanner({
       const result = await processAttendanceScan(
         currentId, 
         actionType,
-        branchId,
-        actionType === "IN" ? detectCheckInDeviceType(window.navigator.userAgent) : null
+        branchId
       );
 
       triggerFeedback(result.success ? "success" : "error", result.message || "İŞLEM SONUCU ALINAMADI");
