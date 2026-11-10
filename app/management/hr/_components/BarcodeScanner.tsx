@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { processAttendanceScan } from "@/app/actions/attendance";
 import { supabase } from "@/lib/supabase";
+import { detectCheckInDeviceType } from "@/lib/attendance/record-provenance";
 import { CHECK_IN_LOCATIONS, CHECK_IN_LOCATION_STORAGE_KEY, isCheckInLocationCode, type CheckInLocationCode } from "@/lib/attendance/check-in-location";
 import { Check, AlertCircle, ShieldAlert, User } from "lucide-react";
 
@@ -111,7 +112,8 @@ export default function BarcodeScanner({
         currentId, 
         actionType,
         branchId,
-        actionType === "IN" ? checkInLocation : null
+        actionType === "IN" ? checkInLocation : null,
+        actionType === "IN" ? detectCheckInDeviceType(window.navigator.userAgent) : null
       );
 
       triggerFeedback(result.success ? "success" : "error", result.message || "İŞLEM SONUCU ALINAMADI");

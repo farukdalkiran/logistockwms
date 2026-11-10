@@ -247,7 +247,8 @@ export async function processApproval(params: ProcessApprovalParams): Promise<Ac
             rounded_check_out: rOut ? rOut.toISOString() : null,
             break_hours: breakH,
             working_hours: parseFloat(netW.toFixed(2)),
-            status: "MANUAL_EDIT_APPROVED"
+            status: "MANUAL_EDIT_APPROVED",
+            is_system_adjusted: true
           };
 
           if (req.attendance_id) {

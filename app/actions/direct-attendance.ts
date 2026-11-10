@@ -103,7 +103,8 @@ export async function upsertDirectAttendance(data: DirectAttendancePayload) {
       rounded_check_out: checkOutISO,
       break_hours: breakHours,
       working_hours: workingHours > 0 ? workingHours : 0, 
-      status: "ON_TIME", 
+      status: "ON_TIME",
+      is_system_adjusted: true,
       manager_id: data.manager_id
     };
 

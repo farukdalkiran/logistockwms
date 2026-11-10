@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { isCheckInLocationCode } from '@/lib/attendance/check-in-location';
+import { isCheckInDeviceType } from '@/lib/attendance/record-provenance';
 
 // Yardımcı Fonksiyon: Saati bir sonraki 15 dakikalık dilime (tavana) yuvarlar
 function roundToNext15Minutes(date: Date): Date {
@@ -30,7 +31,8 @@ export async function processAttendanceScan(
   scannedCode: string, 
   actionType: 'IN' | 'OUT',
   branchId: string | null,
-  checkInLocationCode?: string | null
+  checkInLocationCode?: string | null,
+  checkInDeviceType?: string | null
 ) {
   if (!scannedCode || !/^\d{5}$/.test(scannedCode)) {
     return { success: false, message: 'LÜTFEN 5 HANELİ KİMLİK NUMARANIZI GİRİNİZ!' };
@@ -101,7 +103,8 @@ export async function processAttendanceScan(
             .from('attendance')
             .update({ 
               check_out_time: startOfDayTrt, // Gece yarısı sistem kapattı
-              status: 'AUTO_CLOSED_MISSING_OUT' 
+              status: 'AUTO_CLOSED_MISSING_OUT',
+              is_system_adjusted: true 
             })
             .eq('id', activeSession.id);
         } else {
@@ -142,6 +145,7 @@ export async function processAttendanceScan(
           check_in_time: actualTime,
           rounded_check_in: roundedTimeIso,
           check_in_location_code: checkInLocationCode,
+          check_in_device_type: isCheckInDeviceType(checkInDeviceType) ? checkInDeviceType : null,
           status: 'ON_TIME'
         });
 
