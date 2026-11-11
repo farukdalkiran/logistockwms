@@ -20,6 +20,10 @@ export async function proxy(req: NextRequest) {
     return res;
   }
 
+  // Telegram callbacks use their own secret headers; do not redirect external bot webhooks to login.
+  // Every /api/telegram/* handler independently authorizes requests before side effects.
+  if (path.startsWith("/api/telegram/")) return res;
+
   // ==========================================
   // 2. SAHA PERSONELİ (PORTAL) ZIRHI VE BYPASS
   // ==========================================
