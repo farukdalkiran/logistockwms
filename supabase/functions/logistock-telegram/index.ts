@@ -13,6 +13,7 @@ const admin=()=>{
  if(!key||!env("SUPABASE_URL"))throw Error("Database credentials missing");
  return createClient(env("SUPABASE_URL"),key,{auth:{persistSession:false,autoRefreshToken:false}});
 };
+async function loadSettings(){const {data,error}=await admin().from("telegram_runtime_config").select("allowed_chat_ids,telegram_webhook_secret,db_hook_secret,setup_secret,setup_consumed,enabled").eq("id",1).single();if(error||!data)throw Error("Telegram settings unavailable");settings=data as typeof settings;}
 async function pages(table:string,select:string,dateColumn:string,start:string,end:string){
  const db=admin(),result:Record<string,unknown>[]=[];
  for(let offset=0;offset<10000;offset+=500){
@@ -103,10 +104,25 @@ function eventFrom(payload:any):{key:string;text:string}|null{
  return null;
 }
 Deno.serve(async(req:Request)=>{
- if(req.method!=="POST")return j({ok:false},405);
+ try{await loadSettings();}catch(e){console.error("Settings unavailable",String(e));return j({error:"Configuration unavailable"},503);}
  const bot=env("LOGISTOCK_TELEGRAM_BOT_TOKEN"),allowed=ids();
- if(!bot||allowed.length===0)return j({error:"Bot secrets not configured"},503);
- const telegramSecret=env("LOGISTOCK_TELEGRAM_SECRET_TOKEN"),dbSecret=env("LOGISTOCK_TELEGRAM_DB_SECRET");
+ if(req.method==="GET"){
+   const uri=new URL(req.url),key=uri.searchParams.get("setup")||"";
+   if(!key||key!==settings.setup_secret||settings.setup_consumed)return j({error:"Not found"},404);
+   if(!bot||allowed.length===0)return j({error:"Bot token missing"},503);
+   const hook=env("SUPABASE_URL")+"/functions/v1/logistock-telegram";
+   const res=await fetch(`https://api.telegram.org/bot${bot}/setWebhook`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url:hook,secret_token:settings.telegram_webhook_secret,allowed_updates:["message"],drop_pending_updates:true})});
+   const reply=await res.json();if(!res.ok||!reply.ok)return j({error:"Telegram webhook registration failed"},502);
+   await fetch(`https://api.telegram.org/bot${bot}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"mesai",description:"Günlük personel giriş-çıkış"},{command:"kargo",description:"Kargo oturumları"},{command:"sonokutmalar",description:"Son 15 kargo okutma"},{command:"transfer",description:"Transfer durumları"},{command:"rapor",description:"Günlük genel rapor"},{command:"yardim",description:"Komutlar"}]})});
+   const {error}=await admin().from("telegram_runtime_config").update({enabled:true,setup_consumed:true}).eq("id",1);
+   if(error)return j({error:"Webhook active but config update failed"},500);
+   settings.enabled=true;
+   const outcome=await broadcast("✅ Logistock Telegram botu etkinleştirildi. /mesai, /kargo, /sonokutmalar, /transfer, /rapor komutlarını kullanabilirsiniz.");
+   return j({ok:outcome.failed===0,webhook:true,...outcome});
+ }
+ if(req.method!=="POST")return j({ok:false},405);
+ if(!settings.enabled||!bot||allowed.length===0)return j({error:"Bot not enabled"},503);
+ const telegramSecret=settings.telegram_webhook_secret,dbSecret=settings.db_hook_secret;
  const tg=req.headers.get("x-telegram-bot-api-secret-token");
  const dbHeader=req.headers.get("x-logistock-event-secret");
  const isTelegram=!!telegramSecret&&tg===telegramSecret;
