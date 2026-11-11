@@ -1,6 +1,6 @@
 # Logistock Telegram — Supabase-native free-tier deployment
 
-Status: Supabase Edge Function `logistock-telegram` deployed. Database triggers and private configuration tables installed but notifications remain disabled until one-time activation.
+Status: Supabase Edge Function `logistock-telegram` ACTIVE, database triggers installed, webhook activated. Notifications are sent only to authorized chats; recipient must not have blocked the bot.
 
 ## Cost and hosting
 - Telegram Bot API standard `sendMessage` only, with `allow_paid_broadcast:false`. No paid broadcast.
@@ -25,13 +25,13 @@ Status: Supabase Edge Function `logistock-telegram` deployed. Database triggers 
 - `/rapor`: mesai + cargo + transfer.
 - `/yardim`: command help.
 
-## Event alerts
-- `attendance` INSERT check-in, UPDATE null->timestamp check-out. Avoid historic edits, leave rows, synthetic midnight closures.
-- `cargo_sessions` start, completed.
-- `cargo_logs` barcode activity no more often than once every five minutes per session.
-- `transfers` creation, status/picker change.
-- `scan_logs` successful counting activity no more often than once every five minutes per transfer.
-- All event types ignore out-of-date synthetic/historical rows for attendance and cargo. Transfer state is not proof of physical count completion.
+## Automatic alerts (simplified 2026-11-11)
+- `attendance`: successful real check-in and real check-out, person and Türkiye-local time; no leave records or synthetic midnight closures.
+- `cargo_sessions`: **only on INSERT/start**. Send initiating employee's name, carrier, and local start time. No cargo completion or individual barcode activity messages.
+- `transfers`: **only on the first UPDATE changing status to `Tamamlandi`**. Send transfer code, recorded picker employee's name (if available), and local completion-event time. Picker is not necessarily the user who clicked completion; avoid claiming that.
+- `cargo_logs` and `scan_logs`: Telegram DB triggers removed; no periodic 5-minute activity alerts.
+- Status reports and scan details remain available **on request** through `/kargo`, `/sonokutmalar`, `/transfer`, and `/sonsayimlar`.
+- Only the three database triggers `logistock_telegram_attendance`, `logistock_telegram_cargo_sessions`, and `logistock_telegram_transfers` remain. Test requests for old activity events return `{ok:true,ignored:true}`.
 
 Security: Telegram validates secret header and allowed chat IDs; database events have an independent secret; no anon/authenticated access to private settings. Private person-level reports and scan barcodes should only be shared with approved managers, consistent with staff notification and KVKK obligations.
 
