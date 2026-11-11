@@ -63,7 +63,7 @@ export async function attendanceReport(date: string): Promise<string> {
     if(error) throw new Error(error.message);
     (data||[]).forEach(e=>names.set(e.id,e.full_name));
   }
-  const lines = punches.sort((a,b)=>names.get(a.employee_id!)!.localeCompare(names.get(b.employee_id!)!, "tr")).map(r =>
+  const lines = punches.sort((a,b)=>(names.get(a.employee_id!) || a.employee_id || "").localeCompare(names.get(b.employee_id!) || b.employee_id || "", "tr")).map(r =>
     `• ${names.get(r.employee_id!) || r.employee_id}: ${time(r.check_in_time)} → ${time(r.check_out_time)}`);
   return `👥 MESAİ | ${date}\nGiriş yapan: ${ids.length} kişi | Açık mesai: ${punches.filter(r=>!r.check_out_time).length}\n${lines.join("\n") || "Kayıt yok."}`;
 }
@@ -100,7 +100,7 @@ export async function transferReport(date: string): Promise<string> {
     const result=status==="Tamamlandi" ? (allCounted?"Tamamlandı / adetler eşit":"Tamamlandı / sayım farkı veya eksik veri") : (allCounted?"Adetler eşit, durum açık":"Sayım bekliyor veya fark var");
     return `• ${t.transfer_code}: ${status} — ${result}`;
   });
-  return `🚚 TRANSFER | ${date}\nOluşturulan: ${rows.length} | Yolda: ${rows.filter(x=>x.status==="Yolda").length} | Tamamlanan: ${rows.filter(x=>x.status==="Tamamlandi").length}\n${details.join("\n")||"Transfer yok."}\nNot: Eşit adetler, bağımsız okutma onayının yerine geçmez.`;
+  return `🚚 TRANSFER | ${date} (bugün açılanlar)\nOluşturulan: ${rows.length} | Yolda: ${rows.filter(x=>x.status==="Yolda").length} | Tamamlanan: ${rows.filter(x=>x.status==="Tamamlandi").length}\n${details.join("\n")||"Transfer yok."}\nNot: Eşit adetler, bağımsız okutma onayının yerine geçmez.`;
 }
 export async function report(command: Command,date=todayTR()):Promise<string> {
   if(command==="YARDIM") return "Logistock komutları: RAPOR, MESAI, KARGO, TRANSFER, YARDIM";
