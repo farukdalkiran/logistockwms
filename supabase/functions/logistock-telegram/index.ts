@@ -147,7 +147,7 @@ Deno.serve(async(req:Request)=>{
   const chat=String(input.message?.chat?.id||"");
   if(!allowed.includes(chat)||!input.message?.text)return j({ok:true,ignored:true});
   const cmd=String(input.message.text).trim().split(/\s+/)[0].replace(/^\//,"").split("@")[0].toLocaleLowerCase("tr-TR");
-  const cmds:Record<string,()=>Promise<string>>={mesai,kargo,transfer,sonokutmalar,sonsayimlar:sonSayimlar,rapor:async()=>[await mesai(),await kargo(),await transfer()].join("\n\n"),start:async()=>help(),yardim:async()=>help()};
+  const cmds:Record<string,()=>Promise<string>>={mesai,kargo,transfer,sonokutmalar:sonOkutmalar,sonsayimlar:sonSayimlar,rapor:async()=>[await mesai(),await kargo(),await transfer()].join("\n\n"),start:async()=>help(),yardim:async()=>help()};
   try{await send(chat,await (cmds[cmd]||cmds.yardim)());return j({ok:true});}
   catch(e){console.error("Command failed",String(e));return j({error:"Command failed"},500);}
  }
