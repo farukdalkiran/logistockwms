@@ -72,6 +72,15 @@ async function transfer(){
  const names=await namesFor(rows.map(x=>String(x.picker_employee_id||"")));
  return `🚚 TRANSFER — ${d} (bugün oluşturulan)\nToplam: ${rows.length} | Yolda: ${rows.filter(x=>x.status==="Yolda").length} | Tamamlandı: ${rows.filter(x=>x.status==="Tamamlandi").length}\n${rows.slice(-35).map(x=>`• ${x.transfer_code}: ${x.status} | Toplayan: ${names.get(String(x.picker_employee_id))||"Henüz atanmadı"}`).join("\n")||"Transfer yok."}\nNot: Tamamlandı durumu fiziksel sayım doğrulaması değildir.`;
 }
+async function sonSayimlar(){
+ const {start,end}=range(),db=admin();
+ const {data,error}=await db.from("scan_logs").select("transfer_id,employee_id,barcode,scanned_qty,scan_type,status,created_at").gte("created_at",start).lt("created_at",end).order("created_at",{ascending:false}).limit(15);
+ if(error)throw Error(error.message);
+ const rows=data||[],pids=[...new Set(rows.map(x=>x.employee_id).filter(Boolean))],transferIds=[...new Set(rows.map(x=>x.transfer_id).filter(Boolean))];
+ const [people,transfers]=await Promise.all([pids.length?db.from("profiles").select("id,full_name").in("id",pids):Promise.resolve({data:[],error:null}),transferIds.length?db.from("transfers").select("id,transfer_code").in("id",transferIds):Promise.resolve({data:[],error:null})]);
+ const names=new Map((people.data||[]).map(x=>[x.id,x.full_name])),codes=new Map((transfers.data||[]).map(x=>[x.id,x.transfer_code]));
+ return `🔎 SON TRANSFER SAYIMLARI — ${day()}\n${rows.map(x=>`• ${fmt(x.created_at)} ${names.get(x.employee_id)||"Bilinmiyor"} — ${codes.get(x.transfer_id)||"Transfer"} / ${x.scanned_qty||0} adet / ${x.status||""}`).join("\n")||"Bugün sayım hareketi yok."}`;
+}
 async function send(id:string,text:string){
  if(!ids().includes(id))throw Error("Unauthorized chat");
  const token=env("LOGISTOCK_TELEGRAM_BOT_TOKEN");if(!token)throw Error("Bot not configured");
@@ -98,6 +107,10 @@ function eventFrom(payload:any):{key:string;text:string}|null{
   if(created&&recent(r.started_at))return {key:`cargo:${r.id}:start`,text:`📦 KARGO OKUTMASI BAŞLADI\nPersonel kodu: ${r.employee_id}\nFirma: ${r.carrier_name}\nSaat: ${fmt(r.started_at)}`};
   if(changed&&o&&o.status!=="COMPLETED"&&r.status==="COMPLETED"&&recent(r.completed_at))return {key:`cargo:${r.id}:complete`,text:`✅ KARGO OTURUMU TAMAMLANDI\nPersonel kodu: ${r.employee_id}\nFirma: ${r.carrier_name}\nAdet: ${r.total_items??"—"}\nSaat: ${fmt(r.completed_at)}`};
  }
+ if(table==="cargo_logs"&&created&&recent(r.scanned_at))
+  return {key:`cargo-scan:${r.id}`,text:`📦 KARGO OKUTMA AKTİVİTESİ\nOturum: ${r.session_id}\nSon barkod: ${r.tracking_number}\nSaat: ${fmt(r.scanned_at)}\nNot: Okutma bildirimi en fazla 5 dakikada bir gönderilir.`};
+ if(table==="scan_logs"&&created&&r.status==="SUCCESS"&&recent(r.created_at))
+  return {key:`transfer-scan:${r.id}`,text:`🔎 TRANSFER SAYIMI DEVAM EDİYOR\nTransfer ID: ${r.transfer_id}\nSayım yapan ID: ${r.employee_id}\nAdet: ${r.scanned_qty}\nSaat: ${fmt(r.created_at)}\nNot: Bildirim en fazla 5 dakikada bir gönderilir.`};
  if(table==="transfers"){
   if(created&&recent(r.created_at))return {key:`transfer:${r.id}:create`,text:`🚚 TRANSFER OLUŞTURULDU\nTransfer: ${r.transfer_code}\nDurum: ${r.status}\nSaat: ${fmt(r.created_at)}`};
   if(changed&&o&&(o.status!==r.status||o.picker_employee_id!==r.picker_employee_id))return {key:`transfer:${r.id}:${r.status}:${r.picker_employee_id||"-"}`,text:`🚚 TRANSFER GÜNCELLENDİ\nTransfer: ${r.transfer_code}\nDurum: ${r.status}\nToplayan kodu: ${r.picker_employee_id||"Atanmadı"}`};
@@ -114,7 +127,7 @@ Deno.serve(async(req:Request)=>{
    const hook=env("SUPABASE_URL")+"/functions/v1/logistock-telegram";
    const res=await fetch(`https://api.telegram.org/bot${bot}/setWebhook`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({url:hook,secret_token:settings.telegram_webhook_secret,allowed_updates:["message"],drop_pending_updates:true})});
    const reply=await res.json();if(!res.ok||!reply.ok)return j({error:"Telegram webhook registration failed"},502);
-   await fetch(`https://api.telegram.org/bot${bot}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"mesai",description:"Günlük personel giriş-çıkış"},{command:"kargo",description:"Kargo oturumları"},{command:"sonokutmalar",description:"Son 15 kargo okutma"},{command:"transfer",description:"Transfer durumları"},{command:"rapor",description:"Günlük genel rapor"},{command:"yardim",description:"Komutlar"}]})});
+   await fetch(`https://api.telegram.org/bot${bot}/setMyCommands`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({commands:[{command:"mesai",description:"Günlük personel giriş-çıkış"},{command:"kargo",description:"Kargo oturumları"},{command:"sonokutmalar",description:"Son 15 kargo okutma"},{command:"transfer",description:"Transfer durumları"},{command:"sonsayimlar",description:"Son 15 transfer sayımı"},{command:"rapor",description:"Günlük genel rapor"},{command:"yardim",description:"Komutlar"}]})});
    const {error}=await admin().from("telegram_runtime_config").update({enabled:true,setup_consumed:true}).eq("id",1);
    if(error)return j({error:"Webhook active but config update failed"},500);
    settings.enabled=true;
@@ -134,12 +147,12 @@ Deno.serve(async(req:Request)=>{
   const chat=String(input.message?.chat?.id||"");
   if(!allowed.includes(chat)||!input.message?.text)return j({ok:true,ignored:true});
   const cmd=String(input.message.text).trim().split(/\s+/)[0].replace(/^\//,"").split("@")[0].toLocaleLowerCase("tr-TR");
-  const cmds:Record<string,()=>Promise<string>>={mesai,kargo,transfer,sonokutmalar,rapor:async()=>[await mesai(),await kargo(),await transfer()].join("\n\n"),start:async()=>help(),yardim:async()=>help()};
+  const cmds:Record<string,()=>Promise<string>>={mesai,kargo,transfer,sonokutmalar,sonsayimlar:sonSayimlar,rapor:async()=>[await mesai(),await kargo(),await transfer()].join("\n\n"),start:async()=>help(),yardim:async()=>help()};
   try{await send(chat,await (cmds[cmd]||cmds.yardim)());return j({ok:true});}
   catch(e){console.error("Command failed",String(e));return j({error:"Command failed"},500);}
  }
  if(isDatabase){
-  if(input.schema!=="public"||!["attendance","cargo_sessions","transfers"].includes(input.table))return j({ok:true,ignored:true});
+  if(input.schema!=="public"||!["attendance","cargo_sessions","cargo_logs","transfers","scan_logs"].includes(input.table))return j({ok:true,ignored:true});
   const event=eventFrom(input);if(!event)return j({ok:true,ignored:true});
   const db=admin();
   const {error}=await db.from("telegram_notification_events").insert({event_key:event.key});
@@ -148,6 +161,15 @@ Deno.serve(async(req:Request)=>{
   try{
    const row=input.record;
    if(row?.employee_id){const names=await namesFor([String(row.employee_id)]);event.text=event.text.replace("Personel kodu: "+row.employee_id,"Personel: "+(names.get(String(row.employee_id))||row.employee_id));}
+   if(input.table==="cargo_logs"&&row?.session_id){
+    const {data:session}=await db.from("cargo_sessions").select("employee_id,carrier_name").eq("id",row.session_id).maybeSingle();
+    if(session){const names=await namesFor([session.employee_id]);event.text=event.text.replace("Oturum: "+row.session_id,`Personel: ${names.get(session.employee_id)||session.employee_id}\nFirma: ${session.carrier_name}`);}
+   }
+   if(input.table==="scan_logs"&&row?.transfer_id){
+    const [{data:transfer},{data:profile}]=await Promise.all([db.from("transfers").select("transfer_code").eq("id",row.transfer_id).maybeSingle(),row.employee_id?db.from("profiles").select("full_name").eq("id",row.employee_id).maybeSingle():Promise.resolve({data:null})]);
+    if(transfer)event.text=event.text.replace("Transfer ID: "+row.transfer_id,"Transfer: "+transfer.transfer_code);
+    if(profile)event.text=event.text.replace("Sayım yapan ID: "+row.employee_id,"Sayım yapan: "+profile.full_name);
+   }
    if(row?.picker_employee_id){const names=await namesFor([String(row.picker_employee_id)]);event.text=event.text.replace("Toplayan kodu: "+row.picker_employee_id,"Toplayan: "+(names.get(String(row.picker_employee_id))||row.picker_employee_id));}
    const outcome=await broadcast(event.text);
    return j({ok:outcome.failed===0,...outcome},outcome.failed?207:200);
