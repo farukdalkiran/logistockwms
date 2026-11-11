@@ -95,28 +95,25 @@ async function send(id:string,text:string){
 }
 async function broadcast(text:string){let sent=0,failed=0;for(const id of ids()){try{await send(id,text);sent++;}catch(e){failed++;console.error("Send failed",String(e));}}return {sent,failed};}
 function eventFrom(payload:any):{key:string;text:string}|null{
- const {type,table,record:r,old_record:o}=payload;if(!r||!r.id)return null;
- const created=type==="INSERT",changed=type==="UPDATE",time=Date.now();
- const recent=(timestamp?:string)=>!!timestamp&&Math.abs(time-new Date(timestamp).getTime())<180000;
+ const {type,table,record:r,old_record:o,event_at}=payload;
+ if(!r||!r.id)return null;
+ const created=type==="INSERT",changed=type==="UPDATE";
+ const recent=(stamp?:string)=>!!stamp&&Math.abs(Date.now()-new Date(stamp).getTime())<180000;
+
  if(table==="attendance"){
   if(String(r.status||"").startsWith("LEAVE_"))return null;
-  if(created&&r.check_in_time&&!r.check_out_time&&recent(r.check_in_time))return {key:`att:${r.id}:in`,text:`🟢 PERSONEL GİRİŞİ\nPersonel kodu: ${r.employee_id}\nSaat: ${fmt(r.check_in_time)}`};
-  if(changed&&o&&o.check_out_time==null&&r.check_out_time&&r.status!=="AUTO_CLOSED_MISSING_OUT"&&recent(r.check_out_time))return {key:`att:${r.id}:out`,text:`🔴 PERSONEL ÇIKIŞI\nPersonel kodu: ${r.employee_id}\nSaat: ${fmt(r.check_out_time)}`};
+  if(created&&r.check_in_time&&!r.check_out_time&&recent(r.check_in_time))
+    return {key:`att:${r.id}:in`,text:`🟢 PERSONEL GİRİŞİ\nPersonel kodu: ${r.employee_id}\nSaat: ${fmt(r.check_in_time)}`};
+  if(changed&&o&&o.check_out_time==null&&r.check_out_time&&r.status!=="AUTO_CLOSED_MISSING_OUT"&&recent(r.check_out_time))
+    return {key:`att:${r.id}:out`,text:`🔴 PERSONEL ÇIKIŞI\nPersonel kodu: ${r.employee_id}\nSaat: ${fmt(r.check_out_time)}`};
  }
- if(table==="cargo_sessions"){
-  if(created&&recent(r.started_at))return {key:`cargo:${r.id}:start`,text:`📦 KARGO OKUTMASI BAŞLADI\nPersonel kodu: ${r.employee_id}\nFirma: ${r.carrier_name}\nSaat: ${fmt(r.started_at)}`};
-  if(changed&&o&&o.status!=="COMPLETED"&&r.status==="COMPLETED"&&recent(r.completed_at))return {key:`cargo:${r.id}:complete`,text:`✅ KARGO OTURUMU TAMAMLANDI\nPersonel kodu: ${r.employee_id}\nFirma: ${r.carrier_name}\nAdet: ${r.total_items??"—"}\nSaat: ${fmt(r.completed_at)}`};
- }
- if(table==="cargo_logs"&&created&&recent(r.scanned_at))
-  return {key:`cargo-scan:${r.id}`,text:`📦 KARGO OKUTMA AKTİVİTESİ\nOturum: ${r.session_id}\nSon barkod: ${r.tracking_number}\nSaat: ${fmt(r.scanned_at)}\nNot: Okutma bildirimi en fazla 5 dakikada bir gönderilir.`};
- if(table==="scan_logs"&&created&&r.status==="SUCCESS"&&recent(r.created_at))
-  return {key:`transfer-scan:${r.id}`,text:`🔎 TRANSFER SAYIMI DEVAM EDİYOR\nTransfer ID: ${r.transfer_id}\nSayım yapan ID: ${r.employee_id}\nAdet: ${r.scanned_qty}\nSaat: ${fmt(r.created_at)}\nNot: Bildirim en fazla 5 dakikada bir gönderilir.`};
- if(table==="transfers"){
-  if(created&&recent(r.created_at))return {key:`transfer:${r.id}:create`,text:`🚚 TRANSFER OLUŞTURULDU\nTransfer: ${r.transfer_code}\nDurum: ${r.status}\nSaat: ${fmt(r.created_at)}`};
-  if(changed&&o&&(o.status!==r.status||o.picker_employee_id!==r.picker_employee_id))return {key:`transfer:${r.id}:${r.status}:${r.picker_employee_id||"-"}`,text:`🚚 TRANSFER GÜNCELLENDİ\nTransfer: ${r.transfer_code}\nDurum: ${r.status}\nToplayan kodu: ${r.picker_employee_id||"Atanmadı"}`};
- }
+ if(table==="cargo_sessions"&&created&&recent(r.started_at))
+  return {key:`cargo:${r.id}:start`,text:`📦 KARGO OKUTMASI BAŞLADI\nPersonel kodu: ${r.employee_id}\nFirma: ${r.carrier_name||"Bilinmiyor"}\nSaat: ${fmt(r.started_at)}`};
+ if(table==="transfers"&&changed&&o&&o.status!=="Tamamlandi"&&r.status==="Tamamlandi")
+  return {key:`transfer:${r.id}:complete`,text:`✅ TRANSFER TAMAMLANDI\nTransfer: ${r.transfer_code}\nToplayan kodu: ${r.picker_employee_id||"Atanmadı"}\nSaat: ${fmt(event_at||new Date().toISOString())}`};
  return null;
 }
+
 Deno.serve(async(req:Request)=>{
  try{await loadSettings();}catch(e){console.error("Settings unavailable",String(e));return j({error:"Configuration unavailable"},503);}
  const bot=env("LOGISTOCK_TELEGRAM_BOT_TOKEN"),allowed=ids();
@@ -152,7 +149,7 @@ Deno.serve(async(req:Request)=>{
   catch(e){console.error("Command failed",String(e));if(String(e).includes("bot was blocked by the user"))return j({ok:true,recipient_blocked:true});return j({error:"Command failed"},500);}
  }
  if(isDatabase){
-  if(input.schema!=="public"||!["attendance","cargo_sessions","cargo_logs","transfers","scan_logs"].includes(input.table))return j({ok:true,ignored:true});
+  if(input.schema!=="public"||!["attendance","cargo_sessions","transfers"].includes(input.table))return j({ok:true,ignored:true});
   const event=eventFrom(input);if(!event)return j({ok:true,ignored:true});
   const db=admin();
   const {error}=await db.from("telegram_notification_events").insert({event_key:event.key});
@@ -161,15 +158,6 @@ Deno.serve(async(req:Request)=>{
   try{
    const row=input.record;
    if(row?.employee_id){const names=await namesFor([String(row.employee_id)]);event.text=event.text.replace("Personel kodu: "+row.employee_id,"Personel: "+(names.get(String(row.employee_id))||row.employee_id));}
-   if(input.table==="cargo_logs"&&row?.session_id){
-    const {data:session}=await db.from("cargo_sessions").select("employee_id,carrier_name").eq("id",row.session_id).maybeSingle();
-    if(session){const names=await namesFor([session.employee_id]);event.text=event.text.replace("Oturum: "+row.session_id,`Personel: ${names.get(session.employee_id)||session.employee_id}\nFirma: ${session.carrier_name}`);}
-   }
-   if(input.table==="scan_logs"&&row?.transfer_id){
-    const [{data:transfer},{data:profile}]=await Promise.all([db.from("transfers").select("transfer_code").eq("id",row.transfer_id).maybeSingle(),row.employee_id?db.from("profiles").select("full_name").eq("id",row.employee_id).maybeSingle():Promise.resolve({data:null})]);
-    if(transfer)event.text=event.text.replace("Transfer ID: "+row.transfer_id,"Transfer: "+transfer.transfer_code);
-    if(profile)event.text=event.text.replace("Sayım yapan ID: "+row.employee_id,"Sayım yapan: "+profile.full_name);
-   }
    if(row?.picker_employee_id){const names=await namesFor([String(row.picker_employee_id)]);event.text=event.text.replace("Toplayan kodu: "+row.picker_employee_id,"Toplayan: "+(names.get(String(row.picker_employee_id))||row.picker_employee_id));}
    const outcome=await broadcast(event.text);
    // A failed single-recipient delivery must not permanently mark an event as delivered.
