@@ -89,7 +89,7 @@ async function send(id:string,text:string){
   let ok=false;
   for(let attempt=0;attempt<2;attempt++){
    const res=await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:id,text:chunk,disable_web_page_preview:true,protect_content:true,allow_paid_broadcast:false})});
-   if(res.ok){ok=true;break;}const apiError=await res.json().catch(()=>({description:"No details"}));console.error("Telegram API sendMessage rejected",res.status,String(apiError?.description||"unknown").slice(0,300));if(res.status===429&&attempt===0){await new Promise(r=>setTimeout(r,1100));continue;}throw Error("Telegram HTTP "+res.status);
+   if(res.ok){ok=true;break;}const apiError=await res.json().catch(()=>({description:"No details"}));console.error("Telegram API sendMessage rejected",res.status,String(apiError?.description||"unknown").slice(0,300));if(res.status===429&&attempt===0){await new Promise(r=>setTimeout(r,1100));continue;}throw Error("Telegram HTTP "+res.status+": "+String(apiError?.description||"No details").slice(0,250));
   }if(!ok)throw Error("Telegram rate limited");
  }
 }
@@ -149,7 +149,7 @@ Deno.serve(async(req:Request)=>{
   const cmd=String(input.message.text).trim().split(/\s+/)[0].replace(/^\//,"").split("@")[0].toLocaleLowerCase("tr-TR");
   const cmds:Record<string,()=>Promise<string>>={mesai,kargo,transfer,sonokutmalar:sonOkutmalar,sonsayimlar:sonSayimlar,rapor:async()=>[await mesai(),await kargo(),await transfer()].join("\n\n"),start:async()=>help(),yardim:async()=>help()};
   try{await send(chat,await (cmds[cmd]||cmds.yardim)());return j({ok:true});}
-  catch(e){console.error("Command failed",String(e));return j({error:"Command failed"},500);}
+  catch(e){console.error("Command failed",String(e));return j({error:"Command failed",detail:String(e).slice(0,300)},500);}
  }
  if(isDatabase){
   if(input.schema!=="public"||!["attendance","cargo_sessions","cargo_logs","transfers","scan_logs"].includes(input.table))return j({ok:true,ignored:true});
