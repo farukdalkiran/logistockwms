@@ -29,7 +29,7 @@ function db() {
 function time(value: string | null) {
   return value ? new Date(value).toLocaleTimeString("tr-TR", { timeZone: TZ, hour: "2-digit", minute: "2-digit" }) : "—";
 }
-async function allPages<T>(fetchPage: (from: number, to: number) => Promise<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
+async function allPages<T>(fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
   const rows: T[] = [];
   for (let offset = 0; offset < 100000; offset += 1000) {
     const result = await fetchPage(offset, offset + 999);
