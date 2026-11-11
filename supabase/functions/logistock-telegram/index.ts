@@ -152,6 +152,11 @@ Deno.serve(async(req:Request)=>{
   catch(e){console.error("Command failed",String(e));return j({error:"Command failed",detail:String(e).slice(0,300)},500);}
  }
  if(isDatabase){
+  if(input.type==="CHECK_BOT_IDENTITY"){
+    const res=await fetch(`https://api.telegram.org/bot${bot}/getMe`);
+    const info=await res.json().catch(()=>({}));
+    return j({ok:!!info.ok,username:info.result?.username||null,is_bot:info.result?.is_bot||false},res.ok?200:502);
+  }
   if(input.schema!=="public"||!["attendance","cargo_sessions","cargo_logs","transfers","scan_logs"].includes(input.table))return j({ok:true,ignored:true});
   const event=eventFrom(input);if(!event)return j({ok:true,ignored:true});
   const db=admin();
