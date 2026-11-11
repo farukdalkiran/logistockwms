@@ -149,14 +149,9 @@ Deno.serve(async(req:Request)=>{
   const cmd=String(input.message.text).trim().split(/\s+/)[0].replace(/^\//,"").split("@")[0].toLocaleLowerCase("tr-TR");
   const cmds:Record<string,()=>Promise<string>>={mesai,kargo,transfer,sonokutmalar:sonOkutmalar,sonsayimlar:sonSayimlar,rapor:async()=>[await mesai(),await kargo(),await transfer()].join("\n\n"),start:async()=>help(),yardim:async()=>help()};
   try{await send(chat,await (cmds[cmd]||cmds.yardim)());return j({ok:true});}
-  catch(e){console.error("Command failed",String(e));return j({error:"Command failed",detail:String(e).slice(0,300)},500);}
+  catch(e){console.error("Command failed",String(e));if(String(e).includes("bot was blocked by the user"))return j({ok:true,recipient_blocked:true});return j({error:"Command failed"},500);}
  }
  if(isDatabase){
-  if(input.type==="CHECK_BOT_IDENTITY"){
-    const res=await fetch(`https://api.telegram.org/bot${bot}/getMe`);
-    const info=await res.json().catch(()=>({}));
-    return j({ok:!!info.ok,username:info.result?.username||null,is_bot:info.result?.is_bot||false},res.ok?200:502);
-  }
   if(input.schema!=="public"||!["attendance","cargo_sessions","cargo_logs","transfers","scan_logs"].includes(input.table))return j({ok:true,ignored:true});
   const event=eventFrom(input);if(!event)return j({ok:true,ignored:true});
   const db=admin();
@@ -177,6 +172,11 @@ Deno.serve(async(req:Request)=>{
    }
    if(row?.picker_employee_id){const names=await namesFor([String(row.picker_employee_id)]);event.text=event.text.replace("Toplayan kodu: "+row.picker_employee_id,"Toplayan: "+(names.get(String(row.picker_employee_id))||row.picker_employee_id));}
    const outcome=await broadcast(event.text);
+   // A failed single-recipient delivery must not permanently mark an event as delivered.
+   if(outcome.failed&&ids().length===1){
+     const {error:unlockError}=await db.from("telegram_notification_events").delete().eq("event_key",event.key);
+     if(unlockError)console.error("Failed to unlock Telegram event",unlockError.code);
+   }
    return j({ok:outcome.failed===0,...outcome},outcome.failed?207:200);
   }catch(e){console.error("Event failed",String(e));return j({error:"Event failed"},500);}
  }
