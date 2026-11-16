@@ -37,6 +37,8 @@ jobs:
         run: node --experimental-strip-types --test tests/hr-upcoming-events.test.mjs
       - name: Excel catalog review regression
         run: node --experimental-strip-types --test tests/catalog-excel-review.test.mjs
+      - name: HamurLabs transfer regression
+        run: node --experimental-strip-types --test tests/hamurlabs-transfer.test.mjs
       - name: TypeScript
         run: npx tsc --noEmit
       - name: Next.js build
