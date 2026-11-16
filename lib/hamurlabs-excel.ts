@@ -124,6 +124,7 @@ export type SpecialColumn = {
 export type SpecialSheet = {
   sheetName: string;
   headerRow: number;
+  hasHeader: boolean;
   columns: SpecialColumn[];
   suggestedColumn: number;
 };
@@ -155,7 +156,7 @@ export async function inspectHamurlabsSpecialFile(file: File): Promise<SpecialSh
       };
     });
     const suggestedColumn = indexOfHeading(headings, ["Barkod", "Ürün Barkodu", "Ürün Barkod", "EAN", "SKU", "Ürün Kodu"]);
-    sheets.push({ sheetName, headerRow, columns, suggestedColumn });
+    sheets.push({ sheetName, headerRow, hasHeader: headerIndex >= 0, columns, suggestedColumn });
   }
   if (!sheets.length) throw new Error("Excel dosyasında kullanılabilir sayfa bulunamadı.");
   return sheets;
@@ -163,7 +164,7 @@ export async function inspectHamurlabsSpecialFile(file: File): Promise<SpecialSh
 
 /** Extract only the approved column, not other numbers such as SKU, price or quantity. */
 export async function readHamurlabsSpecialList(
-  file: File, sheetName: string, columnIndex: number, headerRow: number,
+  file: File, sheetName: string, columnIndex: number, headerRow: number, hasHeader: boolean,
 ): Promise<string[]> {
   if (!/\.xlsx?$/i.test(file.name) || file.size > 15 * 1024 * 1024)
     throw new Error("Özel liste dosyası geçersiz.");
@@ -173,11 +174,8 @@ export async function readHamurlabsSpecialList(
   const ws = wb.Sheets[sheetName];
   if (!ws) throw new Error("Seçilen Excel sayfası bulunamadı.");
   const grid = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: "", raw: false });
-  const headings = grid[headerRow] || [];
-  const skipHeader = ["Barkod", "Ürün Barkodu", "Ürün Barkod", "EAN", "SKU", "Ürün Kodu"]
-    .some(title => compact(headings[columnIndex]) === compact(title));
   const codes = new Set<string>();
-  for (const row of grid.slice(headerRow + (skipHeader ? 1 : 0))) {
+  for (const row of grid.slice(headerRow + (hasHeader ? 1 : 0))) {
     const code = normalizedCode(row[columnIndex]);
     if (code && !["BARKOD", "EAN", "SKU", "ÜRÜNKODU", "URUNKODU"].includes(code.replace(/\s+/g, "")))
       codes.add(code);
