@@ -201,7 +201,7 @@ export default function HamurlabsTransferPlanner() {
     setSelection(current => {
       const next = { ...current };
       for (const row of target) {
-        if (!eligibleForTransfer(row.item) || !row.item.barcode) continue;
+        if (!eligibleForTransfer(row.item) || !row.item.barcode || (checked && (!row.valid || row.quantity <= 0))) continue;
         next[row.item.key] = { ...DEFAULT_SELECTION, ...(next[row.item.key] || {}), checked };
       }
       return next;
@@ -311,8 +311,8 @@ export default function HamurlabsTransferPlanner() {
 
   const gridPage = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const eligibleFiltered = filtered.filter(row => eligibleForTransfer(row.item) && row.item.barcode);
-  const eligiblePage = gridPage.filter(row => eligibleForTransfer(row.item) && row.item.barcode);
+  const eligibleFiltered = filtered.filter(row => eligibleForTransfer(row.item) && row.item.barcode && row.valid && row.quantity > 0);
+  const eligiblePage = gridPage.filter(row => eligibleForTransfer(row.item) && row.item.barcode && row.valid && row.quantity > 0);
   const selectedFilteredCount = eligibleFiltered.filter(row => row.selection.checked).length;
   const selectedPageCount = eligiblePage.filter(row => row.selection.checked).length;
   const allPageSelected = eligiblePage.length > 0 && selectedPageCount === eligiblePage.length;
@@ -351,7 +351,7 @@ export default function HamurlabsTransferPlanner() {
         </div>
       </header>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[
           { label: "Toplam stok çeşidi", value: items.length, subtitle: "Excel'den okundu", icon: Layers },
           { label: "Online depoda bulunmayan", value: stats.missing, subtitle: "Merkezde stok var", icon: FileSearch },
@@ -360,11 +360,11 @@ export default function HamurlabsTransferPlanner() {
         ].map(card => (
           <div key={card.label} className="rounded-[5px] border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center justify-between text-slate-500">
-              <span className="text-[10px] font-bold uppercase tracking-wide">{card.label}</span>
+              <span className="text-xs font-bold uppercase tracking-wide">{card.label}</span>
               <card.icon size={17} className="text-[#dc3545]" />
             </div>
             <p className="mt-2 text-2xl font-black tabular-nums">{formatCount(card.value)}</p>
-            <p className="mt-0.5 text-[11px] text-slate-500">{card.subtitle}</p>
+            <p className="mt-1 text-sm text-slate-600">{card.subtitle}</p>
           </div>
         ))}
       </div>
@@ -461,7 +461,7 @@ export default function HamurlabsTransferPlanner() {
                 <option value={-1}>Barkod sütununu seç...</option>
                 {activeSpecialSheet.columns.map(column =>
                   <option key={column.index} value={column.index}>
-                    {String.fromCharCode(65 + column.index % 26)}{column.index >= 26 ? " (" + (column.index + 1) + ")" : ""} — {column.label}
+                    Sütun {column.index + 1} — {column.label}
                   </option>)}
               </select>
             </label>
@@ -487,7 +487,7 @@ export default function HamurlabsTransferPlanner() {
       {tab === "special" && (
         <section className="rounded-[5px] border border-slate-200 bg-white p-4 shadow-sm md:p-5">
           <div className="mb-3 flex items-center gap-2"><Sparkles size={17} className="text-[#dc3545]" />
-            <h2 className="text-sm font-black">Toplu kampanya / özel ürün sorgulama</h2>
+            <h2 className="text-lg font-extrabold">Toplu kampanya / özel ürün sorgulama</h2>
           </div>
           <p className="mb-3 text-sm leading-relaxed text-slate-700">
             Kampanya Excel'inde seçtiğin barkod sütunu veya buraya yapıştırdığın barkodlarla stok raporu karşılaştırılır.
@@ -532,7 +532,7 @@ export default function HamurlabsTransferPlanner() {
       <section className="rounded-[5px] border border-slate-200 bg-white p-4 shadow-sm md:p-5">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div><h2 className="text-lg font-extrabold text-slate-900">Transfer miktarı kuralları</h2>
-            <p className="mt-1 text-[11px] text-slate-500">Koli bilgisi varsa tam koliye aşağı yuvarlanır. İstisnalar ve manuel düzenlemeler ürün bazındadır.</p>
+            <p className="mt-1 text-sm leading-relaxed text-slate-600">Koli bilgisi varsa tam koliye aşağı yuvarlanır. Manuel düzenlemeler ürün bazında korunur.</p>
           </div>
           <button type="button" title="Miktar ayarlarını sıfırla" onClick={() => { setSettings(DEFAULT_SETTINGS); setTotalCap(0); }}
             className="rounded border border-slate-200 p-2 text-slate-500 hover:text-red-600"><RotateCcw size={17} /></button>
@@ -585,11 +585,11 @@ export default function HamurlabsTransferPlanner() {
               </button>
             </div>
           </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
             <label className="block">
-              <span className="mb-1 block text-[10px] font-bold text-slate-500">Stok koşulu</span>
+              <span className="mb-2 block text-sm font-semibold text-slate-700">Stok koşulu</span>
               <select value={eligibilityFilter} onChange={e => setEligibilityFilter(e.target.value as EligibilityFilter)}
-                className="h-10 w-full rounded border border-slate-300 bg-white px-2 text-xs">
+                className="h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm">
                 <option value="missing">Online depoda hiç yok</option>
                 <option value="lower">Online depoda daha az</option>
                 <option value="both">İki uygun filtre birlikte</option>
@@ -597,16 +597,16 @@ export default function HamurlabsTransferPlanner() {
               </select>
             </label>
             <label className="block">
-              <span className="mb-1 block text-[10px] font-bold text-slate-500">Barkod / SKU / Ürün</span>
+              <span className="mb-2 block text-sm font-semibold text-slate-700">Barkod / SKU / Ürün</span>
               <div className="relative"><Search size={14} className="absolute left-3 top-3 text-slate-400" />
                 <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Ara..."
-                  className="h-10 w-full rounded border border-slate-300 bg-white pl-9 pr-3 text-xs outline-none focus:border-red-400" />
+                  className="h-11 w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 text-sm outline-none focus:border-red-400" />
               </div>
             </label>
             <label className="block">
-              <span className="mb-1 block text-[10px] font-bold text-slate-500">Marka</span>
+              <span className="mb-2 block text-sm font-semibold text-slate-700">Marka</span>
               <select value={brand} onChange={e => setBrand(e.target.value)}
-                className="h-10 w-full rounded border border-slate-300 bg-white px-2 text-xs">
+                className="h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm">
                 <option value="">Tüm markalar</option>
                 {brands.map(value => <option key={value}>{value}</option>)}
               </select>
@@ -614,7 +614,7 @@ export default function HamurlabsTransferPlanner() {
             <NumberField label="Minimum merkez stoku" value={minimumCenter} onChange={setMinimumCenter} />
             <NumberField label="Minimum stok farkı" value={minimumGap} onChange={setMinimumGap} />
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-4 text-[11px] font-semibold text-slate-600">
+          <div className="mt-4 flex flex-wrap items-center gap-5 rounded-md border border-slate-200 bg-white p-3 text-sm font-semibold text-slate-700">
             <label className="flex items-center gap-2"><input type="checkbox" checked={onlyWithPack}
               onChange={e => setOnlyWithPack(e.target.checked)} className="accent-red-600" /> Koli bilgisi olanlar</label>
             <label className="flex items-center gap-2"><input type="checkbox" checked={specialOnly}
@@ -685,7 +685,7 @@ export default function HamurlabsTransferPlanner() {
                         {row.ambiguous && <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-700">Koli çakışması</span>}
                         {!row.knownProduct && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700">Katalogda yok</span>}
                       </div>
-                      {row.selection.checked && !row.valid && <p className="mt-2 text-[10px] font-bold text-red-700">{row.reason}</p>}
+                      {row.selection.checked && !row.valid && <p className="mt-2 text-xs font-bold text-red-700">{row.reason}</p>}
                     </td>
                     <td className="px-3 py-4 text-center align-top font-bold tabular-nums">{formatCount(i.center)}</td>
                     <td className="px-3 py-4 text-center align-top font-bold tabular-nums">{formatCount(i.online)}</td>
@@ -709,7 +709,7 @@ export default function HamurlabsTransferPlanner() {
                           className="mt-1 block w-full text-xs text-slate-600 underline">Otomatik ({row.suggested})</button>}
                     </td>
                     <td className="px-2 py-3 text-center align-top">
-                      <p className="mt-2 font-bold">{pieces.boxes} koli + {pieces.singles} tekil</p>
+                      <p className="mt-2 whitespace-nowrap text-sm font-bold text-slate-800">{pieces.boxes} koli + {pieces.singles} tekil</p>
                       {row.pack && row.pack > 1 && (
                         <label className="mt-2 flex cursor-pointer items-center justify-center gap-1 text-xs text-slate-700">
                           <input type="checkbox" checked={row.selection.allowSingles}
@@ -738,7 +738,7 @@ export default function HamurlabsTransferPlanner() {
           </table>
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3">
-          <p className="text-[11px] text-slate-500">Sayfa {page}/{totalPages} · Sayfa başı {PAGE_SIZE} ürün</p>
+          <p className="text-sm font-medium text-slate-600">Sayfa {page}/{totalPages} · Sayfa başı {PAGE_SIZE} ürün</p>
           <div className="flex items-center gap-2">
             <button type="button" onClick={() => setPage(n => Math.max(1, n - 1))} disabled={page <= 1}
               className="rounded border border-slate-300 bg-white p-2 disabled:opacity-30"><ChevronLeft size={15} /></button>
