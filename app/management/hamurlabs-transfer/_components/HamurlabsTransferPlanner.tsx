@@ -91,6 +91,7 @@ export default function HamurlabsTransferPlanner() {
   const [specialSheets, setSpecialSheets] = useState<SpecialSheet[]>([]);
   const [specialSheetName, setSpecialSheetName] = useState("");
   const [specialColumn, setSpecialColumn] = useState(-1);
+  const [specialHasHeader, setSpecialHasHeader] = useState(true);
   const [campaignLoading, setCampaignLoading] = useState(false);
   const [specialUploaded, setSpecialUploaded] = useState<string[]>([]);
   const [specialInput, setSpecialInput] = useState("");
@@ -256,6 +257,7 @@ export default function HamurlabsTransferPlanner() {
       setSpecialSheets(sheets);
       setSpecialSheetName(first.sheetName);
       setSpecialColumn(first.suggestedColumn);
+      setSpecialHasHeader(first.hasHeader);
       setTab("special");
     } catch (error) {
       setSpecialError(error instanceof Error ? error.message : "Özel liste açılamadı.");
@@ -275,7 +277,7 @@ export default function HamurlabsTransferPlanner() {
     setCampaignLoading(true);
     setSpecialError("");
     try {
-      const codes = await readHamurlabsSpecialList(pendingSpecialFile, sheet.sheetName, specialColumn, sheet.headerRow);
+      const codes = await readHamurlabsSpecialList(pendingSpecialFile, sheet.sheetName, specialColumn, sheet.headerRow, specialHasHeader);
       if (!codes.length) throw new Error("Seçilen sütunda barkod bulunamadı.");
       setSpecialUploaded(codes);
       setSpecialFileName(pendingSpecialFile.name);
@@ -451,6 +453,7 @@ export default function HamurlabsTransferPlanner() {
                 const next = specialSheets.find(s => s.sheetName === event.target.value);
                 setSpecialSheetName(event.target.value);
                 setSpecialColumn(next?.suggestedColumn ?? -1);
+                setSpecialHasHeader(next?.hasHeader ?? false);
               }} className="mt-2 h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm">
                 {specialSheets.map(sheet => <option key={sheet.sheetName} value={sheet.sheetName}>{sheet.sheetName}</option>)}
               </select>
@@ -466,6 +469,11 @@ export default function HamurlabsTransferPlanner() {
               </select>
             </label>
           </div>
+          <label className="mt-4 inline-flex cursor-pointer items-center gap-2 text-sm font-semibold text-slate-700">
+            <input type="checkbox" checked={specialHasHeader} onChange={e => setSpecialHasHeader(e.target.checked)}
+              className="h-4 w-4 accent-[#dc3545]" />
+            Seçilen başlangıç satırı başlık içeriyor (ilk satırı barkod olarak alma)
+          </label>
           {specialColumn >= 0 && <div className="mt-3 rounded-md border border-blue-100 bg-white p-3">
             <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Seçilen sütundaki örnek değerler</p>
             <p className="mt-2 break-all font-mono text-sm font-semibold text-slate-800">
