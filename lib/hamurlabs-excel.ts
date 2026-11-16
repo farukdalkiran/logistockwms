@@ -116,30 +116,73 @@ export async function readHamurlabsStockFile(file: File): Promise<ReportResult> 
   return { rows, errors, skipped };
 }
 
-export async function readHamurlabsSpecialList(file: File): Promise<string[]> {
+export type SpecialColumn = {
+  index: number;
+  label: string;
+  sample: string[];
+};
+export type SpecialSheet = {
+  sheetName: string;
+  headerRow: number;
+  columns: SpecialColumn[];
+  suggestedColumn: number;
+};
+
+/** Inspect the actual Excel columns first; never silently search an arbitrary first column. */
+export async function inspectHamurlabsSpecialFile(file: File): Promise<SpecialSheet[]> {
   if (!/\.xlsx?$/i.test(file.name) || file.size > 15 * 1024 * 1024) {
     throw new Error("Özel liste .xlsx veya .xls olmalı ve 15 MB'ı aşmamalı.");
   }
   const wb = XLSX.read(await file.arrayBuffer(), { type: "array", cellText: true });
-  const keys = new Set<string>();
+  const sheets: SpecialSheet[] = [];
   for (const sheetName of wb.SheetNames) {
     const grid = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[sheetName], {
       header: 1, defval: "", raw: false,
     });
-    const headerIndex = grid.findIndex((row, i) => i < 15 &&
-      row.some(x => ["Barkod", "EAN", "SKU", "Ürün Kodu"].some(h => compact(x) === compact(h))));
-    const header = headerIndex >= 0 ? grid[headerIndex] : [];
-    const keyIndex = headerIndex >= 0
-      ? indexOfHeading(header, ["Barkod", "EAN", "SKU", "Ürün Kodu"])
-      : 0;
-    for (const row of grid.slice(headerIndex >= 0 ? headerIndex + 1 : 0)) {
-      const code = normalizedCode(row[keyIndex]);
-      if (code && !["BARKOD", "EAN", "SKU", "ÜRÜNKODU", "URUNKODU"].includes(code.replace(/\s+/g, ""))) {
-        keys.add(code);
-      }
-    }
+    if (!grid.length) continue;
+    const headerIndex = grid.findIndex((row, i) => i < 20 &&
+      row.some(x => ["Barkod", "Ürün Barkodu", "Ürün Barkod", "EAN", "SKU", "Ürün Kodu"].some(h => compact(x) === compact(h))));
+    const headerRow = headerIndex < 0 ? 0 : headerIndex;
+    const headings = grid[headerRow] || [];
+    const width = Math.min(80, Math.max(headings.length, ...grid.slice(headerRow + 1, headerRow + 10).map(r => r.length)));
+    const columns: SpecialColumn[] = Array.from({ length: width }, (_, index) => {
+      const name = headerIndex < 0 ? "" : String(headings[index] || "").trim();
+      return {
+        index,
+        label: name || "Sütun " + (index + 1),
+        sample: grid.slice(headerRow + (headerIndex < 0 ? 0 : 1), headerRow + 12)
+          .map(row => normalizedCode(row[index])).filter(Boolean).slice(0, 3),
+      };
+    });
+    const suggestedColumn = indexOfHeading(headings, ["Barkod", "Ürün Barkodu", "Ürün Barkod", "EAN", "SKU", "Ürün Kodu"]);
+    sheets.push({ sheetName, headerRow, columns, suggestedColumn });
   }
-  return [...keys];
+  if (!sheets.length) throw new Error("Excel dosyasında kullanılabilir sayfa bulunamadı.");
+  return sheets;
+}
+
+/** Extract only the approved column, not other numbers such as SKU, price or quantity. */
+export async function readHamurlabsSpecialList(
+  file: File, sheetName: string, columnIndex: number, headerRow: number,
+): Promise<string[]> {
+  if (!/\.xlsx?$/i.test(file.name) || file.size > 15 * 1024 * 1024)
+    throw new Error("Özel liste dosyası geçersiz.");
+  if (!Number.isInteger(columnIndex) || columnIndex < 0 || columnIndex > 79)
+    throw new Error("Lütfen barkodun bulunduğu sütunu seçin.");
+  const wb = XLSX.read(await file.arrayBuffer(), { type: "array", cellText: true });
+  const ws = wb.Sheets[sheetName];
+  if (!ws) throw new Error("Seçilen Excel sayfası bulunamadı.");
+  const grid = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: "", raw: false });
+  const headings = grid[headerRow] || [];
+  const skipHeader = ["Barkod", "Ürün Barkodu", "Ürün Barkod", "EAN", "SKU", "Ürün Kodu"]
+    .some(title => compact(headings[columnIndex]) === compact(title));
+  const codes = new Set<string>();
+  for (const row of grid.slice(headerRow + (skipHeader ? 1 : 0))) {
+    const code = normalizedCode(row[columnIndex]);
+    if (code && !["BARKOD", "EAN", "SKU", "ÜRÜNKODU", "URUNKODU"].includes(code.replace(/\s+/g, "")))
+      codes.add(code);
+  }
+  return [...codes];
 }
 
 export function exportHamurlabsTransfer(rows: { barcode: string; quantity: number }[]) {
