@@ -543,9 +543,10 @@ export default function HamurlabsTransferPlanner() {
         </section>
       )}
 
-      <section className="rounded-[5px] border border-slate-200 bg-white p-4 shadow-sm md:p-5">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <div><h2 className="text-lg font-extrabold text-slate-900">Transfer miktarı kuralları</h2>
+      <section className={styles.card}>
+        <div className={styles.cardBody}>
+        <div className="mb-5 flex items-center justify-between gap-3">
+          <div><h2 className={styles.sectionTitle}>02 / Transfer kurallarını belirle</h2>
             <p className="mt-1 text-sm leading-relaxed text-slate-600">Koli bilgisi varsa tam koliye aşağı yuvarlanır. Manuel düzenlemeler ürün bazında korunur.</p>
           </div>
           <button type="button" title="Miktar ayarlarını sıfırla" onClick={() => { setSettings(DEFAULT_SETTINGS); setTotalCap(0); }}
@@ -575,18 +576,19 @@ export default function HamurlabsTransferPlanner() {
           <NumberField label="Toplam transfer üst limiti" value={totalCap} onChange={setTotalCap}
             hint="0 = sınırsız · aşılırsa çıktı engellenir" />
         </div>
-        <div className="mt-3 rounded-[5px] bg-slate-50 px-3 py-2.5 text-[11px] leading-relaxed text-slate-600">
+        <div className={styles.cardHint}>
           <strong>Tekli ürün istisnası:</strong> Online depoda hiç yoksa ve merkezde rezerv sonrası kalan miktar bir koliden azsa,
           tüm uygun tekil adetler önerilir. Koli büyüklüğü çakışan ürünlerde elle seçim gerekir.
           Koli bilgisi olmayan ürünlerde standart tekil adet uygulanır.
         </div>
+        </div>
       </section>
 
-      <section className="overflow-hidden rounded-[5px] border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-200 bg-slate-50 p-4 md:p-5">
+      <section className={styles.card}>
+        <div className={styles.cardTitleBar}>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div><h2 className="text-lg font-extrabold text-slate-900">Ürün uygunluğu ve transfer seçimi</h2>
-              <p className="mt-1 text-[11px] text-slate-500">{formatCount(filtered.length)} filtreye uyan · {formatCount(views.length)} toplam ürün · {selectedFilteredCount} seçili</p>
+            <div><h2 className={styles.sectionTitle}>03 / Ürünleri seç ve düzenle</h2>
+              <p className={styles.sectionDescription}>{formatCount(filtered.length)} filtreye uyan · {formatCount(views.length)} toplam ürün · {selectedFilteredCount} seçili</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <button type="button" onClick={() => selectFiltered(true, "filtered")} disabled={!eligibleFiltered.length}
@@ -661,9 +663,9 @@ export default function HamurlabsTransferPlanner() {
             </button>
           </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1190px] text-left text-sm">
-            <thead className="bg-slate-200 text-xs font-extrabold uppercase tracking-wide text-slate-700">
+        <div className={styles.tableWrapper}>
+          <table className={styles.productTable}>
+            <thead>
               <tr>
                 <th className="px-3 py-3 text-center">Seç</th>
                 <th className="px-3 py-3">Ürün / Barkod</th>
@@ -681,7 +683,7 @@ export default function HamurlabsTransferPlanner() {
                 const i = row.item;
                 const pieces = countBoxes(row.quantity, row.pack);
                 return (
-                  <tr key={i.key} className={row.selection.checked ? "bg-red-50 hover:bg-red-100/60" : "odd:bg-white even:bg-slate-50 hover:bg-blue-50/60"}>
+                  <tr key={i.key} className={[styles.productRow, row.selection.checked ? styles.productRowSelected : ""].join(" ")}>
                     <td className="px-3 py-3 text-center align-top">
                       <input type="checkbox" checked={row.selection.checked}
                         disabled={!eligibleForTransfer(i) || !i.barcode}
@@ -690,8 +692,8 @@ export default function HamurlabsTransferPlanner() {
                         className="mt-2 h-5 w-5 accent-[#dc3545]" />
                     </td>
                     <td className="min-w-[290px] max-w-[430px] px-4 py-4 align-top">
-                      <p className="text-sm font-bold leading-6 text-slate-950">{i.name || "İsimsiz ürün"}</p>
-                      <p className="mt-1 font-mono text-xs font-medium text-slate-600">Barkod: {i.barcode || "Yok"} · SKU: {i.sku || "Yok"}</p>
+                      <p className={styles.productName}>{i.name || "İsimsiz ürün"}</p>
+                      <p className={styles.productCodes}>Barkod: {i.barcode || "Yok"} · SKU: {i.sku || "Yok"}</p>
                       <div className="mt-1 flex flex-wrap gap-1">
                         {eligibilityOf(i) === "missing" && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">Online yok</span>}
                         {eligibilityOf(i) === "lower" && <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-800">Online az</span>}
@@ -701,14 +703,14 @@ export default function HamurlabsTransferPlanner() {
                       </div>
                       {row.selection.checked && !row.valid && <p className="mt-2 text-xs font-bold text-red-700">{row.reason}</p>}
                     </td>
-                    <td className="px-3 py-4 text-center align-top font-bold tabular-nums">{formatCount(i.center)}</td>
-                    <td className="px-3 py-4 text-center align-top font-bold tabular-nums">{formatCount(i.online)}</td>
-                    <td className="px-3 py-4 text-center align-top tabular-nums text-slate-500">{formatCount(i.center - i.online)}</td>
+                    <td className="px-3 py-4 text-center align-top font-bold tabular-nums"><span className={styles.stockNumber}>{formatCount(i.center)}</span></td>
+                    <td className="px-3 py-4 text-center align-top font-bold tabular-nums"><span className={[styles.stockNumber, styles.onlineNumber].join(" ")}>{formatCount(i.online)}</span></td>
+                    <td className="px-3 py-4 text-center align-top tabular-nums text-slate-500"><span className={styles.diffNumber}>{formatCount(i.center - i.online)}</span></td>
                     <td className="px-2 py-3 text-center align-top">
                       <input type="number" min="1" step="1" title="Koli içi adet: elle değiştirebilirsin"
                         value={row.pack || ""} placeholder="—"
                         onChange={e => changeSelection(i.key, { packOverride: e.target.value === "" ? null : Math.max(1, Math.floor(Number(e.target.value) || 1)) })}
-                        className="h-11 w-20 rounded-md border border-slate-300 bg-white px-2 text-center text-sm font-bold outline-none focus:border-red-500 focus:ring-2 focus:ring-red-100" />
+                        className={styles.packInput} />
                       {row.selection.packOverride && <button type="button" onClick={() => changeSelection(i.key, { packOverride: null })}
                         className="mt-1 block w-full text-xs text-slate-600 underline">DB'ye dön</button>}
                     </td>
@@ -716,8 +718,7 @@ export default function HamurlabsTransferPlanner() {
                       <input type="number" min="0" step="1" value={row.quantity}
                         disabled={!eligibleForTransfer(i)}
                         onChange={e => changeSelection(i.key, { quantity: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
-                        className={"h-11 w-24 rounded-md border bg-white px-2 text-center text-base font-extrabold outline-none focus:border-red-500 focus:ring-2 focus:ring-red-100 " +
-                          (row.selection.checked && !row.valid ? "border-red-500 text-red-700" : "border-slate-300")} />
+                        className={[styles.quantityInput, row.selection.checked && !row.valid ? styles.quantityError : ""].join(" ")} />
                       {row.selection.quantity !== undefined &&
                         <button type="button" onClick={() => changeSelection(i.key, { quantity: undefined })}
                           className="mt-1 block w-full text-xs text-slate-600 underline">Otomatik ({row.suggested})</button>}
@@ -762,10 +763,10 @@ export default function HamurlabsTransferPlanner() {
         </div>
       </section>
 
-      <section className="sticky bottom-3 z-30 flex flex-col gap-3 rounded-[6px] border border-slate-800 bg-[#101a2d] p-4 text-white shadow-2xl md:flex-row md:items-center md:justify-between md:p-5">
+      <section className={styles.actionBar}>
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Onay bekleyen transfer listesi</p>
-          <p className="mt-1 text-lg font-black">
+          <p className={styles.actionLabel}>Onay bekleyen transfer listesi</p>
+          <p className={styles.actionCount}>
             {formatCount(selectedViews.length)} ürün <span className="text-slate-500">·</span> {formatCount(selectedQty)} adet
           </p>
           {exceededCap && <p className="text-[11px] font-bold text-red-300">Toplam transfer üst limiti aşıldı ({formatCount(totalCap)} adet).</p>}
@@ -781,7 +782,7 @@ export default function HamurlabsTransferPlanner() {
             <ClipboardCheck size={15} /> Seçilenleri incele
           </button>
           <button type="button" onClick={() => setReviewOpen(true)} disabled={!canExport}
-            className="flex items-center gap-2 rounded-[4px] bg-[#dc3545] px-4 py-2.5 text-xs font-black text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-40">
+            className={styles.actionPrimary}>
             <Download size={16} /> HamurLabs Excel hazırla <ArrowRight size={14} />
           </button>
         </div>
