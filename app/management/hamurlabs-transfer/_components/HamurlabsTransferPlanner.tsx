@@ -71,6 +71,7 @@ export default function HamurlabsTransferPlanner() {
   const [catalogError, setCatalogError] = useState("");
   const [rawRows, setRawRows] = useState<StockRow[]>([]);
   const [stockFiles, setStockFiles] = useState<string[]>([]);
+  const [appendStock, setAppendStock] = useState(false);
   const [stockLoading, setStockLoading] = useState(false);
   const [stockNotes, setStockNotes] = useState<string[]>([]);
   const [selection, setSelection] = useState<Record<string, Selection>>({});
@@ -207,6 +208,9 @@ export default function HamurlabsTransferPlanner() {
     setStockLoading(true);
     setMessage("");
     try {
+      if (appendStock && files.some(file => stockFiles.includes(file.name))) {
+        throw new Error("Bu dosya daha önce yüklendi; stokların iki kez sayılmaması için farklı bir dosya seçin.");
+      }
       const combined: StockRow[] = [];
       const warnings: string[] = [];
       const seen = new Set<string>();
@@ -219,14 +223,14 @@ export default function HamurlabsTransferPlanner() {
         if (report.skipped) warnings.push(file.name + ": " + report.skipped + " depo dışı/eksik satır atlandı.");
       }
       if (!combined.length) throw new Error("Yüklenecek stok bulunamadı.");
-      setRawRows(combined);
-      setStockFiles(files.map(f => f.name));
-      setStockNotes(warnings.slice(0, 12));
+      setRawRows(current => appendStock ? [...current, ...combined] : combined);
+      setStockFiles(current => appendStock ? [...current, ...files.map(f => f.name)] : files.map(f => f.name));
+      setStockNotes(current => (appendStock ? [...current, ...warnings] : warnings).slice(0, 12));
       setSelection({});
       setTab("compare");
-      setMessage(formatCount(combined.length) + " stok satırı analiz edildi. Transfer için ürün seçebilirsiniz.");
+      setMessage(formatCount(combined.length) + (appendStock ? " stok satırı önceki rapora eklendi." : " stok satırı analiz edildi.") + " Transfer için ürün seçebilirsiniz.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Stok raporu açılamadı.");
+      setMessage((error instanceof Error ? error.message : "Stok raporu açılamadı.") + (stockFiles.length ? " Önceki rapor korunuyor." : ""));
     } finally {
       setStockLoading(false);
     }
@@ -352,6 +356,11 @@ export default function HamurlabsTransferPlanner() {
           </div>
         </label>
       </section>
+
+      {stockFiles.length > 0 && <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+        <input type="checkbox" checked={appendStock} onChange={e => setAppendStock(e.target.checked)} className="accent-red-600" />
+        Yeni seçilecek Excel dosyalarını mevcut stok raporuna ekle (ayrı Merkez ve Yeni Depo raporları için)
+      </label>}
 
       {(message || catalogError || stockNotes.length > 0 || specialError) && (
         <div className="space-y-1 rounded-[5px] border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
