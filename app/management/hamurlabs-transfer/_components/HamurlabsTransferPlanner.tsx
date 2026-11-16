@@ -243,6 +243,7 @@ export default function HamurlabsTransferPlanner() {
       setSpecialUploaded(codes);
       setSpecialFileName(file.name);
       setSpecialOnly(true);
+      setEligibilityFilter("both");
       setSelection({});
       setTab("special");
     } catch (error) {
@@ -373,7 +374,7 @@ export default function HamurlabsTransferPlanner() {
         ] as const).map(([key, label, Icon]) => (
           <button type="button" key={key} onClick={() => {
             setTab(key);
-            if (key === "special") setSpecialOnly(true);
+            if (key === "special") { setSpecialOnly(true); setEligibilityFilter("both"); }
             if (key === "basket") setOnlySelected(true);
             else setOnlySelected(false);
           }} className={"inline-flex items-center gap-2 rounded-[4px] px-4 py-2.5 text-xs font-bold transition " +
