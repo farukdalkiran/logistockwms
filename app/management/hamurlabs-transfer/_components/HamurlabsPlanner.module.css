@@ -90,6 +90,7 @@
 }
 
 .partnerInfo {
+  display: block;
   color: #596579;
   font-size: 12px;
 }
