@@ -16,8 +16,9 @@ import {
   type PlannerSettings, type StockItem, type StockRow,
 } from "@/lib/hamurlabs-transfer";
 import {
-  readHamurlabsSpecialList, readHamurlabsStockFile,
+  inspectHamurlabsSpecialFile, readHamurlabsSpecialList, readHamurlabsStockFile,
   exportHamurlabsPickingList, exportHamurlabsTransfer,
+  type SpecialSheet,
 } from "@/lib/hamurlabs-excel";
 
 type Selection = {
@@ -86,6 +87,11 @@ export default function HamurlabsTransferPlanner() {
   const [onlySelected, setOnlySelected] = useState(false);
   const [specialOnly, setSpecialOnly] = useState(false);
   const [specialFileName, setSpecialFileName] = useState("");
+  const [pendingSpecialFile, setPendingSpecialFile] = useState<File | null>(null);
+  const [specialSheets, setSpecialSheets] = useState<SpecialSheet[]>([]);
+  const [specialSheetName, setSpecialSheetName] = useState("");
+  const [specialColumn, setSpecialColumn] = useState(-1);
+  const [campaignLoading, setCampaignLoading] = useState(false);
   const [specialUploaded, setSpecialUploaded] = useState<string[]>([]);
   const [specialInput, setSpecialInput] = useState("");
   const [specialError, setSpecialError] = useState("");
@@ -190,10 +196,11 @@ export default function HamurlabsTransferPlanner() {
     }));
   }
 
-  function selectFiltered(checked: boolean) {
+  function selectFiltered(checked: boolean, scope: "filtered" | "page" | "special" = "filtered") {
+    const target = scope === "page" ? gridPage : scope === "special" ? eligibleSpecial : filtered;
     setSelection(current => {
       const next = { ...current };
-      for (const row of filtered) {
+      for (const row of target) {
         if (!eligibleForTransfer(row.item) || !row.item.barcode) continue;
         next[row.item.key] = { ...DEFAULT_SELECTION, ...(next[row.item.key] || {}), checked };
       }
@@ -241,17 +248,46 @@ export default function HamurlabsTransferPlanner() {
     event.target.value = "";
     if (!file) return;
     setSpecialError("");
+    setCampaignLoading(true);
     try {
-      const codes = await readHamurlabsSpecialList(file);
-      if (!codes.length) throw new Error("Özel listede barkod veya SKU bulunamadı.");
-      setSpecialUploaded(codes);
-      setSpecialFileName(file.name);
-      setSpecialOnly(true);
-      setEligibilityFilter("both");
-      setSelection({});
+      const sheets = await inspectHamurlabsSpecialFile(file);
+      const first = sheets.find(sheet => sheet.suggestedColumn >= 0) || sheets[0];
+      setPendingSpecialFile(file);
+      setSpecialSheets(sheets);
+      setSpecialSheetName(first.sheetName);
+      setSpecialColumn(first.suggestedColumn);
       setTab("special");
     } catch (error) {
       setSpecialError(error instanceof Error ? error.message : "Özel liste açılamadı.");
+      setPendingSpecialFile(null);
+    } finally {
+      setCampaignLoading(false);
+    }
+  }
+
+  async function applySpecialColumn() {
+    if (!pendingSpecialFile || specialColumn < 0) {
+      setSpecialError("Barkodların bulunduğu sütunu seçmelisin.");
+      return;
+    }
+    const sheet = specialSheets.find(s => s.sheetName === specialSheetName);
+    if (!sheet || !sheet.columns.some(column => column.index === specialColumn)) return;
+    setCampaignLoading(true);
+    setSpecialError("");
+    try {
+      const codes = await readHamurlabsSpecialList(pendingSpecialFile, sheet.sheetName, specialColumn, sheet.headerRow);
+      if (!codes.length) throw new Error("Seçilen sütunda barkod bulunamadı.");
+      setSpecialUploaded(codes);
+      setSpecialFileName(pendingSpecialFile.name);
+      setSpecialOnly(true);
+      setEligibilityFilter("both");
+      setTab("special");
+      setPendingSpecialFile(null);
+      setMessage(formatCount(codes.length) + " barkod seçilen sütundan alındı. Ürünler otomatik transfere eklenmedi.");
+    } catch (error) {
+      setSpecialError(error instanceof Error ? error.message : "Barkodlar okunamadı.");
+    } finally {
+      setCampaignLoading(false);
     }
   }
 
@@ -275,6 +311,10 @@ export default function HamurlabsTransferPlanner() {
 
   const gridPage = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const eligibleFiltered = filtered.filter(row => eligibleForTransfer(row.item) && row.item.barcode);
+  const eligiblePage = gridPage.filter(row => eligibleForTransfer(row.item) && row.item.barcode);
+  const selectedFilteredCount = eligibleFiltered.filter(row => row.selection.checked).length;
+  const selectedPageCount = eligiblePage.filter(row => row.selection.checked).length;
 
   return (
     <div className="mx-auto flex max-w-[1500px] flex-col gap-5 pb-12 text-slate-800">
