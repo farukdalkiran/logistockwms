@@ -95,11 +95,12 @@ export async function readHamurlabsStockFile(file: File): Promise<ReportResult> 
       }
       const listedName = String(at(cells, "name") || "").trim();
       const codeName = String(at(cells, "code") || "").trim();
-      const name = listedName.length > 12 ? listedName : codeName || listedName;
+      const shifted = listedName.length <= 12 && codeName.length > 12;
+      const name = shifted ? codeName : listedName || codeName;
       const activeValue = String(at(cells, "active") ||
         cells.find(v => /^(evet|hayir|hayır)$/i.test(String(v).trim())) || "").trim().toLocaleLowerCase("tr-TR");
       rows.push({
-        barcode, ean, sku, name, brand: String(at(cells, "brand") || "").trim(),
+        barcode, ean, sku, name, brand: shifted ? listedName : String(at(cells, "brand") || "").trim(),
         warehouse: depot, sellable, racked: racked ?? 0,
         active: !["hayır", "hayir", "pasif", "false", "0"].includes(activeValue),
       });
