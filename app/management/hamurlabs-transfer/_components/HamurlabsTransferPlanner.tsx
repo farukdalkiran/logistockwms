@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import styles from "./HamurlabsPlanner.module.css";
 import {
   AlertCircle, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight,
   ClipboardCheck, Download, FileSearch, FileSpreadsheet, Filter,
@@ -321,35 +322,37 @@ export default function HamurlabsTransferPlanner() {
   const activeSpecialSheet = specialSheets.find(sheet => sheet.sheetName === specialSheetName);
 
   return (
-    <div className="mx-auto flex max-w-[1500px] flex-col gap-5 pb-12 text-slate-800">
-      <header className="overflow-hidden rounded-[7px] border border-slate-800 bg-[#101a2d] shadow-lg">
-        <div className="h-1.5 bg-[#dc3545]" />
-        <div className="flex flex-col gap-5 px-5 py-5 md:flex-row md:items-center md:justify-between md:px-7">
-          <div className="flex items-center gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[6px] bg-white p-2 shadow">
+    <div className={styles.workspace}>
+      <header className={styles.hero}>
+        <div className={styles.heroTop}>
+          <div className={styles.brand}>
+            <div className={styles.brandLogo}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="https://lego.hamurlabs.io/site_media/images/favicon.ico"
-                alt="HamurLabs" className="h-10 w-10 object-contain" />
+                alt="HamurLabs" className="h-11 w-11 object-contain" />
             </div>
             <div>
-              <div className="mb-1 flex flex-wrap items-center gap-2 text-[10px] font-bold uppercase tracking-[.15em] text-red-300">
-                <span>HamurLabs Entegrasyonu</span><span className="h-1 w-1 rounded-full bg-slate-500" />
-                <span>Excel Planlama</span>
-              </div>
-              <h1 className="text-xl font-black tracking-tight text-white md:text-2xl">Merkez → Online Transfer Planlama</h1>
-              <p className="mt-1 max-w-2xl text-xs text-slate-300">
-                Stok raporlarını karşılaştır, koli bazında planla, istediğin ürünleri onayla ve HamurLabs çıktısı oluştur.
+              <p className={styles.eyebrow}>LogiStock WMS / Akıllı depo planlama</p>
+              <h1 className={styles.heroTitle}>HamurLabs Transfer Merkezi</h1>
+              <p className={styles.heroDescription}>
+                Merkez Depo → Online Depo · Stok farklarını gör, koli hesabını yap, transferi sen onayla.
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-3 rounded-[5px] border border-slate-700 bg-slate-900/60 px-4 py-3">
+          <div className={styles.partner}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="https://lego.storeturkey.com.tr/Data/EditorFiles/brand-lego-1.svg"
-              alt="LEGO" className="h-10 w-10 shrink-0 object-contain" />
-            <div className="text-xs font-bold text-white">
-              <p>HAMURLABS</p><p className="mt-0.5 text-[10px] font-medium text-slate-400">Stok değiştirmeyen bağımsız araç</p>
+              alt="LEGO" className="h-12 w-12 shrink-0 object-contain" />
+            <div>
+              <span className={styles.partnerName}>LEGO × HamurLabs</span>
+              <span className={styles.partnerInfo}>Excel odaklı, bağımsız transfer planlama</span>
             </div>
           </div>
+        </div>
+        <div className={styles.stepRail} aria-label="Transfer hazırlama adımları">
+          <span className={[styles.step, styles.stepCurrent].join(" ")}><span className={styles.stepNumber}>1</span> Depo Excel'lerini yükle</span>
+          <span className={styles.step}><span className={styles.stepNumber}>2</span> Ürünleri filtrele ve seç</span>
+          <span className={styles.step}><span className={styles.stepNumber}>3</span> Onayla ve Excel indir</span>
         </div>
       </header>
 
@@ -360,28 +363,32 @@ export default function HamurlabsTransferPlanner() {
           { label: "Online depoda daha az", value: stats.lower, subtitle: "Farkı pozitif", icon: SlidersHorizontal },
           { label: "Seçilmiş transfer", value: selectedViews.length, subtitle: formatCount(selectedQty) + " adet", icon: ClipboardCheck },
         ].map(card => (
-          <div key={card.label} className="rounded-[5px] border border-slate-200 bg-white p-4 shadow-sm">
+          <div key={card.label} className={styles.metric}>
             <div className="flex items-center justify-between text-slate-500">
-              <span className="text-xs font-bold uppercase tracking-wide">{card.label}</span>
+              <span className={styles.metricLabel}>{card.label}</span>
               <card.icon size={17} className="text-[#dc3545]" />
             </div>
-            <p className="mt-2 text-2xl font-black tabular-nums">{formatCount(card.value)}</p>
-            <p className="mt-1 text-sm text-slate-600">{card.subtitle}</p>
+            <p className={styles.metricValue}>{formatCount(card.value)}</p>
+            <p className={styles.metricCaption}>{card.subtitle}</p>
           </div>
         ))}
       </div>
 
+      <div>
+        <h2 className={styles.sectionTitle}>01 / Dosyaları yükle</h2>
+        <p className={styles.sectionDescription}>Önce depoların stok raporunu, istersen ayrıca kampanya ürün listesini seç. Listeleri karşılaştırmadan transfer oluşturulmaz.</p>
+      </div>
       <section className="grid gap-4 lg:grid-cols-2">
-        <label className="flex min-h-40 cursor-pointer flex-col justify-between rounded-[6px] border-2 border-dashed border-slate-300 bg-white p-5 shadow-sm transition hover:border-red-400 hover:bg-red-50/30">
+        <label className={styles.uploadCard}>
           <input type="file" accept=".xlsx,.xls" multiple className="sr-only"
             onChange={event => void onStockUpload(event)} disabled={stockLoading} />
           <div className="flex items-center gap-3">
             <span className="rounded bg-red-50 p-3 text-[#dc3545]"><UploadCloud size={23} /></span>
-            <div><h2 className="text-sm font-black">1. Depo bazlı stok raporu yükle</h2>
-              <p className="mt-1 text-[11px] text-slate-500">Merkez + Yeni Depo tek dosyada veya ayrı Excel'ler</p>
+            <div><h3 className={styles.uploadHeading}>Depo stok Excel dosyası</h3>
+              <p className={styles.uploadDescription}>Merkez ve Online Depo tek dosyada veya ayrı stok raporları olarak yüklenebilir.</p>
             </div>
           </div>
-          <div className="mt-3 flex items-center gap-2 text-xs font-bold text-red-700">
+          <div className={[styles.uploadFooter, "mt-3 flex items-center gap-2 text-red-700"].join(" ")}>
             {stockLoading ? <Loader2 size={15} className="animate-spin" /> : <FileSpreadsheet size={15} />}
             {stockLoading ? "Rapor okunuyor..." : stockFiles.length ? stockFiles.join(", ") : "Excel dosyası seç · XLSX / XLS"}
           </div>
@@ -390,11 +397,11 @@ export default function HamurlabsTransferPlanner() {
           <input type="file" accept=".xlsx,.xls" className="sr-only" onChange={event => void onSpecialUpload(event)} />
           <div className="flex items-center gap-3">
             <span className="rounded bg-slate-100 p-3 text-slate-700"><FileSearch size={23} /></span>
-            <div><h2 className="text-sm font-black">2. Kampanya / özel ürün listesi</h2>
-              <p className="mt-1 text-sm text-slate-600">Excel sayfasını ve <strong>barkod sütununu</strong> seçerek toplu uygunluk sorgula</p>
+            <div><h3 className={styles.uploadHeading}>Kampanya / özel barkod listesi</h3>
+              <p className={styles.uploadDescription}>Sütunu sen seç. Excel'deki barkodlarla yalnızca uygun ürünleri bul.</p>
             </div>
           </div>
-          <div className="mt-3 flex items-center gap-2 text-xs font-bold text-slate-700">
+          <div className={[styles.uploadFooter, "mt-3 flex items-center gap-2 text-slate-700"].join(" ")}>
             <FileSpreadsheet size={15} />
             {pendingSpecialFile ? pendingSpecialFile.name + " · sütun seçimi bekleniyor" : specialFileName ? specialFileName + " · " + formatCount(specialUploaded.length) + " kod" : "Kampanya Excel dosyasını seç"}
           </div>
@@ -419,7 +426,7 @@ export default function HamurlabsTransferPlanner() {
         <ShieldCheck size={14} /> Supabase: {formatCount(catalog.products.length)} ürün, {formatCount(catalog.boxes.length)} koli tanımı okundu. Veritabanına yazılmaz.
       </p>}
 
-      <div className="flex flex-wrap gap-2 rounded-[5px] border border-slate-200 bg-white p-2 shadow-sm">
+      <div className={styles.tabs}>
         {([
           ["compare", "Stok karşılaştırma", Filter],
           ["special", "Özel liste sorgula", Search],
@@ -430,8 +437,7 @@ export default function HamurlabsTransferPlanner() {
             if (key === "special") { setSpecialOnly(true); setEligibilityFilter("both"); }
             if (key === "basket") setOnlySelected(true);
             else setOnlySelected(false);
-          }} className={"inline-flex items-center gap-2 rounded-[4px] px-4 py-2.5 text-xs font-bold transition " +
-            (tab === key ? "bg-slate-900 text-white shadow" : "text-slate-600 hover:bg-slate-100")}>
+          }} className={[styles.tab, tab === key ? styles.tabActive : ""].join(" ")}>
             <Icon size={15} /> {label}
             {key === "basket" && <span className="rounded bg-white/15 px-1.5 py-0.5">{selectedViews.length}</span>}
           </button>
