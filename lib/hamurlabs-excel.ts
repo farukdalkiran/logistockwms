@@ -16,8 +16,14 @@ type ReportResult = {
 };
 
 const compact = (value: unknown) => normalizeHeader(value);
-const indexOfHeading = (headings: unknown[], variants: string[]) =>
-  headings.findIndex(h => variants.some(v => compact(h) === compact(v)));
+const indexOfHeading = (headings: unknown[], variants: string[]) => {
+  // Prefer Barkod over an earlier, empty Ürün Kodu column in HamurLabs exports.
+  for (const variant of variants) {
+    const index = headings.findIndex(heading => compact(heading) === compact(variant));
+    if (index >= 0) return index;
+  }
+  return -1;
+};
 
 const num = (value: unknown) => wholeNumber(value);
 
