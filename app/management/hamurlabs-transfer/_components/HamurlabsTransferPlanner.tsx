@@ -315,6 +315,8 @@ export default function HamurlabsTransferPlanner() {
   const eligiblePage = gridPage.filter(row => eligibleForTransfer(row.item) && row.item.barcode);
   const selectedFilteredCount = eligibleFiltered.filter(row => row.selection.checked).length;
   const selectedPageCount = eligiblePage.filter(row => row.selection.checked).length;
+  const allPageSelected = eligiblePage.length > 0 && selectedPageCount === eligiblePage.length;
+  const activeSpecialSheet = specialSheets.find(sheet => sheet.sheetName === specialSheetName);
 
   return (
     <div className="mx-auto flex max-w-[1500px] flex-col gap-5 pb-12 text-slate-800">
@@ -387,12 +389,12 @@ export default function HamurlabsTransferPlanner() {
           <div className="flex items-center gap-3">
             <span className="rounded bg-slate-100 p-3 text-slate-700"><FileSearch size={23} /></span>
             <div><h2 className="text-sm font-black">2. Kampanya / özel ürün listesi</h2>
-              <p className="mt-1 text-[11px] text-slate-500">Barkod, EAN veya SKU listesiyle toplu uygunluk sorgula</p>
+              <p className="mt-1 text-sm text-slate-600">Excel sayfasını ve <strong>barkod sütununu</strong> seçerek toplu uygunluk sorgula</p>
             </div>
           </div>
           <div className="mt-3 flex items-center gap-2 text-xs font-bold text-slate-700">
             <FileSpreadsheet size={15} />
-            {specialFileName ? specialFileName + " · " + formatCount(specialUploaded.length) + " kod" : "İsteğe bağlı Excel yükle"}
+            {pendingSpecialFile ? pendingSpecialFile.name + " · sütun seçimi bekleniyor" : specialFileName ? specialFileName + " · " + formatCount(specialUploaded.length) + " kod" : "Kampanya Excel dosyasını seç"}
           </div>
         </label>
       </section>
@@ -434,19 +436,68 @@ export default function HamurlabsTransferPlanner() {
         ))}
       </div>
 
+      {pendingSpecialFile && activeSpecialSheet && (
+        <section className="rounded-lg border-2 border-blue-200 bg-blue-50 p-5 shadow-sm" aria-label="Kampanya Excel sütun eşleştirme">
+          <div className="mb-3">
+            <h2 className="text-base font-extrabold text-slate-900">Kampanya Excel'i — barkod sütununu seç</h2>
+            <p className="mt-1 text-sm leading-relaxed text-slate-700">
+              <strong>{pendingSpecialFile.name}</strong> dosyasında hangi sütunda ürün barkodları varsa onu seç.
+              Sadece bu sütundaki değerler sorgulanır; diğer alanlar görmezden gelinir.
+            </p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="text-sm font-semibold text-slate-800">Excel sayfası
+              <select value={specialSheetName} onChange={event => {
+                const next = specialSheets.find(s => s.sheetName === event.target.value);
+                setSpecialSheetName(event.target.value);
+                setSpecialColumn(next?.suggestedColumn ?? -1);
+              }} className="mt-2 h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm">
+                {specialSheets.map(sheet => <option key={sheet.sheetName} value={sheet.sheetName}>{sheet.sheetName}</option>)}
+              </select>
+            </label>
+            <label className="text-sm font-semibold text-slate-800">Barkod sütunu
+              <select value={specialColumn} onChange={event => setSpecialColumn(Number(event.target.value))}
+                className="mt-2 h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm">
+                <option value={-1}>Barkod sütununu seç...</option>
+                {activeSpecialSheet.columns.map(column =>
+                  <option key={column.index} value={column.index}>
+                    {String.fromCharCode(65 + column.index % 26)}{column.index >= 26 ? " (" + (column.index + 1) + ")" : ""} — {column.label}
+                  </option>)}
+              </select>
+            </label>
+          </div>
+          {specialColumn >= 0 && <div className="mt-3 rounded-md border border-blue-100 bg-white p-3">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Seçilen sütundaki örnek değerler</p>
+            <p className="mt-2 break-all font-mono text-sm font-semibold text-slate-800">
+              {activeSpecialSheet.columns.find(column => column.index === specialColumn)?.sample.join(" · ") || "Boş sütun"}
+            </p>
+          </div>}
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button type="button" onClick={() => void applySpecialColumn()} disabled={specialColumn < 0 || campaignLoading}
+              className="inline-flex min-h-11 items-center gap-2 rounded-md bg-[#dc3545] px-5 py-2 text-sm font-bold text-white hover:bg-red-700 disabled:opacity-40">
+              {campaignLoading ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
+              Seçilen barkod sütunuyla sorgula
+            </button>
+            <button type="button" onClick={() => { setPendingSpecialFile(null); setSpecialSheets([]); }}
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold">İptal</button>
+          </div>
+        </section>
+      )}
+
       {tab === "special" && (
         <section className="rounded-[5px] border border-slate-200 bg-white p-4 shadow-sm md:p-5">
           <div className="mb-3 flex items-center gap-2"><Sparkles size={17} className="text-[#dc3545]" />
             <h2 className="text-sm font-black">Toplu kampanya / özel ürün sorgulama</h2>
           </div>
-          <p className="mb-3 text-xs text-slate-600">
-            Excel yükleyebilir veya aşağıya barkod/SKU listesini yapıştırabilirsin. Yalnızca stok koşulunu sağlayan ürünleri ayrıca seçerek transfere al.
+          <p className="mb-3 text-sm leading-relaxed text-slate-700">
+            Kampanya Excel'inde seçtiğin barkod sütunu veya buraya yapıştırdığın barkodlarla stok raporu karşılaştırılır.
+            Eşleşen ürünler otomatik eklenmez; listeye alacağın ürünleri sen belirlersin.
           </p>
           <textarea value={specialInput} onChange={e => { setSpecialInput(e.target.value); setSpecialOnly(true); }}
             rows={4} placeholder={"Barkodları alt alta ya da virgülle ayırarak yaz...\n4895028526511\n4895028515133"}
-            className="w-full rounded-[5px] border border-slate-300 p-3 font-mono text-xs outline-none focus:border-red-500" />
+            className="w-full rounded-md border border-slate-300 p-3 font-mono text-sm leading-6 outline-none focus:border-red-500" />
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-slate-600">
+            <p className="text-sm text-slate-700">
               <strong>{formatCount(specialCodes.size)}</strong> kod sorguda · <strong>{formatCount(matchingSpecial.length)}</strong> eşleşen ·
               <strong> {formatCount(eligibleSpecial.length)}</strong> transfere uygun · <strong>{formatCount(missingSpecial.length)}</strong> bulunamadı
             </p>
@@ -456,6 +507,19 @@ export default function HamurlabsTransferPlanner() {
               <Trash2 size={14} /> Özel listeyi temizle
             </button>
           </div>
+          {eligibleSpecial.length > 0 && (
+            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+              <span className="text-sm font-semibold text-slate-800">{eligibleSpecial.length} uygun kampanya ürünü bulundu</span>
+              <button type="button" onClick={() => selectFiltered(true, "special")}
+                className="rounded-md bg-slate-900 px-4 py-2.5 text-sm font-bold text-white hover:bg-slate-700">
+                Uygun kampanya ürünlerinin tümünü seç
+              </button>
+              <button type="button" onClick={() => selectFiltered(false, "special")}
+                className="rounded-md border border-slate-300 bg-white px-4 py-2.5 text-sm font-bold text-slate-800">
+                Kampanya seçimini kaldır
+              </button>
+            </div>
+          )}
           {missingSpecial.length > 0 && (
             <details className="mt-3 text-xs text-amber-800">
               <summary className="cursor-pointer font-bold">Stok raporunda bulunamayan kodlar ({missingSpecial.length})</summary>
