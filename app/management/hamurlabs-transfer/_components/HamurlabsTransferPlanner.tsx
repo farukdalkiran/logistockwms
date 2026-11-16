@@ -435,8 +435,17 @@ export default function HamurlabsTransferPlanner() {
           <button type="button" key={key} onClick={() => {
             setTab(key);
             if (key === "special") { setSpecialOnly(true); setEligibilityFilter("both"); }
-            if (key === "basket") setOnlySelected(true);
-            else setOnlySelected(false);
+            if (key === "basket") {
+              // Always show the complete approval list, independent of the previous filters.
+              setOnlySelected(true);
+              setEligibilityFilter("all");
+              setSpecialOnly(false);
+              setOnlyWithPack(false);
+              setQuery("");
+              setBrand("");
+              setMinimumCenter(0);
+              setMinimumGap(0);
+            } else setOnlySelected(false);
           }} className={[styles.tab, tab === key ? styles.tabActive : ""].join(" ")}>
             <Icon size={15} /> {label}
             {key === "basket" && <span className="rounded bg-white/15 px-1.5 py-0.5">{selectedViews.length}</span>}
