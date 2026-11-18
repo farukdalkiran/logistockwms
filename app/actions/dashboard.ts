@@ -2,7 +2,6 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
-import { unstable_cache } from "next/cache";
 import { createClient as createSessionClient } from "@/lib/supabase/server";
 
 const supabaseAdmin = createClient(
@@ -305,16 +304,10 @@ async function fetchDashboardDataCore(userId: string) {
   };
 }
 
-// 2. SUNUCU BELLEKLEME KATMANI (30 dakika)
-const getCachedDashboardData = unstable_cache(
-  async (userId: string) => fetchDashboardDataCore(userId),
-  ["logistock-dashboard-cache"],
-  { revalidate: 1800 }
-);
-
+// Her açılışta ve manuel yenilemede doğrudan veritabanından güncel anlık görünüm alınır.
 export async function getDashboardDataServer(
   userId: string,
-  forceRefresh = false
+  _forceRefresh = false
 ) {
   try {
     if (!userId) {
@@ -329,11 +322,8 @@ export async function getDashboardDataServer(
       return { success: false, error: "Oturum doğrulaması başarısız." };
     }
 
-    const data = forceRefresh
-      ? await fetchDashboardDataCore(userId)
-      : await getCachedDashboardData(userId);
-
-    return { success: true, data };
+    const data = await fetchDashboardDataCore(userId);
+    return { success: true, data, fetchedAt: new Date().toISOString() };
   } catch (err) {
     console.error("Dashboard Veri Hatası:", err);
     return { success: false, error: "Veritabanı bağlantı hatası." };
