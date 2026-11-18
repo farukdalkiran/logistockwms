@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Truck,
   CalendarDays,
+  Clock3,
   ArrowUpRight,
 } from "lucide-react";
 
@@ -53,14 +54,6 @@ interface DashboardData {
   systemLoad: number;
 }
 
-let dashboardClientCache: {
-  userId: string;
-  data: DashboardData;
-  timestamp: number;
-} | null = null;
-
-const CLIENT_CACHE_TTL = 30 * 60 * 1000; // 30 dakika
-
 export default function ManagementDashboard() {
   const { userProfile, isLoading: isAuthLoading } = useAuth();
   const { branchName } = useWms();
@@ -69,6 +62,7 @@ export default function ManagementDashboard() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [data, setData] = useState<DashboardData | null>(null);
   const [refreshError, setRefreshError] = useState("");
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
   const inFlightRef = useRef(false);
 
   const fetchedUserIdRef = useRef<string | null>(null);
@@ -77,14 +71,6 @@ export default function ManagementDashboard() {
   const fetchData = useCallback(
     async (force = false) => {
       if (!userId || inFlightRef.current) return;
-      const now = Date.now();
-      if (!force && dashboardClientCache && dashboardClientCache.userId === userId &&
-          now - dashboardClientCache.timestamp < CLIENT_CACHE_TTL) {
-        setData(dashboardClientCache.data);
-        setLoading(false);
-        return;
-      }
-
       inFlightRef.current = true;
       if (force) setIsRefreshing(true);
       else setLoading(true);
@@ -94,9 +80,8 @@ export default function ManagementDashboard() {
         const result = await getDashboardDataServer(userId, force);
         if (result.success && result.data) {
           const freshData = result.data as DashboardData;
-          const timestamp = Date.now();
           setData(freshData);
-          dashboardClientCache = { userId, data: freshData, timestamp };
+          setLastUpdatedAt(result.fetchedAt || new Date().toISOString());
         } else {
           setRefreshError(result.error || "Veriler güncellenemedi.");
         }
@@ -122,31 +107,6 @@ export default function ManagementDashboard() {
       void fetchData(false);
     }
   }, [userId, isAuthLoading, fetchData, router]);
-
-  // Sekme açıkken her dakika yalnızca yerel zamanı kontrol eder; API isteği
-  // 08:00-17:00 (Türkiye) arasında ve son başarılı yüklemeden 30 dk sonra yapılır.
-  useEffect(() => {
-    if (!userId || isAuthLoading) return;
-
-    const updateIfDue = () => {
-      if (document.visibilityState !== "visible") return;
-      const hour = Number(new Intl.DateTimeFormat("en-GB", {
-        timeZone: "Europe/Istanbul", hour: "2-digit", hourCycle: "h23",
-      }).format(new Date()));
-      if (hour < 8 || hour >= 17) return;
-      if (!dashboardClientCache || dashboardClientCache.userId !== userId ||
-          Date.now() - dashboardClientCache.timestamp >= CLIENT_CACHE_TTL) {
-        void fetchData(true);
-      }
-    };
-
-    const timer = window.setInterval(updateIfDue, 60 * 1000);
-    document.addEventListener("visibilitychange", updateIfDue);
-    return () => {
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", updateIfDue);
-    };
-  }, [userId, isAuthLoading, fetchData]);
 
   const getStatusStyle = (status: string) => {
     const s = status?.toUpperCase().replace("İ", "I") || "";
@@ -236,6 +196,18 @@ export default function ManagementDashboard() {
                 >
                   <RefreshCw size={16} className={isRefreshing ? "animate-spin" : ""} /> {isRefreshing ? "Güncelleniyor..." : "Paneli yenile"}
                 </button>
+                {lastUpdatedAt && (
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-300">
+                    <Clock3 size={13} className="text-rose-300" />
+                    Son güncelleme:
+                    <time dateTime={lastUpdatedAt} className="font-mono font-bold tabular-nums text-white">
+                      {new Intl.DateTimeFormat("tr-TR", {
+                        timeZone: "Europe/Istanbul", hour: "2-digit", minute: "2-digit", second: "2-digit",
+                      }).format(new Date(lastUpdatedAt))}
+                    </time>
+                    <span className="text-[10px] text-slate-400">(TR)</span>
+                  </span>
+                )}
               </div>
             </div>
             <div className="flex flex-col justify-center border-t border-white/10 bg-white/[0.04] p-4 sm:p-5 lg:col-span-4 lg:border-l lg:border-t-0">
