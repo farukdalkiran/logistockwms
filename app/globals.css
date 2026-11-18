@@ -78,3 +78,24 @@ button, a {
 @media (prefers-reduced-motion: reduce) {
   .dashboard-log-row { animation: none !important; }
 }
+
+/* Yalnızca Depo Operasyon Akışı başlığının sağ üstünde yumuşak pulse. */
+.dashboard-feed-glow {
+  background: radial-gradient(ellipse at 100% 0%, rgba(220, 53, 69, .19) 0%, rgba(220, 53, 69, .055) 49%, transparent 76%);
+  animation: dashboard-feed-glow-pulse 5s ease-in-out infinite;
+}
+.dashboard-feed-live-dot {
+  animation: dashboard-feed-dot-pulse 2.8s ease-in-out infinite;
+}
+@keyframes dashboard-feed-glow-pulse {
+  0%, 100% { opacity: .55; transform: translate3d(10px, -4px, 0); }
+  50% { opacity: 1; transform: translate3d(-8px, 5px, 0); }
+}
+@keyframes dashboard-feed-dot-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 53, 69, .2); }
+  50% { box-shadow: 0 0 0 4px rgba(220, 53, 69, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-feed-glow,
+  .dashboard-feed-live-dot { animation: none !important; }
+}
