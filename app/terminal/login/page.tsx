@@ -19,6 +19,13 @@ export default function TerminalLoginPage() {
 
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Önceden açık kalmış veya geçersiz terminal oturumu bildirimi.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("blocked") === "1") {
+      setError("Terminal oturumu geçersiz veya personel hesabı pasif. Yeniden giriş yapın.");
+    }
+  }, []);
+
   // 1. Cihazın bağlı olduğu yönetici oturumunu ve şubesini kontrol et
   useEffect(() => {
     const checkDeviceAuth = async () => {
