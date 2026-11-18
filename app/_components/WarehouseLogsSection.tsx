@@ -86,30 +86,41 @@ export function WarehouseLogsSection({ recentPutawayLogs }: { recentPutawayLogs:
 
   return (
     <section aria-labelledby="warehouse-feed-title" className="lg:col-span-12 min-w-0 overflow-hidden rounded-md border border-slate-200 border-l-[4px] border-l-[#dc3545] bg-white shadow-lg shadow-slate-200/70">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-slate-900 text-white">
-            <Activity size={18} />
+      <header className="relative overflow-hidden border-b border-slate-200 bg-white px-4 py-3 sm:px-5">
+        {/* Hafif kırmızı renk hareketi yalnızca log panelinin sağ üstündedir. */}
+        <span className="dashboard-feed-glow pointer-events-none absolute -right-4 -top-7 h-24 w-56" aria-hidden="true" />
+        <div className="relative z-10 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-slate-900 text-white">
+              <Activity size={18} />
+            </div>
+            <div className="min-w-0">
+              <h2 id="warehouse-feed-title" className="text-sm font-black text-slate-900">Depo Operasyon Akışı</h2>
+              <p className="mt-0.5 text-[10px] font-medium text-slate-500">Son işlemler · saat, personel ve açıklama</p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <h2 id="warehouse-feed-title" className="text-sm font-black text-slate-900">Depo Operasyon Akışı</h2>
-            <p className="mt-0.5 text-[10px] font-medium text-slate-500">Son işlemler · saat, personel ve açıklama</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              title="Görsel log akışı. Yeni kayıtlar dashboard yenilendiğinde görüntülenir."
+              className="inline-flex items-center gap-1.5 rounded-full border border-rose-100 bg-white/85 px-2.5 py-1.5 text-[9px] font-black uppercase tracking-widest text-[#b42332] shadow-sm"
+            >
+              <span className={`h-1.5 w-1.5 rounded-full bg-[#dc3545] ${autoFlow && logs.length ? "dashboard-feed-live-dot" : "opacity-40"}`} aria-hidden="true" />
+              {logs.length === 0 ? "Akış bekleniyor" : autoFlow ? "Canlı Akış" : "Akış durdu"}
+            </span>
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-mono text-[10px] font-bold text-slate-600">
+              Son {logs.length} kayıt
+            </span>
+            <button
+              type="button"
+              onClick={() => setAutoFlow((value) => !value)}
+              aria-pressed={autoFlow}
+              aria-label={autoFlow ? "Otomatik kaydırmayı durdur" : "Otomatik kaydırmayı başlat"}
+              className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-600 hover:border-[#dc3545] hover:text-[#dc3545]"
+            >
+              {autoFlow ? <Pause size={12} /> : <Play size={12} />}
+              {autoFlow ? "Akışı durdur" : "Akışı başlat"}
+            </button>
           </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-mono text-[10px] font-bold text-slate-600">
-            Son {logs.length} kayıt
-          </span>
-          <button
-            type="button"
-            onClick={() => setAutoFlow((value) => !value)}
-            aria-pressed={autoFlow}
-            aria-label={autoFlow ? "Otomatik kaydırmayı durdur" : "Otomatik kaydırmayı başlat"}
-            className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-600 hover:border-[#dc3545] hover:text-[#dc3545]"
-          >
-            {autoFlow ? <Pause size={12} /> : <Play size={12} />}
-            {autoFlow ? "Akışı durdur" : "Akışı başlat"}
-          </button>
         </div>
       </header>
 
