@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { assertActiveTerminalEmployee } from "@/lib/terminal-employee-access";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -13,6 +14,7 @@ export async function processPutawayServer(payload: {
   quantity: number; empId: string; productDetails: any;
 }) {
   try {
+    await assertActiveTerminalEmployee(supabaseAdmin, payload.empId, payload.branchId);
     const { data: existingStocks, error: fetchErr } = await supabaseAdmin
       .from("stocks").select("id, quantity")
       .eq("product_id", payload.productId).eq("branch_id", payload.branchId).eq("shelf_id", payload.shelfId)
@@ -60,6 +62,7 @@ export async function processPickingServer(payload: {
   quantity: number; empId: string; productDetails: any; reasonDetails?: string | null;
 }) {
   try {
+    await assertActiveTerminalEmployee(supabaseAdmin, payload.empId, payload.branchId);
     // 1. İlgili raftaki tüm kopya stokları çek
     const { data: stocks, error: fetchErr } = await supabaseAdmin
       .from("stocks").select("id, quantity")
