@@ -155,15 +155,16 @@ async function fetchDashboardDataCore(userId: string) {
 
   let putawayLogsQuery = supabaseAdmin
     .from("transaction_logs")
-    .select("id, action_type, description, employee_id, created_at")
+    .select("id, action_type, description, employee_id, branch_id, created_at")
     .order("created_at", { ascending: false })
-    .limit(15);
+    .limit(30);
 
   if (targetBranchId) {
-    putawayLogsQuery =
-      branchEmployeeIds.length > 0
-        ? putawayLogsQuery.in("employee_id", branchEmployeeIds)
-        : putawayLogsQuery.eq("employee_id", "00000");
+    // Şubeye ait doğrudan kayıtları ve eski personel temelli kayıtları koru.
+    // Şubesi bilinmeyen sistem logları yanlış şubeye dağıtılmaz.
+    putawayLogsQuery = branchEmployeeIds.length > 0
+      ? putawayLogsQuery.or(`branch_id.eq.${targetBranchId},employee_id.in.(${branchEmployeeIds.join(",")})`)
+      : putawayLogsQuery.eq("branch_id", targetBranchId);
   }
 
   let leaveLogsQuery = supabaseAdmin
@@ -265,7 +266,8 @@ async function fetchDashboardDataCore(userId: string) {
     action_type: l.action_type,
     description: l.description,
     created_at: l.created_at,
-    employee_name: employeeMap[l.employee_id] || "Sistem",
+    employee_name: l.employee_id ? (employeeMap[l.employee_id] || "Personel") : "Sistem",
+    branch_name: l.branch_id ? branchMap[l.branch_id] || "Şube" : undefined,
   }));
 
   const formattedLeaveLogs = (rawLeaveLogs || []).map((l) => ({
