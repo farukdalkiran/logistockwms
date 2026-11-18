@@ -9,11 +9,6 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { getDashboardDataServer } from "@/app/actions/dashboard";
 import {
   Building2,
-  Users,
-  AlertCircle,
-  Layers,
-  BoxSelect,
-  Box,
   BellRing,
   UserCheck,
   RefreshCw,
@@ -31,6 +26,7 @@ import type {
   CargoSessionData,
 } from "./_components/CargoDistributionSection";
 import { CatalogActivitySection } from "./_components/CatalogActivitySection";
+import { OperationsPulseSection } from "./_components/OperationsPulseSection";
 import {
   WarehouseLogsSection,
   PutawayLogData,
@@ -293,71 +289,9 @@ export default function ManagementDashboard() {
           </div>
         )}
 
-        {/* KPI KARTLARI */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 w-full">
-          {[
-            {
-              title: "Kayıtlı Ürün",
-              value: data?.kpis.productsTotal.toLocaleString("tr-TR"),
-              icon: BoxSelect,
-              color: "text-purple-600",
-              bg: "bg-purple-50 border-purple-200",
-            },
-            {
-              title: "Toplam Stok",
-              value: data?.kpis.stockVolume.toLocaleString("tr-TR"),
-              icon: Layers,
-              color: "text-[#dc3545]",
-              bg: "bg-red-50 border-red-200",
-            },
-            {
-              title: "Kayıtlı Koli",
-              value: data?.kpis.boxesTotal.toLocaleString("tr-TR"),
-              icon: Box,
-              color: "text-indigo-600",
-              bg: "bg-indigo-50 border-indigo-200",
-            },
-            {
-              title: "Bağlı Şubeler",
-              value: data?.kpis.branches,
-              icon: Building2,
-              color: "text-blue-600",
-              bg: "bg-blue-50 border-blue-200",
-            },
-            {
-              title: "Aktif Personel",
-              value: data?.kpis.employees,
-              icon: Users,
-              color: "text-emerald-600",
-              bg: "bg-emerald-50 border-emerald-200",
-            },
-            {
-              title: "Bekleyen Onay",
-              value: pendingTotal,
-              icon: AlertCircle,
-              color: "text-orange-600",
-              bg: "bg-orange-50 border-orange-200",
-            },
-          ].map((kpi, idx) => (
-            <div
-              key={idx}
-              className="bg-white p-4 border border-slate-200 shadow-md shadow-slate-200/80 rounded-md flex flex-col justify-between gap-3 transition-colors hover:border-slate-400 group"
-            >
-              <div className="flex items-start justify-between">
-                <div className={`w-9 h-9 flex items-center justify-center rounded-md border ${kpi.bg}`}>
-                  <kpi.icon className={`w-4 h-4 ${kpi.color}`} />
-                </div>
-              </div>
-              <div className="flex flex-col min-w-0">
-                <p className="text-xl sm:text-2xl font-black text-slate-800 leading-none truncate font-mono">
-                  {kpi.value}
-                </p>
-                <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mt-1.5 truncate group-hover:text-slate-700 transition-colors">
-                  {kpi.title}
-                </p>
-              </div>
-            </div>
-          ))}
+        {/* HEADING ALTI: TAM GENİŞLİKTE İNCE OPERASYON AKIŞI (12) */}
+        <div className="grid w-full grid-cols-1 lg:grid-cols-12">
+          <WarehouseLogsSection recentPutawayLogs={data?.recentPutawayLogs || []} />
         </div>
 
         {/* 1. SATIR: SOL KARGO (4) / SAĞ TRANSFER (8) */}
@@ -373,12 +307,10 @@ export default function ManagementDashboard() {
           />
         </div>
 
-        {/* 2. SATIR: SOL ÜRÜN/KOLİ (7) / SAĞ LOGLAR (5) */}
+        {/* 2. SATIR: SOL ÜRÜN/KOLİ (7) / SAĞ OPERASYON ÖZETİ (5) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full items-start mt-2">
           <CatalogActivitySection />
-          <WarehouseLogsSection
-            recentPutawayLogs={data?.recentPutawayLogs || []}
-          />
+          <OperationsPulseSection recentPutawayLogs={data?.recentPutawayLogs || []} />
         </div>
       </main>
       <Footer />
