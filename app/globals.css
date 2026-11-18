@@ -65,3 +65,16 @@ button, a {
   border-color: var(--color-primary);
   @apply absolute w-10 h-10 border-4;
 }
+
+
+/* Dashboard: en yeni işlemleri üstten alta yumuşak bir geçişle aç. */
+@keyframes dashboard-log-reveal {
+  from { opacity: 0; transform: translateY(-9px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.dashboard-log-row {
+  animation: dashboard-log-reveal 340ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-log-row { animation: none !important; }
+}
