@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import {
   Activity, ArrowDownLeft, ArrowUpRight, Building2, Clock3, Layers3,
-  Package, Pause, Play, Truck, UserRound,
+  Package, Truck, UserRound,
 } from "lucide-react";
 
 export interface PutawayLogData {
@@ -63,29 +62,9 @@ function formattedMoment(value?: string) {
 
 export function WarehouseLogsSection({ recentPutawayLogs }: { recentPutawayLogs: PutawayLogData[] }) {
   const logs = recentPutawayLogs || [];
-  const viewportRef = useRef<HTMLDivElement>(null);
-  const pausedRef = useRef(false);
-  const [autoFlow, setAutoFlow] = useState(true);
-
-  // Görsel akış dışında istek atılmaz; fare/klavye etkileşiminde duraklar.
-  useEffect(() => {
-    const viewport = viewportRef.current;
-    if (viewport) viewport.scrollTop = 0;
-    if (!autoFlow || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-
-    const timer = window.setInterval(() => {
-      const element = viewportRef.current;
-      if (!element || pausedRef.current || document.visibilityState !== "visible") return;
-      const maximum = element.scrollHeight - element.clientHeight;
-      if (maximum < 12) return;
-      const step = element.firstElementChild?.getBoundingClientRect().height || 50;
-      element.scrollTo({ top: element.scrollTop >= maximum - 4 ? 0 : Math.min(maximum, element.scrollTop + step), behavior: "smooth" });
-    }, 3000);
-    return () => window.clearInterval(timer);
-  }, [autoFlow, logs.length]);
 
   return (
-    <section aria-labelledby="warehouse-feed-title" className="lg:col-span-12 min-w-0 overflow-hidden rounded-md border border-slate-200 border-l-[4px] border-l-[#dc3545] bg-white shadow-lg shadow-slate-200/70">
+    <section aria-labelledby="warehouse-feed-title" className="lg:col-span-8 min-w-0 overflow-hidden rounded-md border border-slate-200 border-l-[4px] border-l-[#dc3545] bg-white shadow-lg shadow-slate-200/70">
       <header className="relative overflow-hidden border-b border-slate-200 bg-white px-4 py-3 sm:px-5">
         {/* Hafif kırmızı renk hareketi yalnızca log panelinin sağ üstündedir. */}
         <span className="dashboard-feed-glow pointer-events-none absolute -right-4 -top-7 h-24 w-56" aria-hidden="true" />
@@ -100,38 +79,15 @@ export function WarehouseLogsSection({ recentPutawayLogs }: { recentPutawayLogs:
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span
-              title="Görsel log akışı. Yeni kayıtlar dashboard yenilendiğinde görüntülenir."
-              className="inline-flex items-center gap-1.5 rounded-full border border-rose-100 bg-white/85 px-2.5 py-1.5 text-[9px] font-black uppercase tracking-widest text-[#b42332] shadow-sm"
-            >
-              <span className={`h-1.5 w-1.5 rounded-full bg-[#dc3545] ${autoFlow && logs.length ? "dashboard-feed-live-dot" : "opacity-40"}`} aria-hidden="true" />
-              {logs.length === 0 ? "Akış bekleniyor" : autoFlow ? "Canlı Akış" : "Akış durdu"}
-            </span>
             <span className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-mono text-[10px] font-bold text-slate-600">
               Son {logs.length} kayıt
             </span>
-            <button
-              type="button"
-              onClick={() => setAutoFlow((value) => !value)}
-              aria-pressed={autoFlow}
-              aria-label={autoFlow ? "Otomatik kaydırmayı durdur" : "Otomatik kaydırmayı başlat"}
-              className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-600 hover:border-[#dc3545] hover:text-[#dc3545]"
-            >
-              {autoFlow ? <Pause size={12} /> : <Play size={12} />}
-              {autoFlow ? "Akışı durdur" : "Akışı başlat"}
-            </button>
           </div>
         </div>
       </header>
 
       <div
-        ref={viewportRef}
         className="custom-scrollbar h-[285px] overflow-y-auto overscroll-contain sm:h-[310px]"
-        onMouseEnter={() => { pausedRef.current = true; }}
-        onMouseLeave={() => { pausedRef.current = false; }}
-        onFocusCapture={() => { pausedRef.current = true; }}
-        onBlurCapture={() => { pausedRef.current = false; }}
-        aria-live="off"
       >
         {logs.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center">
@@ -146,8 +102,7 @@ export function WarehouseLogsSection({ recentPutawayLogs }: { recentPutawayLogs:
           return (
             <article
               key={log.id}
-              className={`dashboard-log-row group relative flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-slate-100 px-3 py-2.5 last:border-0 sm:min-h-[49px] sm:flex-nowrap sm:px-5 ${index % 2 === 0 ? "bg-white" : "bg-slate-50/80"} hover:!bg-rose-50/40`}
-              style={{ animationDelay: `${Math.min(index, 12) * 65}ms` }}
+              className={`group relative flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-slate-100 px-3 py-2.5 last:border-0 sm:min-h-[49px] sm:flex-nowrap sm:px-5 ${index % 2 === 0 ? "bg-white" : "bg-slate-50/80"} hover:!bg-rose-50/40`}
             >
               <span className={`absolute bottom-1.5 left-0 top-1.5 w-[3px] rounded-r ${meta.accent}`} aria-hidden="true" />
               <time dateTime={log.created_at} title={moment.day} className="flex w-[47px] shrink-0 items-center gap-1 font-mono text-[11px] font-bold tabular-nums text-slate-600 sm:w-[66px]">
@@ -175,7 +130,7 @@ export function WarehouseLogsSection({ recentPutawayLogs }: { recentPutawayLogs:
       </div>
 
       <footer className="flex items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-4 py-2 text-[10px] font-medium text-slate-500 sm:px-5">
-        <span>En yeni işlemler yukarıda · Listenin üzerine gelince akış durur</span>
+        <span>En yeni işlemler yukarıda · Liste manuel kaydırılabilir</span>
         <span className="hidden sm:inline">Türkiye saati (UTC+3)</span>
       </footer>
     </section>
