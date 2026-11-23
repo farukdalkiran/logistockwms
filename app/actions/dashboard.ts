@@ -137,6 +137,14 @@ async function fetchDashboardDataCore(userId: string) {
         : cargoQuery.eq("employee_id", "00000");
   }
 
+  // Eksik parça kayıtları şube alanı içermediğinden günlük genel toplam gösterilir.
+  // İstanbul gün sınırlarını kullan; her panel yenilemesinde güncel veriyi oku.
+  const missingPartsQuery = supabaseAdmin
+    .from("cargo_records")
+    .select("item_count, missing_address")
+    .gte("created_at", dayStart)
+    .lt("created_at", nextDay);
+
   // 4. Transfer, Log ve İzin Verileri (Şube İzolasyonlu)
   let transfersQuery = supabaseAdmin
     .from("transfers")
@@ -186,13 +194,17 @@ async function fetchDashboardDataCore(userId: string) {
     { data: rawPutawayLogs },
     { data: rawLeaveLogs },
     { data: dbSizeData },
+    { data: missingPartRecords, error: missingPartError },
   ] = await Promise.all([
     cargoQuery,
     transfersQuery,
     putawayLogsQuery,
     leaveLogsQuery,
     supabaseAdmin.rpc("get_db_size"),
+    missingPartsQuery,
   ]);
+
+  if (missingPartError) throw missingPartError;
 
   // Çapraz şube transferlerinde başka şube personelinin adı geçiyorsa sadece eksikleri tamamla
   if (targetBranchId && rawTransfers) {
@@ -285,7 +297,15 @@ async function fetchDashboardDataCore(userId: string) {
     systemLoad = Math.min(Math.round((dbSizeMB / 500) * 100), 100);
   }
 
+  const missingPartsSummary = {
+    totalParts: (missingPartRecords || []).reduce((sum, record) => sum + (record.item_count || 0), 0),
+    successful: (missingPartRecords || []).filter((record) => record.missing_address === false).length,
+    missingAddress: (missingPartRecords || []).filter((record) => record.missing_address === true).length,
+    unclassified: (missingPartRecords || []).filter((record) => record.missing_address == null).length,
+  };
+
   return {
+    missingPartsSummary,
     kpis: {
       branches: branchCount || 0,
       employees: employeeCount || 0,
