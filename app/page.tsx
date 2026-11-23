@@ -263,18 +263,18 @@ export default function ManagementDashboard() {
           </div>
         )}
 
-        {/* ÜST SATIR: SOL DEPO LOG (8) / SAĞ KARGO (4) */}
+        {/* ÜST SATIR: SOL DEPO LOG (8) / SAĞ GÜNLÜK EKSİK PARÇA (4) */}
         <div className="grid w-full grid-cols-1 items-start gap-6 lg:grid-cols-12">
           <WarehouseLogsSection recentPutawayLogs={data?.recentPutawayLogs || []} />
+          <MissingPartsSummarySection summary={data?.missingPartsSummary} />
+        </div>
+
+        {/* ALT SATIR: SOL KARGO (4) / SAĞ TRANSFER (8) */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full items-start mt-2">
           <CargoOverviewSection
             cargoDistribution={data?.cargoDistribution || []}
             recentCargoSessions={data?.recentCargoSessions || []}
           />
-        </div>
-
-        {/* ALT SATIR: SOL GÜNLÜK EKSİK PARÇA (4) / SAĞ TRANSFER (8) */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full items-start mt-2">
-          <MissingPartsSummarySection summary={data?.missingPartsSummary} />
           <TransferCenterSection
             recentTransfers={data?.recentTransfers || []}
             getStatusStyle={getStatusStyle}
