@@ -34,6 +34,7 @@ import {
 } from "./_components/WarehouseLogsSection";
 import type { LeaveLogData } from "./_components/LeaveMovementsSection";
 import { CargoOverviewSection } from "./_components/CargoOverviewSection";
+import { MissingPartsSummarySection } from "./_components/MissingPartsSummarySection";
 import { useWms } from "@/components/providers/WmsSessionProvider";
 
 interface DashboardData {
@@ -45,6 +46,7 @@ interface DashboardData {
     boxesTotal: number;
     productsTotal: number;
   };
+  missingPartsSummary: { totalParts: number; successful: number; missingAddress: number; unclassified: number };
   cargoDistribution: CargoDistributionItem[];
   recentTransfers: TransferData[];
   recentPutawayLogs: PutawayLogData[];
@@ -261,17 +263,18 @@ export default function ManagementDashboard() {
           </div>
         )}
 
-        {/* HEADING ALTI: TAM GENİŞLİKTE İNCE OPERASYON AKIŞI (12) */}
-        <div className="grid w-full grid-cols-1 lg:grid-cols-12">
+        {/* ÜST SATIR: SOL DEPO LOG (8) / SAĞ KARGO (4) */}
+        <div className="grid w-full grid-cols-1 items-start gap-6 lg:grid-cols-12">
           <WarehouseLogsSection recentPutawayLogs={data?.recentPutawayLogs || []} />
-        </div>
-
-        {/* 1. SATIR: SOL KARGO (4) / SAĞ TRANSFER (8) */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full items-start mt-2">
           <CargoOverviewSection
             cargoDistribution={data?.cargoDistribution || []}
             recentCargoSessions={data?.recentCargoSessions || []}
           />
+        </div>
+
+        {/* ALT SATIR: SOL GÜNLÜK EKSİK PARÇA (4) / SAĞ TRANSFER (8) */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full items-start mt-2">
+          <MissingPartsSummarySection summary={data?.missingPartsSummary} />
           <TransferCenterSection
             recentTransfers={data?.recentTransfers || []}
             getStatusStyle={getStatusStyle}
