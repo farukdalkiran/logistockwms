@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { ChevronLeft, TerminalSquare, UserCircle, MapPin, Database, QrCode, AlertTriangle } from "lucide-react";
 import { useTransferScan } from "@/app/actions/useTransferScan";
+import { downloadCountWorkbook } from "@/lib/transfer-count-excel";
 
 import ProgressPanel from "./_components/ProgressPanel";
 import ScannerEngine from "./_components/ScannerEngine";
@@ -26,6 +27,8 @@ export default function TransferScanPage() {
 
   const scanInputRef = useRef<HTMLInputElement>(null);
   const [transferCodeInput, setTransferCodeInput] = useState("");
+  const [finished, setFinished] = useState(false);
+  const [reportError, setReportError] = useState("");
 
   const {
     branchId, activeTransfer, setActiveTransfer, transferItems, setTransferItems,
@@ -54,7 +57,7 @@ export default function TransferScanPage() {
   const forceFocus = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.tagName === 'INPUT' || target.tagName === 'BUTTON' || target.closest('button') || target.tagName === 'A') return;
-    if (activeTransfer && !isSpectator) scanInputRef.current?.focus();
+    if (activeTransfer && !isSpectator && !finished) scanInputRef.current?.focus();
   };
 
   const handleBack = async () => {
@@ -70,14 +73,33 @@ export default function TransferScanPage() {
     startTransferScan(transferCodeInput.trim().toUpperCase());
   };
 
+  const handleDownloadExcel = () => {
+    if (!activeTransfer || isProcessing || !mode) return;
+    try {
+      setReportError("");
+      downloadCountWorkbook({
+        code: activeTransfer.transfer_code,
+        route: activeTransfer.fromName + " → " + activeTransfer.toName,
+        operator: empName,
+        partial: !finished,
+        lines: transferItems.map(item => ({ product: item.products, quantity: mode === "outbound" ? item.sent_qty : item.received_qty })),
+      });
+    } catch { setReportError("Excel oluşturulamadı. Tekrar deneyiniz."); }
+  };
+  const resetCount = () => {
+    setActiveTransfer(null); setTransferItems([]); setLastScanned(null);
+    setTransferCodeInput(""); setFinished(false); setReportError("");
+  };
+
   const handleCompleteAndPrint = async () => {
-    if (!activeTransfer || isSpectator) return;
+    if (!activeTransfer || isSpectator || isProcessing || finished) return;
     setIsProcessing(true);
     await flushPendingSync(); 
 
     const isMNS = activeTransfer.transfer_code.startsWith("MNS");
     const newStatus = (isMNS || mode === 'inbound') ? 'Tamamlandi' : 'Yolda';
-    await supabase.from("transfers").update({ status: newStatus }).eq("id", activeTransfer.id);
+    const { error: statusError } = await supabase.from("transfers").update({ status: newStatus }).eq("id", activeTransfer.id);
+    if (statusError) { setReportError("Sayım tamamlanamadı. Tekrar deneyiniz."); setIsProcessing(false); return; }
     if (newStatus === 'Tamamlandi') await supabase.from("transfer_items").update({ status: 'Tamamlandi' }).eq("transfer_id", activeTransfer.id);
 
     await supabase.from("transaction_logs").insert({
@@ -87,8 +109,9 @@ export default function TransferScanPage() {
     });
     
     setIsProcessing(false);
+    setFinished(true);
+    setReportError("");
     window.print();
-    setTimeout(() => { setActiveTransfer(null); setTransferItems([]); setLastScanned(null); }, 1000);
   };
 
   const isMNS = activeTransfer?.transfer_code.startsWith("MNS");
@@ -172,13 +195,13 @@ export default function TransferScanPage() {
             transferItems={transferItems} 
             mode={mode} 
             isMNS={isMNS} 
-            userRole={userRole} // <--- BURASI ARTIK DB'DEN GELİYOR
+            userRole={finished ? "" : userRole}
             isSpectator={isSpectator}
             onToggleSpectator={() => setIsSpectator(!isSpectator)}
           />
 
           <div className="flex-1 w-full max-w-[1400px] mx-auto px-4 md:px-6 lg:px-8 py-4 md:py-6 flex flex-col lg:flex-row gap-4 sm:gap-6 z-10 overflow-hidden">
-            <ScannerEngine 
+            {!finished && <ScannerEngine 
               isSpectator={isSpectator} 
               activeTransfer={activeTransfer} 
               lastScanned={lastScanned} 
@@ -186,14 +209,19 @@ export default function TransferScanPage() {
               isFlexibleOutbound={isFlexibleOutbound} 
               processBarcode={processBarcode} 
               scanInputRef={scanInputRef} 
-            />
+            />}
             <LiveList 
               transferItems={transferItems} 
               mode={mode} 
               isFlexibleOutbound={isFlexibleOutbound} 
               totalScanned={totalScanned} 
               isProcessing={isProcessing} 
-              handleCompleteAndPrint={handleCompleteAndPrint} 
+              handleCompleteAndPrint={handleCompleteAndPrint}
+              handleDownloadExcel={handleDownloadExcel}
+              finished={finished}
+              isSpectator={isSpectator}
+              reportError={reportError}
+              onReset={resetCount}
             />
           </div>
         </div>

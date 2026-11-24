@@ -10,6 +10,7 @@ import {
   ArrowRight, Truck
 } from "lucide-react";
 import { Html5Qrcode } from "html5-qrcode";
+import { downloadCountWorkbook } from "@/lib/transfer-count-excel";
 
 type ScannedItem = {
   product: { id: string; barcode: string; sku: string | null; name: string; image_url: string | null; };
@@ -438,25 +439,23 @@ export default function ManualTransferScanPage() {
   };
 
   const handleDownloadExcel = () => {
-    if (scannedItems.length === 0) return;
-    const headers = ["Sira", "Barkod", "SKU", "Urun Adi", "Okunan_Adet"];
-    const csvRows = scannedItems.map((item, index) => {
-      return `${index + 1};${item.product?.barcode || "-"};${item.product?.sku || "-"};"${(item.product?.name || "İsimsiz").replace(/"/g, '""')}";${item.quantity}`;
-    });
-    const routeStr = `${isCustomFrom ? customFromBranch : branches.find(b=>b.id===fromBranchId)?.name} -> ${isCustomTo ? customToBranch : branches.find(b=>b.id===toBranchId)?.name}`;
-    const csvContent = `sep=;\nROTA: ${routeStr}\n` + headers.join(";") + "\n" + csvRows.join("\n");
-    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url; link.setAttribute("download", `${activeTransferCode || 'MNS_SAYIM'}_RAPORU.csv`);
-    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    if (isProcessing || isSaving || !activeTransferCode || !itemsRef.current.length) return;
+    try {
+      downloadCountWorkbook({
+        code: activeTransferCode,
+        route: routeDisplay,
+        operator: empName,
+        partial: !isFinished,
+        lines: itemsRef.current.map(item => ({ product: item.product, quantity: item.quantity })),
+      });
+    } catch { triggerFeedback('error', "Excel oluşturulamadı. Tekrar deneyiniz."); }
   };
 
   const totalScanned = scannedItems.reduce((acc, i) => acc + i.quantity, 0);
   const routeDisplay = `${isCustomFrom ? customFromBranch : branches.find(b=>b.id===fromBranchId)?.name || '-'} -> ${isCustomTo ? customToBranch : branches.find(b=>b.id===toBranchId)?.name || '-'}`;
 
   return (
-    <div className="min-h-screen bg-slate-100 font-['Quicksand'] flex flex-col antialiased select-none print:bg-white" onClick={() => scanInputRef.current?.focus()}>
+    <div className="min-h-screen bg-slate-100 font-['Quicksand'] flex flex-col antialiased select-none print:bg-white" onClick={(e) => { if (!(e.target as HTMLElement).closest("button, input, select, textarea, a") && !isFinished) scanInputRef.current?.focus(); }}>
       
       {/* BAŞLIK (Dark Heading) */}
       <div className="bg-[#0f172b] shadow-md shrink-0 border-b-4 border-[#dc3545] print:hidden">
@@ -668,14 +667,19 @@ export default function ManualTransferScanPage() {
               </div>
               
               <div className="p-3 sm:p-4 bg-slate-50 border-t border-slate-200 shrink-0 flex flex-col gap-3">
+                <div className="bg-white border border-slate-200 border-l-4 border-l-emerald-600 p-3 shadow-sm">
+                  <div className="flex items-center gap-2 text-slate-800 font-black text-sm"><FileSpreadsheet size={19} className="text-emerald-700"/> {isFinished ? "Nihai sayım raporu" : "Ara sayım raporu"}</div>
+                  <p className="text-xs text-slate-600 mt-1 leading-relaxed">{isFinished ? "Teslim alan mağaza için A4 uyumlu, elle doldurulabilir sayım listesi." : "Bu Excel sadece şimdiye kadar okutulan verileri içermektedir. Nihai liste değildir."}</p>
+                  <button type="button" onClick={handleDownloadExcel} disabled={totalScanned === 0 || isProcessing || isSaving} className="mt-3 w-full bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 disabled:text-slate-500 text-white font-bold text-sm px-4 py-3 flex items-center justify-center gap-2 rounded-sm"><FileSpreadsheet size={18}/> {isFinished ? "Nihai Excel indir" : "Okutulanları Excel indir"} · A4</button>
+                </div>
                 {!isFinished ? (
-                  <button onClick={saveToDatabase} disabled={totalScanned === 0 || isSaving} className="w-full bg-[#0f172b] disabled:bg-slate-300 disabled:text-slate-500 text-white font-black text-[12px] sm:text-[14px] p-4 sm:p-5 uppercase tracking-[0.1em] flex items-center justify-center gap-3 hover:bg-[#dc3545] transition-colors shadow-md active:scale-95 rounded-sm">
+                  <button onClick={saveToDatabase} disabled={totalScanned === 0 || isSaving || isProcessing} className="w-full bg-[#0f172b] disabled:bg-slate-300 disabled:text-slate-500 text-white font-black text-[12px] sm:text-[14px] p-4 sm:p-5 uppercase tracking-[0.1em] flex items-center justify-center gap-3 hover:bg-[#dc3545] transition-colors shadow-md active:scale-95 rounded-sm">
                     {isSaving ? <div className="w-5 h-5 border-2 border-slate-400 border-t-white rounded-full animate-spin"/> : <Printer size={20} />} İŞLEMİ BİTİR, KAYDET VE ETİKET YAZDIR
                   </button>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <button onClick={() => window.print()} className="bg-slate-900 text-white font-black text-[12px] p-4 uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-slate-800 transition-colors shadow-sm rounded-sm"><Printer size={18} /> TEKRAR YAZDIR</button>
-                    <button onClick={handleDownloadExcel} className="bg-emerald-600 text-white font-black text-[12px] p-4 uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-emerald-700 transition-colors shadow-sm rounded-sm"><FileSpreadsheet size={18} /> EXCEL (CSV) İNDİR</button>
+
                     <button onClick={() => window.location.reload()} className="col-span-1 sm:col-span-2 bg-white border-2 border-slate-300 text-slate-700 font-black text-[12px] p-4 uppercase tracking-widest hover:border-[#dc3545] hover:text-[#dc3545] transition-colors rounded-sm">YENİ SAYIM BAŞLAT</button>
                   </div>
                 )}
