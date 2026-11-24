@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { ChevronLeft, TerminalSquare, UserCircle, MapPin, Database, QrCode, AlertTriangle } from "lucide-react";
 import { useTransferScan } from "@/app/actions/useTransferScan";
-import { downloadCountWorkbook } from "@/lib/transfer-count-excel";
+import { downloadLoggedCountWorkbook } from "@/lib/transfer-count-export";
 
 import ProgressPanel from "./_components/ProgressPanel";
 import ScannerEngine from "./_components/ScannerEngine";
@@ -73,17 +73,18 @@ export default function TransferScanPage() {
     startTransferScan(transferCodeInput.trim().toUpperCase());
   };
 
-  const handleDownloadExcel = () => {
+  const handleDownloadExcel = async () => {
     if (!activeTransfer || isProcessing || !mode) return;
     try {
       setReportError("");
-      downloadCountWorkbook({
+      const logged = await downloadLoggedCountWorkbook({
         code: activeTransfer.transfer_code,
         route: activeTransfer.fromName + " → " + activeTransfer.toName,
         operator: empName,
         partial: !finished,
         lines: transferItems.map(item => ({ product: item.products, quantity: mode === "outbound" ? item.sent_qty : item.received_qty })),
-      });
+      }, { employeeId: empId, branchId });
+      if (!logged) setReportError("Excel indirildi ancak işlem kaydı oluşturulamadı.");
     } catch { setReportError("Excel oluşturulamadı. Tekrar deneyiniz."); }
   };
   const resetCount = () => {

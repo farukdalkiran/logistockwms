@@ -5,7 +5,7 @@ import {
   classifyOperationType, operationMeta, type OperationKind, type PutawayLogData,
 } from "./WarehouseLogsSection";
 
-const kinds: OperationKind[] = ["shelf", "transfer", "outbound", "box", "inbound", "other"];
+const kinds: OperationKind[] = ["shelf", "transfer", "outbound", "box", "inbound", "report", "other"];
 
 function timeLabel(value?: string) {
   if (!value) return "—";

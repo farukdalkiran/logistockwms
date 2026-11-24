@@ -2,7 +2,7 @@
 
 import {
   Activity, ArrowDownLeft, ArrowUpRight, Building2, Clock3, Layers3,
-  Package, Truck, UserRound,
+  Package, Truck, UserRound, FileSpreadsheet,
 } from "lucide-react";
 
 export interface PutawayLogData {
@@ -14,10 +14,11 @@ export interface PutawayLogData {
   created_at?: string;
 }
 
-export type OperationKind = "shelf" | "transfer" | "box" | "inbound" | "outbound" | "other";
+export type OperationKind = "shelf" | "transfer" | "box" | "inbound" | "outbound" | "report" | "other";
 
 export function classifyOperationType(actionType: string): OperationKind {
   const action = (actionType || "").toUpperCase();
+  if (action === "TRANSFER_EXCEL_EXPORT") return "report";
   if (/BOX|KOLI/.test(action)) return "box";
   if (/PUTAWAY|SHELF|RAFL/.test(action)) return "shelf";
   if (/TRANSFER|SEVKIYAT|SCAN_COMPLETED/.test(action)) return "transfer";
@@ -27,6 +28,7 @@ export function classifyOperationType(actionType: string): OperationKind {
 }
 
 export const operationMeta = {
+  report: { label: "Excel çıktısı", icon: FileSpreadsheet, color: "text-emerald-700", bg: "bg-emerald-100", accent: "bg-emerald-500" },
   shelf: { label: "Raflama", icon: Layers3, color: "text-amber-700", bg: "bg-amber-50", accent: "bg-amber-400" },
   transfer: { label: "Transfer", icon: Truck, color: "text-sky-700", bg: "bg-sky-50", accent: "bg-sky-400" },
   box: { label: "Koli", icon: Package, color: "text-indigo-700", bg: "bg-indigo-50", accent: "bg-indigo-400" },
@@ -102,7 +104,7 @@ export function WarehouseLogsSection({ recentPutawayLogs }: { recentPutawayLogs:
           return (
             <article
               key={log.id}
-              className={`group relative flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-slate-100 px-3 py-2.5 last:border-0 sm:min-h-[49px] sm:flex-nowrap sm:px-5 ${index % 2 === 0 ? "bg-white" : "bg-slate-50/80"} hover:!bg-rose-50/40`}
+              className={`group relative flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-slate-100 px-3 py-2.5 last:border-0 sm:min-h-[49px] sm:flex-nowrap sm:px-5 ${kind === "report" ? "bg-emerald-50/80 hover:bg-emerald-100/70" : (index % 2 === 0 ? "bg-white hover:!bg-rose-50/40" : "bg-slate-50/80 hover:!bg-rose-50/40")}`}
             >
               <span className={`absolute bottom-1.5 left-0 top-1.5 w-[3px] rounded-r ${meta.accent}`} aria-hidden="true" />
               <time dateTime={log.created_at} title={moment.day} className="flex w-[47px] shrink-0 items-center gap-1 font-mono text-[11px] font-bold tabular-nums text-slate-600 sm:w-[66px]">
@@ -112,7 +114,7 @@ export function WarehouseLogsSection({ recentPutawayLogs }: { recentPutawayLogs:
                 <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${meta.bg}`}><Icon size={13} /></span>
                 {meta.label}
               </span>
-              <p className="order-3 w-full min-w-0 truncate text-[11px] font-semibold text-slate-700 sm:order-none sm:w-auto sm:flex-1 sm:text-xs" title={log.description || ""}>
+              <p className={`order-3 w-full min-w-0 truncate text-[11px] font-semibold ${kind === "report" ? "text-emerald-800" : "text-slate-700"} sm:order-none sm:w-auto sm:flex-1 sm:text-xs`} title={log.description || ""}>
                 {readableDescription(log)}
               </p>
               <span className="ml-auto flex min-w-0 max-w-[145px] shrink-0 items-center gap-1.5 text-[10px] font-bold text-slate-700 sm:ml-0 sm:w-[145px]">
