@@ -414,6 +414,9 @@ export default function TransferCodesPage() {
         <TransferDetailModal 
           transfer={selectedTransfer}
           branchMap={branchMap}
+          employeeId={empId}
+          employeeName={empName}
+          branchId={Object.keys(branchMap).find(id => branchMap[id] === branchName.trim()) ?? null}
           onClose={() => setIsModalOpen(false)} 
         />
       )}

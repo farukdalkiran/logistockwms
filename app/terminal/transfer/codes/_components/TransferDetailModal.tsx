@@ -8,11 +8,14 @@ import {
   CheckCircle2, AlertTriangle, Layers, Hash, QrCode
 } from "lucide-react";
 import type { Transfer } from "../page";
-import { downloadCountWorkbook } from "@/lib/transfer-count-excel"; 
+import { downloadLoggedCountWorkbook } from "@/lib/transfer-count-export"; 
 
 interface Props {
   transfer: Transfer;
   branchMap: Record<string, string>;
+  employeeId: string;
+  employeeName: string;
+  branchId: string | null;
   onClose: () => void;
 }
 
@@ -29,7 +32,7 @@ type TransferItemDetail = {
   } | null;
 };
 
-export default function TransferDetailModal({ transfer, branchMap, onClose }: Props) {
+export default function TransferDetailModal({ transfer, branchMap, employeeId, employeeName, branchId, onClose }: Props) {
   const [items, setItems] = useState<TransferItemDetail[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -67,16 +70,18 @@ export default function TransferDetailModal({ transfer, branchMap, onClose }: Pr
 
   const partial = transfer.status === "Toplaniyor" || transfer.status === "Bekliyor";
   const [exportError, setExportError] = useState("");
-  const handleDownloadExcel = () => {
+  const handleDownloadExcel = async () => {
     if (!items.length) return;
     try {
       setExportError("");
-      downloadCountWorkbook({
+      const logged = await downloadLoggedCountWorkbook({
         code: transfer.transfer_code,
         route: fromName + " → " + toName,
+        operator: employeeName,
         partial,
         lines: items.map(item => ({ product: item.products, quantity: item.sent_qty || 0 })),
-      });
+      }, { employeeId, branchId });
+      if (!logged) setExportError("Excel indirildi ancak işlem kaydı oluşturulamadı.");
     } catch { setExportError("Excel oluşturulamadı. Tekrar deneyiniz."); }
   };
 

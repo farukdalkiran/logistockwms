@@ -10,7 +10,7 @@ import {
   ArrowRight, Truck
 } from "lucide-react";
 import { Html5Qrcode } from "html5-qrcode";
-import { downloadCountWorkbook } from "@/lib/transfer-count-excel";
+import { downloadLoggedCountWorkbook } from "@/lib/transfer-count-export";
 
 type ScannedItem = {
   product: { id: string; barcode: string; sku: string | null; name: string; image_url: string | null; };
@@ -438,16 +438,17 @@ export default function ManualTransferScanPage() {
     }
   };
 
-  const handleDownloadExcel = () => {
+  const handleDownloadExcel = async () => {
     if (isProcessing || isSaving || !activeTransferCode || !itemsRef.current.length) return;
     try {
-      downloadCountWorkbook({
+      const logged = await downloadLoggedCountWorkbook({
         code: activeTransferCode,
         route: routeDisplay,
         operator: empName,
         partial: !isFinished,
         lines: itemsRef.current.map(item => ({ product: item.product, quantity: item.quantity })),
-      });
+      }, { employeeId: empId, branchId });
+      if (!logged) triggerFeedback('error', "Excel indirildi ancak işlem kaydı oluşturulamadı.");
     } catch { triggerFeedback('error', "Excel oluşturulamadı. Tekrar deneyiniz."); }
   };
 
