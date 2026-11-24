@@ -7,7 +7,8 @@ import {
   ArrowRight, CalendarDays, BarChart, MapPin, 
   CheckCircle2, AlertTriangle, Layers, Hash, QrCode
 } from "lucide-react";
-import type { Transfer } from "../page"; 
+import type { Transfer } from "../page";
+import { downloadCountWorkbook } from "@/lib/transfer-count-excel"; 
 
 interface Props {
   transfer: Transfer;
@@ -64,75 +65,19 @@ export default function TransferDetailModal({ transfer, branchMap, onClose }: Pr
     fetchItems();
   }, [fetchItems]);
 
-  // ÇÖZÜM 1: Saf Excel XML (.xls) Çıktı Motoru (Türkçe Karakter ve Barkod Zırhı)
+  const partial = transfer.status === "Toplaniyor" || transfer.status === "Bekliyor";
+  const [exportError, setExportError] = useState("");
   const handleDownloadExcel = () => {
-    if (items.length === 0) return;
-
-    // Satır verilerini HTML Tablosu hücreleri (td) olarak kurguluyoruz
-    const tableRows = items.map((item, index) => {
-      const rowNum = index + 1;
-      const barcode = item.products?.barcode || "BARKOD_YOK";
-      const sku = item.products?.sku || "-";
-      const name = item.products?.name || "İsimsiz Ürün";
-      const reqQty = item.requested_qty || 0;
-      const sentQty = item.sent_qty || 0;
-      const recQty = item.received_qty || 0;
-      
-      return `
-        <tr>
-          <td style="text-align:center;">${rowNum}</td>
-          <td style="mso-number-format:'\\@';">${barcode}</td> <!-- mso-number-format barkodun bilimsel formata dönüşmesini engeller -->
-          <td style="mso-number-format:'\\@';">${sku}</td>
-          <td>${name}</td>
-          <td style="text-align:center;">${reqQty}</td>
-          <td style="text-align:center;">${sentQty}</td>
-          <td style="text-align:center;">${recQty}</td>
-        </tr>
-      `;
-    }).join("");
-
-    // Excel'in Native HTML yorumlayıcısı ile %100 Türkçe Karakter (UTF-8) Desteği
-    const htmlContent = `
-      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-        <style>
-          table { border-collapse: collapse; font-family: Arial, sans-serif; }
-          th { background-color: #0f172b; color: #ffffff; font-weight: bold; border: 1px solid #dddddd; padding: 8px; text-transform: uppercase; font-size: 12px; }
-          td { border: 1px solid #dddddd; padding: 6px; font-size: 13px; }
-        </style>
-      </head>
-      <body>
-        <table>
-          <thead>
-            <tr>
-              <th>Sıra</th>
-              <th>Barkod</th>
-              <th>SKU</th>
-              <th>Ürün Adı</th>
-              <th>Talep Edilen</th>
-              <th>Gönderilen</th>
-              <th>Teslim Alınan</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${tableRows}
-          </tbody>
-        </table>
-      </body>
-      </html>
-    `;
-
-    // Dosyayı XLS uzantılı bir Excel dosyası olarak blob'a çeviriyoruz
-    const blob = new Blob([htmlContent], { type: "application/vnd.ms-excel;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", `LS_URUN_LISTESI_${transfer.transfer_code}.xls`); // .xls formatı
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    if (!items.length) return;
+    try {
+      setExportError("");
+      downloadCountWorkbook({
+        code: transfer.transfer_code,
+        route: fromName + " → " + toName,
+        partial,
+        lines: items.map(item => ({ product: item.products, quantity: item.sent_qty || 0 })),
+      });
+    } catch { setExportError("Excel oluşturulamadı. Tekrar deneyiniz."); }
   };
 
   const fromName = branchMap[transfer.from_branch_id] || "Bilinmeyen Çıkış";
@@ -246,13 +191,15 @@ export default function TransferDetailModal({ transfer, branchMap, onClose }: Pr
           <div className="flex flex-col justify-center min-w-0">
             <button 
               onClick={handleDownloadExcel}
-              disabled={loading || items.length === 0}
+              disabled={loading || items.length === 0 || (partial && stats.totalSent === 0)}
               className="h-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:text-slate-500 text-white flex flex-col items-center justify-center gap-1 p-3 text-[11px] font-black uppercase tracking-widest transition-colors shadow-sm active:scale-95 rounded-sm border border-emerald-500"
             >
               <FileSpreadsheet size={24} className="mb-1 shrink-0" /> 
-              <span className="text-center">Excel İndir (XLS)</span>
-              <span className="text-[9px] text-emerald-100 font-medium tracking-normal normal-case text-center">Türkçe Karakter Uyumlu Form</span>
+              <span className="text-center">{partial ? "Okutulanları Excel indir" : "Nihai Excel indir"} (XLSX)</span>
+              <span className="text-[9px] text-emerald-100 font-medium tracking-normal normal-case text-center">A4 · Teslim alınan adet boş</span>
             </button>
+            {partial && <p className="text-xs text-slate-600 mt-2">Bu Excel sadece şimdiye kadar okutulan verileri içermektedir.</p>}
+            {exportError && <p role="alert" className="text-xs text-red-700 mt-2">{exportError}</p>}
           </div>
 
         </div>
