@@ -1,5 +1,9 @@
 import * as XLSX from "xlsx";
 
+// CommonJS exports CFB under default in Node; the browser ESM build exposes it directly.
+const sheetjs = XLSX as unknown as { CFB?: any; default?: { CFB?: any } };
+const CFB = sheetjs.CFB ?? sheetjs.default?.CFB;
+
 type Product = { sku?: string | null; barcode?: string | null; name?: string | null };
 export type CountLine = { product: Product | null; quantity: number };
 export type CountReport = {
@@ -66,11 +70,11 @@ export function buildCountWorkbook(report: CountReport): Uint8Array {
     "xl/worksheets/sheet1.xml": sheet,
     "xl/styles.xml": styles,
   };
-  const zip = XLSX.CFB.utils.cfb_new();
+  const zip = CFB.utils.cfb_new();
   for (const [path, body] of Object.entries(files)) {
-    XLSX.CFB.utils.cfb_add(zip, path, new TextEncoder().encode(declaration + body));
+    CFB.utils.cfb_add(zip, path, new TextEncoder().encode(declaration + body));
   }
-  return Uint8Array.from(XLSX.CFB.write(zip, { type: "array", fileType: "zip", compression: true }));
+  return Uint8Array.from(CFB.write(zip, { type: "array", fileType: "zip", compression: true }));
 }
 
 export function downloadCountWorkbook(report: CountReport) {
