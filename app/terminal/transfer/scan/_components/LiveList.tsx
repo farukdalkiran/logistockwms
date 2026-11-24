@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy, Printer } from "lucide-react";
+import { Check, Copy, Printer, FileSpreadsheet } from "lucide-react";
 import { TransferItem } from "@/app/actions/useTransferScan";
 
 interface LiveListProps {
@@ -11,9 +11,14 @@ interface LiveListProps {
   totalScanned: number;
   isProcessing: boolean;
   handleCompleteAndPrint: () => void;
+  handleDownloadExcel: () => void;
+  finished: boolean;
+  isSpectator: boolean;
+  reportError: string;
+  onReset: () => void;
 }
 
-export default function LiveList({ transferItems, mode, isFlexibleOutbound, totalScanned, isProcessing, handleCompleteAndPrint }: LiveListProps) {
+export default function LiveList({ transferItems, mode, isFlexibleOutbound, totalScanned, isProcessing, handleCompleteAndPrint, handleDownloadExcel, finished, isSpectator, reportError, onReset }: LiveListProps) {
   const [copiedBarcode, setCopiedBarcode] = useState<string | null>(null);
 
   const handleCopyBarcode = (barcode: string) => {
@@ -22,10 +27,13 @@ export default function LiveList({ transferItems, mode, isFlexibleOutbound, tota
     setTimeout(() => setCopiedBarcode(null), 1500); 
   };
 
+  const scannedTypes = transferItems.filter(item => (mode === "outbound" ? item.sent_qty : item.received_qty) > 0).length;
+
   return (
     <div className="flex-1 bg-white border border-slate-200 shadow-md rounded-md flex flex-col overflow-hidden min-h-[400px]">
       <div className="bg-[#0f172b] px-4 py-3 flex justify-between items-center text-white shrink-0">
-        <span className="text-[11px] font-black uppercase tracking-widest">Canlı Sayım Listesi</span>
+        <span className="text-sm font-black">{finished ? "Sayım tamamlandı" : "Canlı sayım listesi"}</span>
+        <span className="text-xs font-bold text-slate-300">{scannedTypes} / {transferItems.length} kalem</span>
       </div>
       
       <div className="flex-1 overflow-y-auto overflow-x-auto">
@@ -77,14 +85,21 @@ export default function LiveList({ transferItems, mode, isFlexibleOutbound, tota
         </table>
       </div>
       
-      <div className="p-3 bg-white border-t border-slate-200 shrink-0">
+      <div className="p-4 bg-slate-50 border-t border-slate-200 shrink-0 space-y-3">
+        <div className="bg-white border border-slate-200 border-l-4 border-l-emerald-600 p-3 shadow-sm">
+          <div className="flex items-center gap-2 text-slate-800 font-black text-sm"><FileSpreadsheet size={19} className="text-emerald-700" /> {finished ? "Nihai sayım raporu" : "Ara sayım raporu"}</div>
+          <p className="text-xs text-slate-600 mt-1 leading-relaxed">{finished ? "Tüm ürünler ve net sayım adetleri. Teslim alan mağaza için boş adet sütunu." : "Bu Excel sadece şimdiye kadar okutulan verileri içermektedir. Nihai liste değildir."}</p>
+          <button type="button" onClick={handleDownloadExcel} disabled={isProcessing || (finished ? transferItems.length === 0 : totalScanned === 0)} className="mt-3 w-full bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 disabled:text-slate-500 text-white font-bold text-sm px-4 py-3 flex items-center justify-center gap-2 rounded-sm"><FileSpreadsheet size={18} /> {finished ? "Nihai Excel indir" : "Okutulanları Excel indir"} · A4</button>
+        </div>
+        {reportError && <p role="alert" className="text-xs font-bold text-red-700">{reportError}</p>}
+        {finished ? <div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => window.print()} className="border border-slate-300 bg-white py-3 text-xs font-bold flex items-center justify-center gap-2"><Printer size={16}/> Etiketi yazdır</button><button type="button" onClick={onReset} className="bg-slate-900 text-white py-3 text-xs font-bold">Yeni sayım</button></div> : !isSpectator && (
         <button 
           onClick={handleCompleteAndPrint}
           disabled={totalScanned === 0 || isProcessing}
           className="w-full bg-[#0f172b] disabled:bg-slate-300 text-white font-black text-[12px] sm:text-[14px] p-3.5 uppercase tracking-[0.2em] flex items-center justify-center gap-3 hover:bg-[#dc3545] transition-colors shadow-sm active:scale-95 rounded-md"
         >
           <Printer size={20} /> BİTİR VE YAZDIR
-        </button>
+        </button>)}
       </div>
     </div>
   );
