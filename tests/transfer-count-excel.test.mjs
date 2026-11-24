@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import * as XLSX from "xlsx";
+import XLSX from "xlsx";
 import { buildCountWorkbook, countReportRows } from "../lib/transfer-count-excel.ts";
 
 const lines = [
